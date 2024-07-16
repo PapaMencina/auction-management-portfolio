@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Auction Formatter</title>
+</head>
+<body>
+    <h1>Auction Formatter</h1>
+    <form method="post">
+        {% csrf_token %}
+        <label for="auction_id">Auction ID:</label>
+        <input type="text" id="auction_id" name="auction_id" required><br><br>
+        <label for="selected_warehouse">Selected Warehouse:</label>
+        <input type="text" id="selected_warehouse" name="selected_warehouse" required><br><br>
+        <button type="submit">Format Auction</button>
+    </form>
+</body>
+</html>

@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Create Auction</title>
+</head>
+<body>
+    <h1>Create Auction</h1>
+    <form method="post">
+        {% csrf_token %}
+        <label for="auction_title">Auction Title:</label>
+        <input type="text" id="auction_title" name="auction_title" required><br><br>
+        
+        <label for="ending_date">Ending Date (YYYY-MM-DD):</label>
+        <input type="date" id="ending_date" name="ending_date" required><br><br>
+        
+        <label for="selected_warehouse">Select Warehouse:</label>
+        <select id="selected_warehouse" name="selected_warehouse">
+            {% for warehouse in warehouses %}
+                <option value="{{ warehouse }}">{{ warehouse }}</option>
+            {% endfor %}
+        </select><br><br>
+        
+        <label for="show_browser">Show Browser:</label>
+        <input type="checkbox" id="show_browser" name="show_browser"><br><br>
+        
+        <button type="submit">Run Create Auction Script</button>
+    </form>
+</body>
+</html>
