@@ -1,1 +1,2 @@
-config.json
+# Ignore specific config file
+auction_webapp/auction/utils/config.json
