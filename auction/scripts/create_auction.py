@@ -3,6 +3,7 @@ import time
 import json
 import re
 import traceback
+import threading
 from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -15,8 +16,8 @@ from selenium.webdriver.firefox.options import Options as FirefoxOptions
 from webdriver_manager.firefox import GeckoDriverManager
 
 def get_resources_dir():
-    """Navigate up one directory from the script's location and then into the 'resources/event_images' folder."""
-    return os.path.join(os.path.dirname(os.path.dirname(__file__)), 'resources', 'event_images')
+    """Return the path to the resources/event_images directory."""
+    return r"C:\Users\matt9\Desktop\auction_webapp\auction\resources\event_images"
 
 def wait_for_download(gui_callback, timeout=60):
     """Waits for a new file to appear in the resources directory and ensures the download is complete."""
@@ -319,8 +320,8 @@ def create_auction_main(auction_title, ending_date, show_browser, selected_wareh
     def gui_callback(message):
         print(message)
 
-    def should_stop():
-        return False
+    # Use threading.Event() instead of a function for should_stop
+    should_stop = threading.Event()
 
     class SharedEvents:
         def add_event(self, title, event_id, ending_date, timestamp):
