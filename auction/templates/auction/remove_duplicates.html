@@ -1,19 +1,64 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Remove Duplicates in Airtable</title>
-</head>
-<body>
-    <h1>Remove Duplicates in Airtable</h1>
-    <form method="post">
-        {% csrf_token %}
-        <label for="auction_number">Auction Number:</label>
-        <input type="text" id="auction_number" name="auction_number" required><br><br>
-        <label for="target_msrp">Target MSRP:</label>
-        <input type="number" id="target_msrp" name="target_msrp" required><br><br>
-        <label for="warehouse_name">Warehouse Name:</label>
-        <input type="text" id="warehouse_name" name="warehouse_name" required><br><br>
-        <button type="submit">Remove Duplicates</button>
-    </form>
-</body>
-</html>
+<h1>Remove Duplicates in Airtable</h1>
+
+<form method="post" id="removeDuplicatesForm">
+    {% csrf_token %}
+    <label for="warehouse_name">Warehouse Name:</label>
+    <select name="warehouse_name" id="warehouse_name" required onchange="updateAuctions()">
+        <option value="">Select a warehouse</option>
+        {% for warehouse in warehouses %}
+            <option value="{{ warehouse }}">{{ warehouse }}</option>
+        {% endfor %}
+    </select>
+    <br><br>
+
+    <label for="auction_number">Auction Number:</label>
+    <select name="auction_number" id="auction_number" required disabled>
+        <option value="">Select an auction</option>
+    </select>
+    <br><br>
+    
+    <label for="target_msrp">Target MSRP:</label>
+    <input type="number" name="target_msrp" id="target_msrp" required>
+    <br><br>
+    
+    <input type="submit" value="Remove Duplicates">
+</form>
+
+<script>
+    const auctions = {{ auctions_json|safe }};
+
+    function updateAuctions() {
+        const warehouseSelect = document.getElementById('warehouse_name');
+        const auctionSelect = document.getElementById('auction_number');
+        const selectedWarehouse = warehouseSelect.value;
+
+        auctionSelect.innerHTML = '<option value="">Select an auction</option>';
+        auctionSelect.disabled = !selectedWarehouse;
+
+        if (selectedWarehouse) {
+            const filteredAuctions = auctions.filter(auction => auction.warehouse === selectedWarehouse);
+            filteredAuctions.forEach(auction => {
+                const option = document.createElement('option');
+                option.value = auction.id;
+                option.textContent = `${auction.id} - ${auction.title} (${auction.timestamp})`;
+                auctionSelect.appendChild(option);
+            });
+        }
+
+        console.log('Selected Warehouse:', selectedWarehouse);
+        console.log('Filtered Auctions:', filteredAuctions);
+    }
+
+    document.getElementById('removeDuplicatesForm').onsubmit = function(event) {
+        const warehouseSelect = document.getElementById('warehouse_name');
+        const auctionSelect = document.getElementById('auction_number');
+        
+        if (!warehouseSelect.value || !auctionSelect.value) {
+            event.preventDefault();
+            alert('Please select both a warehouse and an auction.');
+        }
+    };
+
+    // Initialize auctions on page load
+    updateAuctions();
+</script>

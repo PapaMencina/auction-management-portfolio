@@ -5,6 +5,19 @@ import random
 import math
 from auction.utils import config_manager
 import sys
+import json
+
+def get_valid_auctions():
+    try:
+        with open("events.json", "r") as file:
+            events = json.load(file)
+            return [event["event_id"] for event in events]
+    except FileNotFoundError:
+        print("events.json file not found.")
+        return []
+    except json.JSONDecodeError:
+        print("Error decoding events.json file.")
+        return []
 
 def remove_duplicates_main(auction_number, target_msrp, warehouse_name):
     def gui_callback(message):
@@ -15,6 +28,11 @@ def remove_duplicates_main(auction_number, target_msrp, warehouse_name):
 
     def callback():
         print("Remove duplicates process completed.")
+
+    valid_auctions = get_valid_auctions()
+    if auction_number not in valid_auctions:
+        print(f"Auction {auction_number} is not in the events.json file. Aborting process.")
+        return
 
     run_remove_dups(auction_number, gui_callback, should_stop, callback, target_msrp, warehouse_name)
 
@@ -80,6 +98,14 @@ def update_records_in_airtable(auction_number, gui_callback, should_stop, callba
         callback()  # Re-enable UI components or similar post-processing
 
 def run_remove_dups(auction_number, gui_callback, should_stop, callback, target_msrp, warehouse_name):
+    # Get valid auctions from events.json
+    valid_auctions = get_valid_auctions()
+    
+    if auction_number not in valid_auctions:
+        gui_callback(f"Auction {auction_number} is not in the events.json file. Aborting process.")
+        callback()
+        return
+
     # Load configuration from config.json for the selected warehouse
     config_path = 'config.json'  # Adjust the path as needed
     config_manager.load_config(config_path, warehouse_name)

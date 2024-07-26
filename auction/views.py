@@ -1,5 +1,8 @@
 from django.shortcuts import render, redirect
 from django.http import HttpResponse
+from django.core.serializers.json import DjangoJSONEncoder
+from django.shortcuts import redirect
+from django.contrib import messages
 import json
 import os
 from datetime import datetime
@@ -10,6 +13,21 @@ from auction.scripts.remove_duplicates_in_airtable import remove_duplicates_main
 from auction.scripts.auction_formatter import auction_formatter_main
 from auction.scripts.upload_to_hibid import upload_to_hibid_main
 
+def get_auction_numbers():
+    try:
+        with open('events.json', 'r') as f:
+            events = json.load(f)
+        return [
+            {
+                'id': event['event_id'],
+                'title': event['title'],
+                'timestamp': event['timestamp'],
+                'warehouse': event['warehouse']
+            }
+            for event in events
+        ]
+    except (FileNotFoundError, json.JSONDecodeError):
+        return []
 
 # Load initial config
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -22,16 +40,23 @@ warehouse_data = config.get('warehouses', {})
 def home(request):
     context = {
         'warehouses': list(warehouse_data.keys()),
-        'default_warehouse': list(warehouse_data.keys())[0] if warehouse_data else None,
+        'default_warehouse': request.session.get('selected_warehouse') or list(warehouse_data.keys())[0] if warehouse_data else None,
     }
     return render(request, 'auction/home.html', context)
 
+from django.shortcuts import redirect
+
 def select_warehouse(request):
-    selected_warehouse = request.POST.get('warehouse')
-    if selected_warehouse in warehouse_data:
-        config_manager.load_config(config_path, selected_warehouse)
-        return HttpResponse(f"Warehouse {selected_warehouse} selected and configuration loaded.")
-    return HttpResponse("Invalid warehouse selection.")
+    if request.method == 'POST':
+        selected_warehouse = request.POST.get('warehouse')
+        if selected_warehouse in warehouse_data:
+            config_manager.load_config(config_path, selected_warehouse)
+            request.session['selected_warehouse'] = selected_warehouse
+            # Add a message to show on the home page
+            messages.success(request, f"Warehouse {selected_warehouse} selected and configuration loaded.")
+        else:
+            messages.error(request, "Invalid warehouse selection.")
+    return redirect('home')  # Always redirect to home
 
 def create_auction_view(request):
     if request.method == 'POST':
@@ -56,14 +81,27 @@ def void_unpaid_view(request):
     return render(request, 'auction/void_unpaid.html')
 
 def remove_duplicates_view(request):
+    auctions = get_auction_numbers()
+    warehouses = list(warehouse_data.keys())
+    
+    print("All auctions:", auctions)  # Debug print
+    
     if request.method == 'POST':
         auction_number = request.POST.get('auction_number')
         target_msrp = float(request.POST.get('target_msrp'))
         warehouse_name = request.POST.get('warehouse_name')
+        
+        print(f"Selected: auction={auction_number}, warehouse={warehouse_name}")  # Debug print
+        
         remove_duplicates_main(auction_number, target_msrp, warehouse_name)
         result = f"Duplicates removed successfully for auction {auction_number}."
         return render(request, 'auction/result.html', {'result': result})
-    return render(request, 'auction/remove_duplicates.html')
+    
+    context = {
+        'auctions_json': json.dumps(auctions, cls=DjangoJSONEncoder),
+        'warehouses': warehouses,
+    }
+    return render(request, 'auction/remove_duplicates.html', context)
 
 def auction_formatter_view(request):
     if request.method == 'POST':
