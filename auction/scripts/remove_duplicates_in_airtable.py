@@ -1,37 +1,45 @@
 import os
 from pyairtable import Api
 from pyairtable import Table
+import traceback
+import threading
 import random
 import math
 from auction.utils import config_manager
 import sys
 import json
 
-def get_valid_auctions():
+def get_valid_auctions(selected_warehouse):
+    file_path = r"C:\Users\matt9\Desktop\auction_webapp\events.json"
     try:
-        with open("events.json", "r") as file:
-            events = json.load(file)
-            return [event["event_id"] for event in events]
-    except FileNotFoundError:
-        print("events.json file not found.")
-        return []
+        if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
+            with open(file_path, "r") as file:
+                events = json.load(file)
+            return [event["event_id"] for event in events if event.get("warehouse") == selected_warehouse]
+        else:
+            print(f"events.json file not found or is empty at {file_path}.")
+            return []
     except json.JSONDecodeError:
-        print("Error decoding events.json file.")
+        print(f"Error decoding events.json file at {file_path}. File may be corrupted.")
+        return []
+    except Exception as e:
+        print(f"An error occurred while reading {file_path}: {e}")
         return []
 
 def remove_duplicates_main(auction_number, target_msrp, warehouse_name):
     def gui_callback(message):
         print(message)
 
-    def should_stop():
-        return False
+    should_stop = threading.Event()  # Create the Event object here
 
     def callback():
         print("Remove duplicates process completed.")
 
-    valid_auctions = get_valid_auctions()
+    print(f"Starting remove duplicates process for auction {auction_number} with target MSRP ${target_msrp}")
+    
+    valid_auctions = get_valid_auctions(warehouse_name)
     if auction_number not in valid_auctions:
-        print(f"Auction {auction_number} is not in the events.json file. Aborting process.")
+        print(f"Auction {auction_number} is not a valid auction for {warehouse_name}. Aborting process.")
         return
 
     run_remove_dups(auction_number, gui_callback, should_stop, callback, target_msrp, warehouse_name)
@@ -43,8 +51,10 @@ def update_record_if_needed(record, auction_number, table):
     """Updates the record if it needs an update based on its auction listing status."""
     fields_to_update = get_fields_to_update(record, auction_number)
     if fields_to_update:
+        print(f"Updating record {record['id']} with fields: {fields_to_update}")
         table.update(record['id'], fields_to_update, typecast=True)
         return True
+    print(f"No update needed for record {record['id']}")
     return False
 
 def get_fields_to_update(record, auction_number):
@@ -55,14 +65,19 @@ def get_fields_to_update(record, auction_number):
     # Check if auction number already exists
     if auction_number not in auctions:
         auctions.append(auction_number)
+        print(f"Adding auction {auction_number} to record")
         return {'Auctions': auctions}
+    print(f"Auction {auction_number} already exists in record")
     return {}
 
 def update_records_in_airtable(auction_number, gui_callback, should_stop, callback, target_msrp, table, view_name):
     """Main function to update records in Airtable based on the auction number."""
     try:
+        gui_callback(f"Starting to update records for auction {auction_number}")
+        
         # Fetch records with specified fields only to optimize performance
         records = table.all(view=view_name, fields=['Product Name', 'Auctions', 'MSRP'])
+        gui_callback(f"Fetched {len(records)} records from Airtable")
 
         groups = {}
         for record in records:
@@ -70,6 +85,8 @@ def update_records_in_airtable(auction_number, gui_callback, should_stop, callba
             product_name = record['fields'].get('Product Name')
             if product_name:
                 groups.setdefault(product_name, []).append(record)
+
+        gui_callback(f"Grouped records into {len(groups)} unique product names")
 
         update_count, total_msrp_reached = 0, 0
 
@@ -90,24 +107,20 @@ def update_records_in_airtable(auction_number, gui_callback, should_stop, callba
                 if update_record_if_needed(record, auction_number, table):
                     update_count += 1
                     total_msrp_reached += record['fields'].get('MSRP', 0)
+                    gui_callback(f"Updated record {record['id']} for product {product_name}")
 
         gui_callback(f"Auction {auction_number} has been added to {update_count} items with total MSRP of ${total_msrp_reached}.")
     except Exception as e:
         gui_callback(f"Error occurred: {e}")
+        traceback.print_exc()
     finally:
         callback()  # Re-enable UI components or similar post-processing
 
 def run_remove_dups(auction_number, gui_callback, should_stop, callback, target_msrp, warehouse_name):
-    # Get valid auctions from events.json
-    valid_auctions = get_valid_auctions()
+    gui_callback(f"Running remove_dups for auction {auction_number} in {warehouse_name}")
     
-    if auction_number not in valid_auctions:
-        gui_callback(f"Auction {auction_number} is not in the events.json file. Aborting process.")
-        callback()
-        return
-
     # Load configuration from config.json for the selected warehouse
-    config_path = 'config.json'  # Adjust the path as needed
+    config_path = os.path.join(os.path.dirname(__file__), '..', 'utils', 'config.json')
     config_manager.load_config(config_path, warehouse_name)
 
     # Retrieve configuration variables
@@ -116,11 +129,33 @@ def run_remove_dups(auction_number, gui_callback, should_stop, callback, target_
     AIRTABLE_INVENTORY_TABLE_ID = config_manager.get_global_var('airtable_inventory_table_id')
     AIRTABLE_REMOVE_DUPS_VIEW = config_manager.get_global_var('airtable_remove_dups_view')
 
+    # Check if all required configuration variables are present
+    if not all([AIRTABLE_TOKEN, AIRTABLE_INVENTORY_BASE_ID, AIRTABLE_INVENTORY_TABLE_ID, AIRTABLE_REMOVE_DUPS_VIEW]):
+        error_msg = "Missing Airtable configuration. Please check your config.json file."
+        gui_callback(error_msg)
+        callback()
+        return
+
+    gui_callback(f"Airtable configuration: Token: {AIRTABLE_TOKEN[:5]}..., Base ID: {AIRTABLE_INVENTORY_BASE_ID}, Table ID: {AIRTABLE_INVENTORY_TABLE_ID}, View: {AIRTABLE_REMOVE_DUPS_VIEW}")
+
     # Initialize Table
-    table = Table(AIRTABLE_TOKEN, AIRTABLE_INVENTORY_BASE_ID, AIRTABLE_INVENTORY_TABLE_ID)
+    try:
+        table = Table(AIRTABLE_TOKEN, AIRTABLE_INVENTORY_BASE_ID, AIRTABLE_INVENTORY_TABLE_ID)
+        gui_callback("Airtable Table initialized successfully")
+    except Exception as e:
+        error_msg = f"Failed to initialize Airtable: {str(e)}"
+        gui_callback(error_msg)
+        callback()
+        return
 
     # Run the update process
-    update_records_in_airtable(auction_number, gui_callback, should_stop, callback, target_msrp, table, AIRTABLE_REMOVE_DUPS_VIEW)
+    try:
+        update_records_in_airtable(auction_number, gui_callback, should_stop, callback, target_msrp, table, AIRTABLE_REMOVE_DUPS_VIEW)
+    except Exception as e:
+        gui_callback(f"An error occurred during the update process: {str(e)}")
+        traceback.print_exc()
+    finally:
+        callback()
 
 if __name__ == '__main__':
     if len(sys.argv) != 7:

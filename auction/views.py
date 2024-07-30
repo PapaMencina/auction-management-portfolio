@@ -1,8 +1,12 @@
 from django.shortcuts import render, redirect
 from django.http import HttpResponse
+from django.http import JsonResponse
 from django.core.serializers.json import DjangoJSONEncoder
 from django.shortcuts import redirect
 from django.contrib import messages
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_http_methods
+import logging
 import json
 import os
 from datetime import datetime
@@ -70,15 +74,56 @@ def create_auction_view(request):
         return render(request, 'auction/result.html', {'result': result})
     return render(request, 'auction/create_auction.html', {'warehouses': list(warehouse_data.keys())})
 
+logger = logging.getLogger(__name__)
+
+@require_http_methods(["GET", "POST"])
 def void_unpaid_view(request):
-    if request.method == 'POST':
-        auction_id = request.POST.get('auction_id')
-        upload_choice = int(request.POST.get('upload_choice', 0))
-        show_browser = 'show_browser' in request.POST
-        void_unpaid_main(auction_id, upload_choice, show_browser)
-        result = "Unpaid transactions voided successfully."
-        return render(request, 'auction/result.html', {'result': result})
-    return render(request, 'auction/void_unpaid.html')
+    if request.method == 'GET':
+        # Render the form for GET requests
+        return render(request, 'auction/void_unpaid.html')
+
+    elif request.method == 'POST':
+        logger.info("Received POST request to void_unpaid_view")
+        logger.info(f"Request headers: {request.headers}")
+
+        try:
+            body = request.body.decode('utf-8')
+            logger.info(f"Request body: {body}")
+            
+            data = json.loads(body)
+            logger.info(f"Parsed JSON data: {data}")
+            
+            auction_id = data.get('auction_id')
+            upload_choice = data.get('upload_choice')
+            show_browser = data.get('show_browser')
+            
+            logger.info(f"auction_id: {auction_id}")
+            logger.info(f"upload_choice: {upload_choice}")
+            logger.info(f"show_browser: {show_browser}")
+
+            # Check for missing parameters
+            required_params = ['auction_id', 'upload_choice', 'show_browser', ]
+            missing = [param for param in required_params if data.get(param) is None]
+            if missing:
+                return JsonResponse({'error': f'Missing required parameters: {", ".join(missing)}'}, status=400)
+
+            # Convert types
+            upload_choice = int(upload_choice)
+            show_browser = bool(show_browser)
+
+            # Call the main function
+            void_unpaid_main(auction_id, upload_choice, show_browser,)
+            return JsonResponse({'message': 'Void unpaid process started successfully'})
+
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON Decode Error: {str(e)}")
+            return JsonResponse({'error': f'Invalid JSON: {str(e)}'}, status=400)
+        except ValueError as e:
+            logger.error(f"Value Error: {str(e)}")
+            return JsonResponse({'error': f'Invalid value for a parameter: {str(e)}'}, status=400)
+        except Exception as e:
+            logger.exception("Unexpected error in void_unpaid_view")
+            return JsonResponse({'error': f'An unexpected error occurred: {str(e)}'}, status=500)
 
 def remove_duplicates_view(request):
     auctions = get_auction_numbers()
@@ -88,14 +133,27 @@ def remove_duplicates_view(request):
     
     if request.method == 'POST':
         auction_number = request.POST.get('auction_number')
-        target_msrp = float(request.POST.get('target_msrp'))
+        target_msrp_str = request.POST.get('target_msrp')
         warehouse_name = request.POST.get('warehouse_name')
         
-        print(f"Selected: auction={auction_number}, warehouse={warehouse_name}")  # Debug print
+        print(f"Selected: auction={auction_number}, warehouse={warehouse_name}, target_msrp={target_msrp_str}")  # Debug print
         
-        remove_duplicates_main(auction_number, target_msrp, warehouse_name)
-        result = f"Duplicates removed successfully for auction {auction_number}."
-        return render(request, 'auction/result.html', {'result': result})
+        try:
+            target_msrp = float(target_msrp_str)
+        except ValueError:
+            return JsonResponse({'status': 'error', 'message': 'Invalid target MSRP value'})
+        
+        if not auction_number or not warehouse_name:
+            return JsonResponse({'status': 'error', 'message': 'Missing auction number or warehouse name'})
+        
+        try:
+            remove_duplicates_main(auction_number, target_msrp, warehouse_name)
+            result = f"Duplicates removed successfully for auction {auction_number}."
+            return render(request, 'auction/result.html', {'result': result})
+        except Exception as e:
+            error_message = f"An error occurred: {str(e)}"
+            print(error_message)  # Log the error
+            return JsonResponse({'status': 'error', 'message': error_message})
     
     context = {
         'auctions_json': json.dumps(auctions, cls=DjangoJSONEncoder),

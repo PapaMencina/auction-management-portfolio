@@ -1,22 +1,89 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Void Unpaid Transactions</title>
 </head>
 <body>
     <h1>Void Unpaid Transactions</h1>
-    <form method="post">
+
+    <form id="voidUnpaidForm">
         {% csrf_token %}
-        <label for="auction_id">Auction ID:</label>
-        <input type="text" id="auction_id" name="auction_id" required><br><br>
-        <label for="upload_choice">Upload to Airtable:</label>
-        <select id="upload_choice" name="upload_choice">
-            <option value="1">Yes</option>
-            <option value="0">No</option>
-        </select><br><br>
-        <label for="show_browser">Show Browser:</label>
-        <input type="checkbox" id="show_browser" name="show_browser"><br><br>
+        <div>
+            <label for="auction_id">Auction ID:</label>
+            <input type="text" id="auction_id" name="auction_id" required>
+        </div>
+        <div>
+            <label>Upload to Airtable:</label>
+            <input type="radio" id="upload_yes" name="upload_choice" value="1" required>
+            <label for="upload_yes">Yes</label>
+            <input type="radio" id="upload_no" name="upload_choice" value="0" required>
+            <label for="upload_no">No</label>
+        </div>
+        <div>
+            <label for="show_browser">Show Browser:</label>
+            <input type="checkbox" id="show_browser" name="show_browser">
+        </div>
         <button type="submit">Void Unpaid Transactions</button>
     </form>
+
+    <div id="result"></div>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        document.getElementById('voidUnpaidForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            voidUnpaid();
+        });
+    });
+
+    function voidUnpaid() {
+        console.log("voidUnpaid function called");
+        const form = document.getElementById('voidUnpaidForm');
+        const data = {
+            auction_id: form.auction_id.value,
+            upload_choice: parseInt(form.upload_choice.value),
+            show_browser: form.show_browser.checked,
+        };
+        
+        console.log("Sending data:", data);
+
+        document.querySelector('button[type="submit"]').disabled = true;
+        document.getElementById('result').textContent = 'Processing...';
+
+        fetch('{% url "void_unpaid" %}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': '{{ csrf_token }}'
+            },
+            body: JSON.stringify(data)
+        })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error('Network response was not ok');
+            }
+            return response.json();
+        })
+        .then(data => {
+            console.log("Response data:", data);
+            if (data.error) {
+                document.getElementById('result').textContent = "Error: " + data.error;
+            } else {
+                document.getElementById('result').textContent = "Success: " + data.message;
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            document.getElementById('result').textContent = "An error occurred. Please check the console for details.";
+        })
+        .finally(() => {
+            document.querySelector('button[type="submit"]').disabled = false;
+        });
+    }
+    </script>
+
+    <p><a href="{% url 'home' %}">Back to Home</a></p>
 </body>
 </html>

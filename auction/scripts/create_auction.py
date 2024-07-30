@@ -20,15 +20,23 @@ file_lock = threading.Lock()
 
 def save_event_to_file(event_data):
     file_path = r"C:\Users\matt9\Desktop\auction_webapp\events.json"
+    print(f"Attempting to save event to {file_path}")
     with file_lock:
         try:
-            if os.path.exists(file_path):
-                with open(file_path, "r") as file:
-                    events = json.load(file)
+            if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
+                try:
+                    with open(file_path, "r") as file:
+                        events = json.load(file)
+                    print(f"Loaded existing events: {len(events)}")
+                except json.JSONDecodeError:
+                    print("Existing file contains invalid JSON. Starting with empty list.")
+                    events = []
             else:
                 events = []
+                print("No existing events file or file is empty. Creating new.")
 
             events.append(event_data)
+            print(f"Added new event. Total events: {len(events)}")
 
             with open(file_path, "w") as file:
                 json.dump(events, file, indent=4)
@@ -345,11 +353,12 @@ def create_auction_main(auction_title, ending_date, show_browser, selected_wareh
             if event_id:
                 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 event_data = {
+                    "warehouse": selected_warehouse,
                     "title": auction_title,
                     "event_id": event_id,
+                    "start_date": formatted_start_date,
                     "ending_date": str(ending_date),
-                    "timestamp": timestamp,
-                    "warehouse": selected_warehouse
+                    "timestamp": timestamp
                 }
                 save_event_to_file(event_data)
                 gui_callback(f"Event {event_id} created at {timestamp}")

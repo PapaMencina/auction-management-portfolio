@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Auction Management System</title>
+    <title>{% block title %}Auction Management System{% endblock %}</title>
 </head>
 <body>
     <h1>Auction Management System</h1>
@@ -15,6 +15,7 @@
         {% endfor %}
     </ul>
     {% endif %}
+
     <ul>
         <li><a href="{% url 'create_auction' %}">Create Auction</a></li>
         <li><a href="{% url 'void_unpaid' %}">Void Unpaid Transactions</a></li>
@@ -24,13 +25,6 @@
     </ul>
 
     {% block content %}
-    <!-- This block can be used for page-specific content in child templates -->
     {% endblock %}
-
-    <script>
-        document.getElementById('warehouseSelect').addEventListener('change', function() {
-            document.getElementById('warehouseForm').submit();
-        });
-    </script>
 </body>
 </html>
