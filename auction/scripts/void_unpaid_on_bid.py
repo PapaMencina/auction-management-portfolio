@@ -18,7 +18,6 @@ from webdriver_manager.firefox import GeckoDriverManager
 from auction.utils import config_manager
 
 config_path = os.path.join(os.path.dirname(__file__), '..', 'utils', 'config.json')
-config_manager.load_config(config_path)
 
 def get_resources_dir(folder):
     base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -28,7 +27,10 @@ def get_resources_dir(folder):
 DOWNLOAD_DIR = get_resources_dir('voided_csv')
 AIRTABLE_URL = lambda base_id, table_id: f'https://api.airtable.com/v0/{base_id}/{table_id}'
 
-def void_unpaid_main(auction_id, upload_choice, show_browser):
+def void_unpaid_main(auction_id, upload_choice, show_browser, warehouse):
+    config_manager.load_config(config_path)
+    config_manager.set_active_warehouse(warehouse)
+    
     def gui_callback(message):
         print(message)  # You might want to log this or handle it differently in a web context
 
@@ -40,7 +42,7 @@ def void_unpaid_main(auction_id, upload_choice, show_browser):
     start_selenium_process(auction_id, upload_choice, gui_callback, should_stop, callback, show_browser)
 
 if __name__ == "__main__":
-    void_unpaid_main("sample_auction_id", 1, True)
+    void_unpaid_main("sample_auction_id", 1, True, "Maule Warehouse")
 
 def configure_driver(url, show_browser):
     firefox_options = Options()
@@ -52,7 +54,7 @@ def configure_driver(url, show_browser):
     firefox_profile.set_preference("browser.download.useDownloadDir", True)
 
     firefox_options.profile = firefox_profile
-    if show_browser == 0:    
+    if not show_browser:
         firefox_options.add_argument("--headless")
         firefox_options.add_argument("--window-size=1920x1080")
 
@@ -154,8 +156,8 @@ def upload_to_airtable(records_batches, headers, csv_filepath, gui_callback, sho
     for batch in records_batches:
         if not should_continue(should_stop, gui_callback, "Upload to Airtable stopped by user."):
             return
-        response = requests.post(AIRTABLE_URL(config_manager.get_global_var('airtable_sales_base_id'),
-                                              config_manager.get_global_var('airtable_cancels_table_id')),
+        response = requests.post(AIRTABLE_URL(config_manager.get_warehouse_var('airtable_sales_base_id'),
+                                              config_manager.get_warehouse_var('airtable_cancels_table_id')),
                                  json={"records": batch}, headers=headers)
         if response.status_code != 200:
             error_message = f"Failed to send data to Airtable: {response.status_code} {response.text}"
@@ -180,7 +182,7 @@ def send_to_airtable(upload_choice, csv_filepath, gui_callback, should_stop):
         gui_callback("Uploading data to Airtable...")
         records_batches = process_csv_for_airtable(csv_filepath)
         headers = {
-            'Authorization': f'Bearer {config_manager.get_global_var("airtable_api_key")}',
+            'Authorization': f'Bearer {config_manager.get_warehouse_var("airtable_api_key")}',
             'Content-Type': 'application/json'
         }
         upload_to_airtable(records_batches, headers, csv_filepath, gui_callback, should_stop)
@@ -325,8 +327,8 @@ def start_selenium_process(event_id, upload_choice, gui_callback, should_stop, c
         if not should_continue(should_stop, gui_callback, "Operation stopped before login."):
             return
 
-        username = config_manager.get_global_var("bid_username")
-        password = config_manager.get_global_var("bid_password")
+        username = config_manager.get_warehouse_var("bid_username")
+        password = config_manager.get_warehouse_var("bid_password")
 
         if username is None or password is None:
             gui_callback("Failed to retrieve login credentials from config.")
@@ -368,9 +370,11 @@ def start_selenium_process(event_id, upload_choice, gui_callback, should_stop, c
         callback()  # Invoke the callback to re-enable the button
 
 def run_void_unpaid_on_bid(auction_id, upload_choice, gui_callback, should_stop, callback, show_browser):
-    username = config_manager.get_global_var("bid_username")
-    password = config_manager.get_global_var("bid_password")
+    config_manager.load_config(config_path)
+    warehouse = "Maule Warehouse"  # You can modify this to dynamically select the warehouse
+    config_manager.set_active_warehouse(warehouse)
+    
     start_selenium_process(auction_id, upload_choice, gui_callback, should_stop, callback, show_browser)
 
 if __name__ == "__main__":
-    void_unpaid_main("sample_auction_id", 1, True)
+    void_unpaid_main("sample_auction_id", 1, True, "Maule Warehouse")

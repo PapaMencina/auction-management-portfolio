@@ -1,12 +1,10 @@
 from django.shortcuts import render, redirect
-from django.http import HttpResponse
 from django.http import JsonResponse
 from django.core.serializers.json import DjangoJSONEncoder
-from django.shortcuts import redirect
 from django.contrib import messages
-from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 import logging
+import threading
 import json
 import os
 from datetime import datetime
@@ -16,6 +14,15 @@ from auction.scripts.void_unpaid_on_bid import void_unpaid_main
 from auction.scripts.remove_duplicates_in_airtable import remove_duplicates_main
 from auction.scripts.auction_formatter import auction_formatter_main
 from auction.scripts.upload_to_hibid import upload_to_hibid_main
+
+logger = logging.getLogger(__name__)
+
+def load_events():
+    file_path = r"C:\Users\matt9\Desktop\auction_webapp\events.json"
+    if os.path.exists(file_path):
+        with open(file_path, "r") as file:
+            return json.load(file)
+    return []
 
 def get_auction_numbers():
     try:
@@ -37,9 +44,8 @@ def get_auction_numbers():
 script_dir = os.path.dirname(os.path.abspath(__file__))
 config_path = os.path.join(script_dir, 'utils', 'config.json')
 
-with open(config_path, 'r') as f:
-    config = json.load(f)
-warehouse_data = config.get('warehouses', {})
+config_manager.load_config(config_path)
+warehouse_data = config_manager.config.get('warehouses', {})
 
 def home(request):
     context = {
@@ -48,19 +54,16 @@ def home(request):
     }
     return render(request, 'auction/home.html', context)
 
-from django.shortcuts import redirect
-
 def select_warehouse(request):
     if request.method == 'POST':
         selected_warehouse = request.POST.get('warehouse')
         if selected_warehouse in warehouse_data:
-            config_manager.load_config(config_path, selected_warehouse)
+            config_manager.set_active_warehouse(selected_warehouse)
             request.session['selected_warehouse'] = selected_warehouse
-            # Add a message to show on the home page
             messages.success(request, f"Warehouse {selected_warehouse} selected and configuration loaded.")
         else:
             messages.error(request, "Invalid warehouse selection.")
-    return redirect('home')  # Always redirect to home
+    return redirect('home')
 
 def create_auction_view(request):
     if request.method == 'POST':
@@ -69,18 +72,24 @@ def create_auction_view(request):
         show_browser = 'show_browser' in request.POST
         selected_warehouse = request.POST.get('selected_warehouse')
 
+        config_manager.set_active_warehouse(selected_warehouse)
         create_auction_main(auction_title, ending_date, show_browser, selected_warehouse)
         result = f"Auction '{auction_title}' created successfully."
         return render(request, 'auction/result.html', {'result': result})
     return render(request, 'auction/create_auction.html', {'warehouses': list(warehouse_data.keys())})
 
-logger = logging.getLogger(__name__)
-
 @require_http_methods(["GET", "POST"])
 def void_unpaid_view(request):
+    warehouses = list(warehouse_data.keys())
+    default_warehouse = warehouses[0] if warehouses else None
+    events = load_events()
+
     if request.method == 'GET':
-        # Render the form for GET requests
-        return render(request, 'auction/void_unpaid.html')
+        context = {
+            'warehouses': warehouses,
+            'default_warehouse': default_warehouse,
+        }
+        return render(request, 'auction/void_unpaid.html', context)
 
     elif request.method == 'POST':
         logger.info("Received POST request to void_unpaid_view")
@@ -93,16 +102,18 @@ def void_unpaid_view(request):
             data = json.loads(body)
             logger.info(f"Parsed JSON data: {data}")
             
+            warehouse = data.get('warehouse')
             auction_id = data.get('auction_id')
             upload_choice = data.get('upload_choice')
             show_browser = data.get('show_browser')
             
+            logger.info(f"warehouse: {warehouse}")
             logger.info(f"auction_id: {auction_id}")
             logger.info(f"upload_choice: {upload_choice}")
             logger.info(f"show_browser: {show_browser}")
 
             # Check for missing parameters
-            required_params = ['auction_id', 'upload_choice', 'show_browser', ]
+            required_params = ['warehouse', 'auction_id', 'upload_choice', 'show_browser']
             missing = [param for param in required_params if data.get(param) is None]
             if missing:
                 return JsonResponse({'error': f'Missing required parameters: {", ".join(missing)}'}, status=400)
@@ -111,8 +122,15 @@ def void_unpaid_view(request):
             upload_choice = int(upload_choice)
             show_browser = bool(show_browser)
 
-            # Call the main function
-            void_unpaid_main(auction_id, upload_choice, show_browser,)
+            # Validate auction ID against the selected warehouse
+            valid_auction = any(event for event in events if event['event_id'] == auction_id and event['warehouse'] == warehouse)
+
+            if not valid_auction:
+                return JsonResponse({'error': 'Invalid Auction ID - Please confirm the auction ID and Warehouse, then try again.'}, status=400)
+
+            # Call the main function with the warehouse parameter
+            config_manager.set_active_warehouse(warehouse)
+            void_unpaid_main(auction_id, upload_choice, show_browser, warehouse)
             return JsonResponse({'message': 'Void unpaid process started successfully'})
 
         except json.JSONDecodeError as e:
@@ -147,6 +165,7 @@ def remove_duplicates_view(request):
             return JsonResponse({'status': 'error', 'message': 'Missing auction number or warehouse name'})
         
         try:
+            config_manager.set_active_warehouse(warehouse_name)
             remove_duplicates_main(auction_number, target_msrp, warehouse_name)
             result = f"Duplicates removed successfully for auction {auction_number}."
             return render(request, 'auction/result.html', {'result': result})
@@ -162,13 +181,37 @@ def remove_duplicates_view(request):
     return render(request, 'auction/remove_duplicates.html', context)
 
 def auction_formatter_view(request):
+    warehouses = list(warehouse_data.keys())
+
     if request.method == 'POST':
         auction_id = request.POST.get('auction_id')
         selected_warehouse = request.POST.get('selected_warehouse')
-        auction_formatter_main(auction_id, selected_warehouse, print, lambda: False, lambda: print("Callback"))
+
+        config_manager.set_active_warehouse(selected_warehouse)
+
+        # Debug: Verify configuration values before calling the main function
+        airtable_token = config_manager.get_warehouse_var('airtable_api_key')
+        inventory_base_id = config_manager.get_warehouse_var('airtable_inventory_base_id')
+        inventory_table_id = config_manager.get_warehouse_var('airtable_inventory_table_id')
+        send_to_auction_view = config_manager.get_warehouse_var('airtable_send_to_auction_view_id')
+
+        print(f"AIRTABLE_TOKEN: {airtable_token}")
+        print(f"AIRTABLE_INVENTORY_BASE_ID: {inventory_base_id}")
+        print(f"AIRTABLE_INVENTORY_TABLE_ID: {inventory_table_id}")
+        print(f"AIRTABLE_SEND_TO_AUCTION_VIEW: {send_to_auction_view}")
+
+        auction_formatter_main(
+            auction_id, 
+            selected_warehouse, 
+            print, 
+            threading.Event(), 
+            lambda: print("Callback")
+        )
+
         result = f"Auction {auction_id} formatted successfully."
         return render(request, 'auction/result.html', {'result': result})
-    return render(request, 'auction/auction_formatter.html')
+
+    return render(request, 'auction/auction_formatter.html', {'warehouses': warehouses})
 
 def upload_to_hibid_view(request):
     if request.method == 'POST':
@@ -177,7 +220,11 @@ def upload_to_hibid_view(request):
         auction_title = request.POST.get('auction_title')
         show_browser = 'show_browser' in request.POST
         selected_warehouse = request.POST.get('selected_warehouse')
+        
+        config_manager.set_active_warehouse(selected_warehouse)
         upload_to_hibid_main(auction_id, ending_date, auction_title, print, lambda: False, lambda: print("Callback"), show_browser, selected_warehouse)
+        
         result = f"Auction {auction_id} uploaded to HiBid successfully."
         return render(request, 'auction/result.html', {'result': result})
+    
     return render(request, 'auction/upload_to_hibid.html')

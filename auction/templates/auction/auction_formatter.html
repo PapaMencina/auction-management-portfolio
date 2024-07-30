@@ -10,7 +10,11 @@
         <label for="auction_id">Auction ID:</label>
         <input type="text" id="auction_id" name="auction_id" required><br><br>
         <label for="selected_warehouse">Selected Warehouse:</label>
-        <input type="text" id="selected_warehouse" name="selected_warehouse" required><br><br>
+        <select id="selected_warehouse" name="selected_warehouse" required>
+            {% for warehouse in warehouses %}
+                <option value="{{ warehouse }}">{{ warehouse }}</option>
+            {% endfor %}
+        </select><br><br>
         <button type="submit">Format Auction</button>
     </form>
 </body>

@@ -2,6 +2,7 @@ from typing import List, Dict
 import ftplib
 import os
 import requests
+import threading
 import json
 import pandas as pd
 import concurrent.futures
@@ -12,7 +13,14 @@ import time
 import re
 from auction.utils import config_manager
 
+# Define the config path
+script_dir = os.path.dirname(os.path.abspath(__file__))
+config_path = os.path.join(script_dir, '..', 'utils', 'config.json')
+
 # Ensure global variables are set after loading config
+config_manager.load_config(config_path)  # Load the configuration here
+
+# Now get the global variables
 AIRTABLE_TOKEN = config_manager.get_global_var('airtable_api_key')
 AIRTABLE_INVENTORY_BASE_ID = config_manager.get_global_var('airtable_inventory_base_id')
 AIRTABLE_INVENTORY_TABLE_ID = config_manager.get_global_var('airtable_inventory_table_id')
@@ -22,11 +30,33 @@ newRecord = {}
 otherParams = {}
 
 def auction_formatter_main(auction_id, selected_warehouse, gui_callback, should_stop, callback):
-    formatter = AuctionFormatter(auction_id, gui_callback, should_stop, callback, selected_warehouse)
-    formatter.run_auction_formatter()
+    if not isinstance(should_stop, threading.Event):
+        should_stop = threading.Event()
 
-if __name__ == "__main__":
-    auction_formatter_main("sample_auction_id", "sample_warehouse", print, lambda: False, lambda: print("Callback"))
+    config_manager.set_active_warehouse(selected_warehouse)
+
+    AIRTABLE_TOKEN = config_manager.get_warehouse_var('airtable_api_key')
+    AIRTABLE_INVENTORY_BASE_ID = config_manager.get_warehouse_var('airtable_inventory_base_id')
+    AIRTABLE_INVENTORY_TABLE_ID = config_manager.get_warehouse_var('airtable_inventory_table_id')
+    AIRTABLE_SEND_TO_AUCTION_VIEW = config_manager.get_warehouse_var('airtable_send_to_auction_view_id')
+
+    print(f"AIRTABLE_TOKEN: {AIRTABLE_TOKEN}")
+    print(f"AIRTABLE_INVENTORY_BASE_ID: {AIRTABLE_INVENTORY_BASE_ID}")
+    print(f"AIRTABLE_INVENTORY_TABLE_ID: {AIRTABLE_INVENTORY_TABLE_ID}")
+    print(f"AIRTABLE_SEND_TO_AUCTION_VIEW: {AIRTABLE_SEND_TO_AUCTION_VIEW}")
+
+    formatter = AuctionFormatter(
+        auction_id, 
+        gui_callback, 
+        should_stop, 
+        callback, 
+        selected_warehouse,
+        AIRTABLE_TOKEN,
+        AIRTABLE_INVENTORY_BASE_ID,
+        AIRTABLE_INVENTORY_TABLE_ID,
+        AIRTABLE_SEND_TO_AUCTION_VIEW
+    )
+    formatter.run_auction_formatter()
 
 def get_extension_from_content_disposition(content_disposition):
     filename_match = re.search(r'filename="([^"]+)"', content_disposition)
@@ -594,7 +624,12 @@ def processed_records_to_df(processed_records, Auction_ID, gui_callback):
                     "UPC", "Truck", "Source", "Size", "Photo Taker", "Packaging", "Other Notes", "MSRP", "Lot Number", "Location",
                     "Item Condition", "ID", "Amazon ID", "HiBid", "AuctionCount", "number"]
     df = df.reindex(columns=column_order, fill_value='')
-    download_path = os.path.join(get_resources_dir('processed_csv'), f'unformatted_{Auction_ID}.csv')
+    
+    # Define the directory path
+    resources_dir = os.path.join(script_dir, '..', 'resources', 'processed_csv')
+    os.makedirs(resources_dir, exist_ok=True)
+    
+    download_path = os.path.join(resources_dir, f'unformatted_{Auction_ID}.csv')
     df.to_csv(download_path, index=False)
     gui_callback(f'Successful records have been saved to {download_path}.')
 
@@ -628,44 +663,38 @@ def check_continuation(func):
     return wrapper
 
 class AuctionFormatter:
-    def __init__(self, Auction_ID, gui_callback, should_stop, callback, selected_warehouse):
-        self.Auction_ID = Auction_ID
+    def __init__(self, auction_id, gui_callback, should_stop, callback, selected_warehouse, airtable_token, inventory_base_id, inventory_table_id, send_to_auction_view):
+        self.Auction_ID = auction_id
         self.gui_callback = gui_callback
-        self.should_stop = should_stop
+        self.should_stop = should_stop if isinstance(should_stop, threading.Event) else threading.Event()
         self.callback = callback
-        self.selected_warehouse = selected_warehouse  # Store the selected warehouse
-        self.failed_records_csv_filepath = None
-        self.successful_records_csv_filepath = None
+        self.selected_warehouse = selected_warehouse
+        
+        self.AIRTABLE_TOKEN = airtable_token
+        self.AIRTABLE_INVENTORY_BASE_ID = inventory_base_id
+        self.AIRTABLE_INVENTORY_TABLE_ID = inventory_table_id
+        self.AIRTABLE_SEND_TO_AUCTION_VIEW = send_to_auction_view
 
-    def check_continuation(func):
-        def wrapper(self, *args, **kwargs):
-            if self.should_stop.is_set():
-                self.gui_callback("Process stopped by user.")
-                return
-            return func(self, *args, **kwargs)
-        return wrapper
+    def should_continue(self, should_stop, gui_callback, message):
+        if should_stop.is_set():
+            gui_callback(message)
+            return False
+        return True
 
     @check_continuation
     def run_auction_formatter(self):
         try:
-            # Ensure the configuration values are updated
-            AIRTABLE_TOKEN = config_manager.get_global_var('airtable_api_key')
-            AIRTABLE_INVENTORY_BASE_ID = config_manager.get_global_var('airtable_inventory_base_id')
-            AIRTABLE_INVENTORY_TABLE_ID = config_manager.get_global_var('airtable_inventory_table_id')
-            AIRTABLE_SEND_TO_AUCTION_VIEW = config_manager.get_global_var('airtable_send_to_auction_view_id')
-
-            # Debugging: Print the configuration values
-            print(f"AIRTABLE_TOKEN: {AIRTABLE_TOKEN}")
-            print(f"AIRTABLE_INVENTORY_BASE_ID: {AIRTABLE_INVENTORY_BASE_ID}")
-            print(f"AIRTABLE_INVENTORY_TABLE_ID: {AIRTABLE_INVENTORY_TABLE_ID}")
-            print(f"AIRTABLE_SEND_TO_AUCTION_VIEW: {AIRTABLE_SEND_TO_AUCTION_VIEW}")
+            print(f"AIRTABLE_TOKEN: {self.AIRTABLE_TOKEN}")
+            print(f"AIRTABLE_INVENTORY_BASE_ID: {self.AIRTABLE_INVENTORY_BASE_ID}")
+            print(f"AIRTABLE_INVENTORY_TABLE_ID: {self.AIRTABLE_INVENTORY_TABLE_ID}")
+            print(f"AIRTABLE_SEND_TO_AUCTION_VIEW: {self.AIRTABLE_SEND_TO_AUCTION_VIEW}")
 
             airtable_records = get_airtable_records_list(
-                AIRTABLE_INVENTORY_BASE_ID, 
-                AIRTABLE_INVENTORY_TABLE_ID, 
-                AIRTABLE_SEND_TO_AUCTION_VIEW, 
+                self.AIRTABLE_INVENTORY_BASE_ID, 
+                self.AIRTABLE_INVENTORY_TABLE_ID, 
+                self.AIRTABLE_SEND_TO_AUCTION_VIEW, 
                 self.gui_callback, 
-                AIRTABLE_TOKEN
+                self.AIRTABLE_TOKEN
             )
             if not airtable_records:
                 self.gui_callback("No records retrieved from Airtable.")
@@ -710,8 +739,12 @@ class AuctionFormatter:
             remaining_items = sorted_data[~sorted_data.index.isin(top_50_items.index)].sample(frac=1).reset_index(drop=True)
 
             final_data = pd.concat([top_50_items, remaining_items]).reset_index(drop=True)
+            
+            # Define the directory path
+            resources_dir = os.path.join(script_dir, '..', 'resources', 'processed_csv')
+            os.makedirs(resources_dir, exist_ok=True)
 
-            output_file_path = os.path.join(get_resources_dir('processed_csv'), f'{self.Auction_ID}.csv')
+            output_file_path = os.path.join(resources_dir, f'{self.Auction_ID}.csv')
             final_data.to_csv(output_file_path, index=False)
 
             self.gui_callback(f"Formatted data saved to {output_file_path}")

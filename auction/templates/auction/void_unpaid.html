@@ -8,8 +8,18 @@
 <body>
     <h1>Void Unpaid Transactions</h1>
 
-    <form id="voidUnpaidForm">
+    <form id="voidUnpaidForm" method="post">
         {% csrf_token %}
+        <div>
+            <label for="warehouseSelect">Select Warehouse:</label>
+            <select name="warehouse" id="warehouseSelect" required>
+                {% for warehouse in warehouses %}
+                    <option value="{{ warehouse }}" {% if warehouse == default_warehouse %}selected{% endif %}>
+                        {{ warehouse }}
+                    </option>
+                {% endfor %}
+            </select>
+        </div>
         <div>
             <label for="auction_id">Auction ID:</label>
             <input type="text" id="auction_id" name="auction_id" required>
@@ -42,6 +52,7 @@
         console.log("voidUnpaid function called");
         const form = document.getElementById('voidUnpaidForm');
         const data = {
+            warehouse: form.warehouse.value,
             auction_id: form.auction_id.value,
             upload_choice: parseInt(form.upload_choice.value),
             show_browser: form.show_browser.checked,
@@ -62,21 +73,17 @@
         })
         .then(response => {
             if (!response.ok) {
-                throw new Error('Network response was not ok');
+                return response.json().then(data => { throw new Error(data.error); });
             }
             return response.json();
         })
         .then(data => {
             console.log("Response data:", data);
-            if (data.error) {
-                document.getElementById('result').textContent = "Error: " + data.error;
-            } else {
-                document.getElementById('result').textContent = "Success: " + data.message;
-            }
+            document.getElementById('result').textContent = "Success: " + data.message;
         })
         .catch(error => {
             console.error('Error:', error);
-            document.getElementById('result').textContent = "An error occurred. Please check the console for details.";
+            document.getElementById('result').textContent = "Error: " + error.message;
         })
         .finally(() => {
             document.querySelector('button[type="submit"]').disabled = false;
