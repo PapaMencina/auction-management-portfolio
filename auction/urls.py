@@ -1,6 +1,8 @@
 from django.urls import path
 from . import views
 
+app_name = 'auction'  # Add this line to create a namespace
+
 urlpatterns = [
     path('', views.home, name='home'),
     path('select_warehouse/', views.select_warehouse, name='select_warehouse'),

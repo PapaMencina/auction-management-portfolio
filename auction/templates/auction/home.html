@@ -1,36 +1,20 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Auction Management System</title>
-</head>
-<body>
-    <h1>Auction Management System</h1>
+<h1>Auction Management System</h1>
 
-    {% if messages %}
-    <ul class="messages">
-        {% for message in messages %}
-        <li{% if message.tags %} class="{{ message.tags }}"{% endif %}>{{ message }}</li>
-        {% endfor %}
-    </ul>
-    {% endif %}
-    <ul>
-        <li><a href="{% url 'create_auction' %}">Create Auction</a></li>
-        <li><a href="{% url 'void_unpaid' %}">Void Unpaid Transactions</a></li>
-        <li><a href="{% url 'remove_duplicates' %}">Remove Duplicates</a></li>
-        <li><a href="{% url 'auction_formatter' %}">Format Auction</a></li>
-        <li><a href="{% url 'upload_to_hibid' %}">Upload to Hibid</a></li>
-    </ul>
+{% if messages %}
+<ul class="messages">
+    {% for message in messages %}
+    <li{% if message.tags %} class="{{ message.tags }}"{% endif %}>{{ message }}</li>
+    {% endfor %}
+</ul>
+{% endif %}
 
-    {% block content %}
-    <!-- This block can be used for page-specific content in child templates -->
-    {% endblock %}
+<ul>
+    <li><a href="{% url 'auction:create_auction' %}">Create Auction</a></li>
+    <li><a href="{% url 'auction:void_unpaid' %}">Void Unpaid Transactions</a></li>
+    <li><a href="{% url 'auction:remove_duplicates' %}">Remove Duplicates</a></li>
+    <li><a href="{% url 'auction:auction_formatter' %}">Format Auction</a></li>
+    <li><a href="{% url 'auction:upload_to_hibid' %}">Upload to Hibid</a></li>
+</ul>
 
-    <script>
-        document.getElementById('warehouseSelect').addEventListener('change', function() {
-            document.getElementById('warehouseForm').submit();
-        });
-    </script>
-</body>
-</html>
+{% block content %}
+{% endblock %}

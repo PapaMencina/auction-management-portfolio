@@ -1,28 +1,52 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Create Auction</title>
+    <script>
+        function updateAuctionTitle() {
+            var warehouseSelect = document.getElementById('warehouse');
+            var auctionTitleInput = document.getElementById('auction_title');
+            var selectedWarehouse = warehouseSelect.value;
+            var currentDate = new Date();
+            var formattedDate = (currentDate.getMonth() + 1) + '/' + currentDate.getDate();
+            
+            if (selectedWarehouse === 'Maule Warehouse') {
+                auctionTitleInput.value = 'Amazon Liquidation Returns & Brand New Overstock Items #';
+            } else if (selectedWarehouse === 'Sunrise Warehouse') {
+                auctionTitleInput.value = 'OFFSITE LOCATION Liquidation Returns & Brand New Overstock Items #';
+            } else {
+                auctionTitleInput.value = '';
+            }
+        }
+    </script>
 </head>
 <body>
     <h1>Create Auction</h1>
     <form method="post">
         {% csrf_token %}
-        <label for="auction_title">Auction Title:</label>
-        <input type="text" id="auction_title" name="auction_title" required><br><br>
-        
-        <label for="ending_date">Ending Date (YYYY-MM-DD):</label>
-        <input type="date" id="ending_date" name="ending_date" required><br><br>
-        
-        <label for="selected_warehouse">Select Warehouse:</label>
-        <select id="selected_warehouse" name="selected_warehouse">
-            {% for warehouse in warehouses %}
-                <option value="{{ warehouse }}">{{ warehouse }}</option>
-            {% endfor %}
-        </select><br><br>
-        
-        <label for="show_browser">Show Browser:</label>
-        <input type="checkbox" id="show_browser" name="show_browser"><br><br>
-        
+        <div>
+            <label for="warehouse">Select Warehouse:</label>
+            <select id="warehouse" name="selected_warehouse" onchange="updateAuctionTitle()">
+                <option value="">Select a warehouse</option>
+                {% for warehouse in warehouses %}
+                    <option value="{{ warehouse }}">{{ warehouse }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label for="auction_title">Auction Title:</label>
+            <input type="text" id="auction_title" name="auction_title" required>
+        </div>
+        <div>
+            <label for="ending_date">Ending Date (YYYY-MM-DD):</label>
+            <input type="date" id="ending_date" name="ending_date" required>
+        </div>
+        <div>
+            <label for="show_browser">Show Browser:</label>
+            <input type="checkbox" id="show_browser" name="show_browser">
+        </div>
         <button type="submit">Run Create Auction Script</button>
     </form>
 </body>

@@ -1,4 +1,5 @@
 from django.shortcuts import render, redirect
+from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse
 from django.core.serializers.json import DjangoJSONEncoder
 from django.contrib import messages
@@ -17,6 +18,15 @@ from auction.scripts.upload_to_hibid import upload_to_hibid_main
 
 logger = logging.getLogger(__name__)
 
+@login_required
+def home(request):
+    context = {
+        'warehouses': list(warehouse_data.keys()),
+        'default_warehouse': request.session.get('selected_warehouse') or list(warehouse_data.keys())[0] if warehouse_data else None,
+    }
+    return render(request, 'auction/home.html', context)
+
+@login_required
 def load_events():
     file_path = r"C:\Users\matt9\Desktop\auction_webapp\events.json"
     if os.path.exists(file_path):
@@ -24,6 +34,7 @@ def load_events():
             return json.load(file)
     return []
 
+@login_required
 def get_auction_numbers():
     try:
         with open('events.json', 'r') as f:
@@ -47,13 +58,7 @@ config_path = os.path.join(script_dir, 'utils', 'config.json')
 config_manager.load_config(config_path)
 warehouse_data = config_manager.config.get('warehouses', {})
 
-def home(request):
-    context = {
-        'warehouses': list(warehouse_data.keys()),
-        'default_warehouse': request.session.get('selected_warehouse') or list(warehouse_data.keys())[0] if warehouse_data else None,
-    }
-    return render(request, 'auction/home.html', context)
-
+@login_required
 def select_warehouse(request):
     if request.method == 'POST':
         selected_warehouse = request.POST.get('warehouse')
@@ -65,6 +70,7 @@ def select_warehouse(request):
             messages.error(request, "Invalid warehouse selection.")
     return redirect('home')
 
+@login_required
 def create_auction_view(request):
     if request.method == 'POST':
         auction_title = request.POST.get('auction_title')
@@ -76,8 +82,12 @@ def create_auction_view(request):
         create_auction_main(auction_title, ending_date, show_browser, selected_warehouse)
         result = f"Auction '{auction_title}' created successfully."
         return render(request, 'auction/result.html', {'result': result})
-    return render(request, 'auction/create_auction.html', {'warehouses': list(warehouse_data.keys())})
+    
+    # This is the only line you need to change
+    warehouses = list(warehouse_data.keys())
+    return render(request, 'auction/create_auction.html', {'warehouses': warehouses})
 
+@login_required
 @require_http_methods(["GET", "POST"])
 def void_unpaid_view(request):
     warehouses = list(warehouse_data.keys())
@@ -143,6 +153,7 @@ def void_unpaid_view(request):
             logger.exception("Unexpected error in void_unpaid_view")
             return JsonResponse({'error': f'An unexpected error occurred: {str(e)}'}, status=500)
 
+@login_required
 def remove_duplicates_view(request):
     auctions = get_auction_numbers()
     warehouses = list(warehouse_data.keys())
@@ -180,8 +191,10 @@ def remove_duplicates_view(request):
     }
     return render(request, 'auction/remove_duplicates.html', context)
 
+@login_required
 def auction_formatter_view(request):
     warehouses = list(warehouse_data.keys())
+    auctions = get_auction_numbers()  # Make sure this function is defined and returns the correct data
 
     if request.method == 'POST':
         auction_id = request.POST.get('auction_id')
@@ -189,17 +202,7 @@ def auction_formatter_view(request):
 
         config_manager.set_active_warehouse(selected_warehouse)
 
-        # Debug: Verify configuration values before calling the main function
-        airtable_token = config_manager.get_warehouse_var('airtable_api_key')
-        inventory_base_id = config_manager.get_warehouse_var('airtable_inventory_base_id')
-        inventory_table_id = config_manager.get_warehouse_var('airtable_inventory_table_id')
-        send_to_auction_view = config_manager.get_warehouse_var('airtable_send_to_auction_view_id')
-
-        print(f"AIRTABLE_TOKEN: {airtable_token}")
-        print(f"AIRTABLE_INVENTORY_BASE_ID: {inventory_base_id}")
-        print(f"AIRTABLE_INVENTORY_TABLE_ID: {inventory_table_id}")
-        print(f"AIRTABLE_SEND_TO_AUCTION_VIEW: {send_to_auction_view}")
-
+        # Your existing code for auction formatting...
         auction_formatter_main(
             auction_id, 
             selected_warehouse, 
@@ -211,8 +214,13 @@ def auction_formatter_view(request):
         result = f"Auction {auction_id} formatted successfully."
         return render(request, 'auction/result.html', {'result': result})
 
-    return render(request, 'auction/auction_formatter.html', {'warehouses': warehouses})
+    context = {
+        'warehouses': warehouses,
+        'auctions': json.dumps(auctions, cls=DjangoJSONEncoder),
+    }
+    return render(request, 'auction/auction_formatter.html', context)
 
+@login_required
 def upload_to_hibid_view(request):
     if request.method == 'POST':
         auction_id = request.POST.get('auction_id')

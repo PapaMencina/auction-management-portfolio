@@ -137,3 +137,8 @@ LOGGING = {
         'level': 'INFO',
     },
 }
+
+# Add these lines at the end of the file
+LOGIN_URL = '/login/'
+LOGIN_REDIRECT_URL = '/auction/'
+LOGOUT_REDIRECT_URL = '/login/'
