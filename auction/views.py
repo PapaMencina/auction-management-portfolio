@@ -27,7 +27,7 @@ def home(request):
     return render(request, 'auction/home.html', context)
 
 @login_required
-def load_events():
+def load_events(request):
     file_path = r"C:\Users\matt9\Desktop\auction_webapp\events.json"
     if os.path.exists(file_path):
         with open(file_path, "r") as file:
@@ -35,10 +35,9 @@ def load_events():
     return []
 
 @login_required
-def get_auction_numbers():
+def get_auction_numbers(request):
     try:
-        with open('events.json', 'r') as f:
-            events = json.load(f)
+        events = load_events(request)
         return [
             {
                 'id': event['event_id'],
@@ -92,7 +91,7 @@ def create_auction_view(request):
 def void_unpaid_view(request):
     warehouses = list(warehouse_data.keys())
     default_warehouse = warehouses[0] if warehouses else None
-    events = load_events()
+    events = load_events(request)
 
     if request.method == 'GET':
         context = {
@@ -155,7 +154,7 @@ def void_unpaid_view(request):
 
 @login_required
 def remove_duplicates_view(request):
-    auctions = get_auction_numbers()
+    auctions = get_auction_numbers(request)  # Pass the request here
     warehouses = list(warehouse_data.keys())
     
     print("All auctions:", auctions)  # Debug print
@@ -194,7 +193,7 @@ def remove_duplicates_view(request):
 @login_required
 def auction_formatter_view(request):
     warehouses = list(warehouse_data.keys())
-    auctions = get_auction_numbers()  # Make sure this function is defined and returns the correct data
+    auctions = get_auction_numbers(request)
 
     if request.method == 'POST':
         auction_id = request.POST.get('auction_id')

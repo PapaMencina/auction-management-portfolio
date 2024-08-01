@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/5.0/ref/settings/
 """
 
 from pathlib import Path
+import os
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -44,11 +45,11 @@ MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
-    'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'auction.middleware.LoginRequiredMiddleware',  # Ensure this line is present
 ]
 
 ROOT_URLCONF = 'auction_webapp.urls'
@@ -56,7 +57,7 @@ ROOT_URLCONF = 'auction_webapp.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        'DIRS': [BASE_DIR / 'templates'],  # Use Path object here
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -138,7 +139,16 @@ LOGGING = {
     },
 }
 
-# Add these lines at the end of the file
+SESSION_COOKIE_AGE = 3600  # 1 hour in seconds
+SESSION_EXPIRE_AT_BROWSER_CLOSE = True
+SESSION_SAVE_EVERY_REQUEST = True
+SESSION_COOKIE_SECURE = False  # Set to True in production
+CSRF_COOKIE_SECURE = False  # Set to True in production
+SESSION_COOKIE_HTTPONLY = True
+CSRF_COOKIE_HTTPONLY = True
+SESSION_ENGINE = 'django.contrib.sessions.backends.db'
+SESSION_COOKIE_SAMESITE = 'Strict'
+
 LOGIN_URL = '/login/'
-LOGIN_REDIRECT_URL = '/auction/'
+LOGIN_REDIRECT_URL = '/'
 LOGOUT_REDIRECT_URL = '/login/'

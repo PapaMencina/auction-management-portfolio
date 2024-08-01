@@ -63,7 +63,7 @@
         document.querySelector('button[type="submit"]').disabled = true;
         document.getElementById('result').textContent = 'Processing...';
 
-        fetch('{% url "void_unpaid" %}', {
+        fetch('{% url "auction:void_unpaid" %}', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -91,6 +91,6 @@
     }
     </script>
 
-    <p><a href="{% url 'home' %}">Back to Home</a></p>
+    <p><a href="{% url 'auction:home' %}">Back to Home</a></p>
 </body>
 </html>
