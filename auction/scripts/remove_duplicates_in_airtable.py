@@ -123,11 +123,10 @@ def run_remove_dups(auction_number, gui_callback, should_stop, callback, target_
     config_path = os.path.join(os.path.dirname(__file__), '..', 'utils', 'config.json')
     config_manager.load_config(config_path, warehouse_name)
 
-    # Retrieve configuration variables
-    AIRTABLE_TOKEN = config_manager.get_global_var('airtable_api_key')
-    AIRTABLE_INVENTORY_BASE_ID = config_manager.get_global_var('airtable_inventory_base_id')
-    AIRTABLE_INVENTORY_TABLE_ID = config_manager.get_global_var('airtable_inventory_table_id')
-    AIRTABLE_REMOVE_DUPS_VIEW = config_manager.get_global_var('airtable_remove_dups_view')
+    AIRTABLE_TOKEN = config_manager.get_warehouse_var('airtable_api_key')
+    AIRTABLE_INVENTORY_BASE_ID = config_manager.get_warehouse_var('airtable_inventory_base_id')
+    AIRTABLE_INVENTORY_TABLE_ID = config_manager.get_warehouse_var('airtable_inventory_table_id')
+    AIRTABLE_REMOVE_DUPS_VIEW = config_manager.get_warehouse_var('airtable_remove_dups_view')
 
     # Check if all required configuration variables are present
     if not all([AIRTABLE_TOKEN, AIRTABLE_INVENTORY_BASE_ID, AIRTABLE_INVENTORY_TABLE_ID, AIRTABLE_REMOVE_DUPS_VIEW]):
