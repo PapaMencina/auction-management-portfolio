@@ -30,11 +30,47 @@
 
         // Call updateAuctionDropdown when the page loads to set initial state
         document.addEventListener('DOMContentLoaded', updateAuctionDropdown);
+
+        function formatAuction(event) {
+            event.preventDefault();
+            const formData = new FormData(event.target);
+            const resultMessage = document.getElementById('result-message');
+            const downloadButton = document.getElementById('download-csv');
+
+            fetch('{% url "auction:auction_formatter" %}', {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'X-CSRFToken': '{{ csrf_token }}'
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                resultMessage.textContent = data.message;
+                if (data.status === 'success' && data.show_download) {
+                    showDownloadButton(data.auction_id);
+                } else {
+                    downloadButton.style.display = 'none';
+                }
+            })
+            .catch(error => {
+                resultMessage.textContent = 'An error occurred: ' + error;
+                downloadButton.style.display = 'none';
+            });
+        }
+
+        function showDownloadButton(auctionId) {
+            const downloadButton = document.getElementById('download-csv');
+            downloadButton.style.display = 'block';
+            downloadButton.onclick = function() {
+                window.location.href = '{% url "auction:download_formatted_csv" auction_id="0" %}'.replace('0', auctionId);
+    };
+}
     </script>
 </head>
 <body>
     <h1>Auction Formatter</h1>
-    <form method="post">
+    <form method="post" onsubmit="formatAuction(event)">
         {% csrf_token %}
         <div>
             <label for="selected_warehouse">Selected Warehouse:</label>
@@ -54,5 +90,7 @@
         </div>
         <button type="submit">Format Auction</button>
     </form>
+    <div id="result-message"></div>
+    <button id="download-csv" style="display: none;">Download CSV</button>
 </body>
 </html>

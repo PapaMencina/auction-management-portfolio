@@ -1,9 +1,10 @@
 from django.shortcuts import render, redirect
 from django.contrib.auth.decorators import login_required
-from django.http import JsonResponse
+from django.http import JsonResponse, FileResponse, HttpResponse
 from django.core.serializers.json import DjangoJSONEncoder
 from django.contrib import messages
 from django.views.decorators.http import require_http_methods
+from django.utils.encoding import smart_str
 import logging
 import threading
 import json
@@ -192,7 +193,7 @@ def remove_duplicates_view(request):
 
 @login_required
 def auction_formatter_view(request):
-    warehouses = list(warehouse_data.keys())
+    warehouses = list(config_manager.config.get('warehouses', {}).keys())
     auctions = get_auction_numbers(request)
 
     if request.method == 'POST':
@@ -201,23 +202,70 @@ def auction_formatter_view(request):
 
         config_manager.set_active_warehouse(selected_warehouse)
 
-        # Your existing code for auction formatting...
-        auction_formatter_main(
-            auction_id, 
-            selected_warehouse, 
-            print, 
-            threading.Event(), 
-            lambda: print("Callback")
-        )
+        def gui_callback(message):
+            logger.info(message)
 
-        result = f"Auction {auction_id} formatted successfully."
-        return render(request, 'auction/result.html', {'result': result})
+        should_stop = threading.Event()
+
+        def callback():
+            logger.info("Auction formatting process completed.")
+
+        try:
+            formatter = auction_formatter_main(
+                auction_id, 
+                selected_warehouse, 
+                gui_callback, 
+                should_stop, 
+                callback
+            )
+            
+            if formatter and formatter.final_csv_path and os.path.exists(formatter.final_csv_path):
+                result = f"Auction {auction_id} formatted successfully. CSV file is ready for download."
+                return JsonResponse({
+                    'status': 'success',
+                    'message': result,
+                    'show_download': True,
+                    'auction_id': auction_id
+                })
+            else:
+                return JsonResponse({
+                    'status': 'error',
+                    'message': f"Auction {auction_id} formatted, but CSV file was not created."
+                })
+        except Exception as e:
+            logger.exception("Error in auction formatting process")
+            return JsonResponse({
+                'status': 'error',
+                'message': f"An error occurred: {str(e)}"
+            })
 
     context = {
         'warehouses': warehouses,
         'auctions': json.dumps(auctions, cls=DjangoJSONEncoder),
     }
     return render(request, 'auction/auction_formatter.html', context)
+
+@login_required
+def download_formatted_csv(request, auction_id):
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    resources_dir = os.path.join(script_dir, 'resources', 'processed_csv')
+    csv_path = os.path.join(resources_dir, f'{auction_id}.csv')
+    
+    logger.info(f"Attempting to download CSV from: {csv_path}")
+    
+    if os.path.exists(csv_path):
+        logger.info(f"CSV file found at: {csv_path}")
+        try:
+            with open(csv_path, 'rb') as fh:
+                response = HttpResponse(fh.read(), content_type='text/csv')
+                response['Content-Disposition'] = f'attachment; filename="{smart_str(auction_id)}.csv"'
+                return response
+        except IOError:
+            logger.error(f"IOError when reading file: {csv_path}")
+            return HttpResponse("Error reading the CSV file", status=500)
+    else:
+        logger.error(f"CSV file not found at: {csv_path}")
+        return HttpResponse(f"CSV file not found at {csv_path}", status=404)
 
 @login_required
 def upload_to_hibid_view(request):

@@ -57,6 +57,7 @@ def auction_formatter_main(auction_id, selected_warehouse, gui_callback, should_
         AIRTABLE_SEND_TO_AUCTION_VIEW
     )
     formatter.run_auction_formatter()
+    return formatter  # Return the formatter instance
 
 def get_extension_from_content_disposition(content_disposition):
     filename_match = re.search(r'filename="([^"]+)"', content_disposition)
@@ -674,6 +675,7 @@ class AuctionFormatter:
         self.AIRTABLE_INVENTORY_BASE_ID = inventory_base_id
         self.AIRTABLE_INVENTORY_TABLE_ID = inventory_table_id
         self.AIRTABLE_SEND_TO_AUCTION_VIEW = send_to_auction_view
+        self.final_csv_path = None  # New attribute to store the final CSV path
 
     def should_continue(self, should_stop, gui_callback, message):
         if should_stop.is_set():
@@ -704,6 +706,7 @@ class AuctionFormatter:
             downloaded_images_bulk = download_images_bulk(download_tasks, self.gui_callback, self.should_stop)
             processed_images = process_images_in_bulk(downloaded_images_bulk, self.gui_callback, self.should_stop)
             uploaded_image_urls = upload_images_and_get_urls(processed_images, self.gui_callback, self.should_stop)
+            
             processed_records, failed_records = process_records_concurrently(
                 airtable_records, uploaded_image_urls, self.gui_callback, self.Auction_ID, self.selected_warehouse, self.should_stop
             )
@@ -713,7 +716,7 @@ class AuctionFormatter:
                 return
 
             unformatted_csv_path = processed_records_to_df(processed_records, self.Auction_ID, self.gui_callback)
-            self.successful_records_csv_filepath = self.format_final_csv(unformatted_csv_path)
+            self.final_csv_path = self.format_final_csv(unformatted_csv_path)
 
             if failed_records:
                 self.failed_records_csv_filepath = failed_records_csv(failed_records, self.Auction_ID, self.gui_callback)
@@ -729,7 +732,7 @@ class AuctionFormatter:
             data = pd.read_csv(file_path)
             self.gui_callback(f"Initial data loaded with {len(data)} records.")
 
-            data['UPC'] = pd.to_numeric(data['UPC'], errors='coerce').fillna('').astype(str)
+            data['UPC'] = data['UPC'].astype(str)
             data['MSRP'] = pd.to_numeric(data['MSRP'], errors='coerce').round(2)
 
             sorted_data = data.sort_values(by='MSRP', ascending=False)
@@ -740,7 +743,6 @@ class AuctionFormatter:
 
             final_data = pd.concat([top_50_items, remaining_items]).reset_index(drop=True)
             
-            # Define the directory path
             resources_dir = os.path.join(script_dir, '..', 'resources', 'processed_csv')
             os.makedirs(resources_dir, exist_ok=True)
 
@@ -748,6 +750,7 @@ class AuctionFormatter:
             final_data.to_csv(output_file_path, index=False)
 
             self.gui_callback(f"Formatted data saved to {output_file_path}")
+            self.final_csv_path = output_file_path  # Store the path
             return output_file_path
         except Exception as e:
             self.gui_callback(f"Error formatting final CSV: {e}")
