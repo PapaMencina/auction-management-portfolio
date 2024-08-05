@@ -1,0 +1,41 @@
+<!-- templates/base.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Auction Management System{% endblock %}</title>
+</head>
+<body>
+    <header>
+        <h1>Auction Management System</h1>
+        {% if user.is_authenticated %}
+            <p>Welcome, {{ user.username }}! <a href="{% url 'logout' %}">Logout</a></p>
+        {% endif %}
+    </header>
+
+    {% if messages %}
+    <ul class="messages">
+        {% for message in messages %}
+        <li{% if message.tags %} class="{{ message.tags }}"{% endif %}>{{ message }}</li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+
+    {% if user.is_authenticated %}
+    <nav>
+        <ul>
+            <li><a href="{% url 'auction:home' %}">Home</a></li>
+            <li><a href="{% url 'auction:create_auction' %}">Create Auction</a></li>
+            <li><a href="{% url 'auction:void_unpaid' %}">Void Unpaid Transactions</a></li>
+            <li><a href="{% url 'auction:remove_duplicates' %}">Remove Duplicates</a></li>
+            <li><a href="{% url 'auction:auction_formatter' %}">Format Auction</a></li>
+            <li><a href="{% url 'auction:upload_to_hibid' %}">Upload to Hibid</a></li>
+        </ul>
+    </nav>
+    {% endif %}
+
+    {% block content %}
+    {% endblock %}
+</body>
+</html>

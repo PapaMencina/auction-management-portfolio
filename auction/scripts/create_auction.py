@@ -3,6 +3,7 @@ import time
 import json
 import re
 import traceback
+import threading
 from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -14,9 +15,43 @@ from selenium.webdriver.firefox.service import Service as FirefoxService
 from selenium.webdriver.firefox.options import Options as FirefoxOptions
 from webdriver_manager.firefox import GeckoDriverManager
 
+# Define a lock for thread-safe file operations
+file_lock = threading.Lock()
+
+def save_event_to_file(event_data):
+    file_path = r"C:\Users\matt9\Desktop\auction_webapp\events.json"
+    print(f"Attempting to save event to {file_path}")
+    with file_lock:
+        try:
+            if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
+                try:
+                    with open(file_path, "r") as file:
+                        events = json.load(file)
+                    print(f"Loaded existing events: {len(events)}")
+                except json.JSONDecodeError:
+                    print("Existing file contains invalid JSON. Starting with empty list.")
+                    events = []
+            else:
+                events = []
+                print("No existing events file or file is empty. Creating new.")
+
+            events.append(event_data)
+            print(f"Added new event. Total events: {len(events)}")
+
+            with open(file_path, "w") as file:
+                json.dump(events, file, indent=4)
+            print(f"Event successfully saved to {file_path}")
+        except Exception as e:
+            print(f"Failed to save event to file: {e}")
+            print("Traceback:")
+            traceback.print_exc()
+            print(f"Current working directory: {os.getcwd()}")
+            print(f"File exists: {os.path.exists(file_path)}")
+            print(f"File is writable: {os.access(file_path, os.W_OK) if os.path.exists(file_path) else 'N/A'}")
+
 def get_resources_dir():
-    """Navigate up one directory from the script's location and then into the 'resources/event_images' folder."""
-    return os.path.join(os.path.dirname(os.path.dirname(__file__)), 'resources', 'event_images')
+    """Return the path to the resources/event_images directory."""
+    return r"C:\Users\matt9\Desktop\auction_webapp\auction\resources\event_images"
 
 def wait_for_download(gui_callback, timeout=60):
     """Waits for a new file to appear in the resources directory and ensures the download is complete."""
@@ -259,17 +294,34 @@ def create_auction(driver, auction_title, image_path, formatted_start_date, bid_
         gui_callback(f"An error occurred: {e}")
         return None
 
-def run_create_auction_with_callback(auction_title, ending_date, gui_callback, should_stop, shared_events, callback, show_browser, selected_warehouse):
-    """Main function to create an auction with callback functionality."""
+class SharedEvents:
+    def add_event(self, title, event_id, ending_date, timestamp):
+        print(f"Event added: {title}, ID: {event_id}, Ending Date: {ending_date}, Timestamp: {timestamp}")
+        event_data = {
+            "title": title,
+            "event_id": event_id,
+            "ending_date": str(ending_date),
+            "timestamp": timestamp
+        }
+        save_event_to_file(event_data)
 
+def create_auction_main(auction_title, ending_date, show_browser, selected_warehouse):
     # Select the relaythat_url based on the selected warehouse
     if selected_warehouse == "Maule Warehouse":
         relaythat_url = "https://app.relaythat.com/composition/2126969"
     elif selected_warehouse == "Sunrise Warehouse":
         relaythat_url = "https://app.relaythat.com/composition/1992064"
     else:
-        gui_callback("Invalid warehouse selected.")
+        print("Invalid warehouse selected.")
         return
+
+    def gui_callback(message):
+        print(message)
+
+    should_stop = threading.Event()
+
+    def callback():
+        print("Auction creation process completed.")
 
     driver = None
 
@@ -300,7 +352,15 @@ def run_create_auction_with_callback(auction_title, ending_date, gui_callback, s
 
             if event_id:
                 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                shared_events.add_event(auction_title, event_id, ending_date, timestamp)
+                event_data = {
+                    "warehouse": selected_warehouse,
+                    "title": auction_title,
+                    "event_id": event_id,
+                    "start_date": formatted_start_date,
+                    "ending_date": str(ending_date),
+                    "timestamp": timestamp
+                }
+                save_event_to_file(event_data)
                 gui_callback(f"Event {event_id} created at {timestamp}")
             else:
                 gui_callback("Failed to obtain event ID.")
@@ -314,24 +374,7 @@ def run_create_auction_with_callback(auction_title, ending_date, gui_callback, s
             driver.quit()
         callback()
 
-# Add this function to allow calling the script from Django view
-def create_auction_main(auction_title, ending_date, show_browser, selected_warehouse):
-    def gui_callback(message):
-        print(message)
-
-    def should_stop():
-        return False
-
-    class SharedEvents:
-        def add_event(self, title, event_id, ending_date, timestamp):
-            print(f"Event added: {title}, ID: {event_id}, Ending Date: {ending_date}, Timestamp: {timestamp}")
-
-    shared_events = SharedEvents()
-
-    def callback():
-        print("Auction creation process completed.")
-
-    run_create_auction_with_callback(auction_title, ending_date, gui_callback, should_stop, shared_events, callback, show_browser, selected_warehouse)
+    return event_id  # Return the event_id if you need it in the calling function
 
 if __name__ == "__main__":
     create_auction_main("Sample Auction", datetime.now(), show_browser=True, selected_warehouse="Maule Warehouse")
