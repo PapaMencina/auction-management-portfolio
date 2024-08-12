@@ -37,6 +37,10 @@
             const resultMessage = document.getElementById('result-message');
             const downloadButton = document.getElementById('download-csv');
 
+            // Add the show_browser value to formData
+            const showBrowser = document.getElementById('show_browser').checked;
+            formData.append('show_browser', showBrowser ? '1' : '0');
+
             fetch('{% url "auction:auction_formatter" %}', {
                 method: 'POST',
                 body: formData,
@@ -64,8 +68,8 @@
             downloadButton.style.display = 'block';
             downloadButton.onclick = function() {
                 window.location.href = '{% url "auction:download_formatted_csv" auction_id="0" %}'.replace('0', auctionId);
-    };
-}
+            };
+        }
     </script>
 </head>
 <body>
@@ -87,6 +91,10 @@
                 <option value="">Select an auction</option>
                 <!-- Options will be populated dynamically by JavaScript -->
             </select>
+        </div>
+        <div>
+            <label for="show_browser">Show Browser:</label>
+            <input type="checkbox" id="show_browser" name="show_browser" value="1">
         </div>
         <button type="submit">Format Auction</button>
     </form>

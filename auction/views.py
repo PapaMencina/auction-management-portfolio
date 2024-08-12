@@ -199,6 +199,7 @@ def auction_formatter_view(request):
     if request.method == 'POST':
         auction_id = request.POST.get('auction_id')
         selected_warehouse = request.POST.get('selected_warehouse')
+        show_browser = request.POST.get('show_browser') == '1'  # Convert to boolean
 
         config_manager.set_active_warehouse(selected_warehouse)
 
@@ -216,7 +217,8 @@ def auction_formatter_view(request):
                 selected_warehouse, 
                 gui_callback, 
                 should_stop, 
-                callback
+                callback,
+                show_browser  # Pass the show_browser parameter
             )
             
             if formatter and formatter.final_csv_path and os.path.exists(formatter.final_csv_path):

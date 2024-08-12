@@ -1,86 +1,59 @@
-from typing import List, Dict
-import ftplib
 import os
-import requests
 import threading
-import json
-import pandas as pd
-import concurrent.futures
-import shutil
-from PIL import Image, ExifTags
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 import re
+import ftplib
+import json
+import shutil
+from typing import List, Dict, Tuple
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+import requests
+import pandas as pd
+from PIL import Image, ExifTags
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.firefox.service import Service as FirefoxService
+from selenium.webdriver.firefox.options import Options as FirefoxOptions
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.common.action_chains import ActionChains
+from webdriver_manager.firefox import GeckoDriverManager
+
 from auction.utils import config_manager
 
-# Define the config path
+# Load configuration
 script_dir = os.path.dirname(os.path.abspath(__file__))
 config_path = os.path.join(script_dir, '..', 'utils', 'config.json')
+config_manager.load_config(config_path)
 
-# Ensure global variables are set after loading config
-config_manager.load_config(config_path)  # Load the configuration here
-
-# Now get the global variables
-AIRTABLE_TOKEN = config_manager.get_global_var('airtable_api_key')
-AIRTABLE_INVENTORY_BASE_ID = config_manager.get_global_var('airtable_inventory_base_id')
-AIRTABLE_INVENTORY_TABLE_ID = config_manager.get_global_var('airtable_inventory_table_id')
-AIRTABLE_SEND_TO_AUCTION_VIEW = config_manager.get_global_var('airtable_send_to_auction_view_id')
-
-newRecord = {}
-otherParams = {}
-
-def auction_formatter_main(auction_id, selected_warehouse, gui_callback, should_stop, callback):
-    if not isinstance(should_stop, threading.Event):
-        should_stop = threading.Event()
-
+def auction_formatter_main(auction_id, selected_warehouse, gui_callback, should_stop, callback, show_browser):
     config_manager.set_active_warehouse(selected_warehouse)
-
-    AIRTABLE_TOKEN = config_manager.get_warehouse_var('airtable_api_key')
-    AIRTABLE_INVENTORY_BASE_ID = config_manager.get_warehouse_var('airtable_inventory_base_id')
-    AIRTABLE_INVENTORY_TABLE_ID = config_manager.get_warehouse_var('airtable_inventory_table_id')
-    AIRTABLE_SEND_TO_AUCTION_VIEW = config_manager.get_warehouse_var('airtable_send_to_auction_view_id')
-
-    print(f"AIRTABLE_TOKEN: {AIRTABLE_TOKEN}")
-    print(f"AIRTABLE_INVENTORY_BASE_ID: {AIRTABLE_INVENTORY_BASE_ID}")
-    print(f"AIRTABLE_INVENTORY_TABLE_ID: {AIRTABLE_INVENTORY_TABLE_ID}")
-    print(f"AIRTABLE_SEND_TO_AUCTION_VIEW: {AIRTABLE_SEND_TO_AUCTION_VIEW}")
-
-    formatter = AuctionFormatter(
-        auction_id, 
-        gui_callback, 
-        should_stop, 
-        callback, 
-        selected_warehouse,
-        AIRTABLE_TOKEN,
-        AIRTABLE_INVENTORY_BASE_ID,
-        AIRTABLE_INVENTORY_TABLE_ID,
-        AIRTABLE_SEND_TO_AUCTION_VIEW
-    )
+    formatter = AuctionFormatter(auction_id, gui_callback, should_stop, callback, selected_warehouse, show_browser)
     formatter.run_auction_formatter()
-    return formatter  # Return the formatter instance
+    return formatter
 
-def get_extension_from_content_disposition(content_disposition):
+def get_extension_from_content_disposition(content_disposition: str) -> str:
     filename_match = re.search(r'filename="([^"]+)"', content_disposition)
     if filename_match:
         filename = filename_match.group(1)
         return os.path.splitext(filename)[1][1:]
     return None
 
-def get_image_orientation(img):
+def get_image_orientation(img: Image.Image) -> int:
     try:
-        if hasattr(img, '_getexif'):
-            exif = img._getexif()
-            if exif is not None:
-                for tag, value in exif.items():
-                    decoded_tag = ExifTags.TAGS.get(tag, tag)
-                    if decoded_tag == 'Orientation':
-                        return value
-        return None
-    except IOError:
-        print(f"Error opening image file {img}")
-        return None
+        exif = img._getexif()
+        if exif:
+            for tag, value in exif.items():
+                if ExifTags.TAGS.get(tag) == 'Orientation':
+                    return value
+    except (AttributeError, KeyError, IndexError):
+        pass
+    return None
 
-def download_image(url, file_name, gui_callback):
+def download_image(url: str, file_name: str, gui_callback) -> str:
     if not url or not file_name:
         gui_callback("Invalid input: URL and file_name are required")
         return None
@@ -94,7 +67,7 @@ def download_image(url, file_name, gui_callback):
             file_extension = content_type.split("/")[1]
         elif content_type.startswith('application/octet-stream'):
             file_extension = get_extension_from_content_disposition(response.headers.get('Content-Disposition', ''))
-            if not file_extension.lower() in ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp']:
+            if file_extension.lower() not in ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp']:
                 gui_callback(f"The URL for {file_name} does not point to a valid image file extension: {file_extension}")
                 return None
         else:
@@ -120,17 +93,10 @@ def download_image(url, file_name, gui_callback):
 
     return None
 
-def process_image(file_path, gui_callback, width_threshold=1024, dpi_threshold=72):
+def process_image(file_path: str, gui_callback, width_threshold: int = 1024, dpi_threshold: int = 72) -> None:
     try:
         with Image.open(file_path) as img:
-            exif = img._getexif()
-            orientation = None
-            if exif is not None:
-                for tag, value in exif.items():
-                    decoded_tag = ExifTags.TAGS.get(tag, tag)
-                    if decoded_tag == 'Orientation':
-                        orientation = value
-                        break
+            orientation = get_image_orientation(img)
 
             if orientation == 6:
                 img = img.rotate(-90, expand=True)
@@ -156,13 +122,9 @@ def process_image(file_path, gui_callback, width_threshold=1024, dpi_threshold=7
                 img.save(file_path)
 
     except Exception as e:
-        error_msg = f"Error processing image {file_path}: {e}"
-        gui_callback(error_msg)
-        pass
+        gui_callback(f"Error processing image {file_path}: {e}")
 
-    return None
-
-def convert_webp_to_jpeg(file_path, gui_callback):
+def convert_webp_to_jpeg(file_path: str, gui_callback) -> str:
     try:
         with Image.open(file_path) as im:
             if im.mode == 'P':
@@ -171,11 +133,10 @@ def convert_webp_to_jpeg(file_path, gui_callback):
             im.save(new_file_path, "JPEG")
             return new_file_path
     except Exception as e:
-        error_msg = (f"Error converting WebP to JPEG: {e}")
-        gui_callback(error_msg)
-        pass
+        gui_callback(f"Error converting WebP to JPEG: {e}")
+    return file_path
 
-def process_image_wrapper(image_path, gui_callback, should_stop):
+def process_image_wrapper(image_path: str, gui_callback, should_stop: threading.Event) -> str:
     if should_stop.is_set():
         return image_path
     if image_path.endswith(".webp"):
@@ -183,7 +144,7 @@ def process_image_wrapper(image_path, gui_callback, should_stop):
     process_image(image_path, gui_callback)
     return image_path
 
-def process_images_in_bulk(downloaded_images_bulk, gui_callback, should_stop):
+def process_images_in_bulk(downloaded_images_bulk: Dict[str, List[str]], gui_callback, should_stop: threading.Event) -> Dict[str, List[str]]:
     gui_callback("Processing Images...")
     all_image_paths = []
     record_id_map = {}
@@ -195,14 +156,7 @@ def process_images_in_bulk(downloaded_images_bulk, gui_callback, should_stop):
 
     processed_images = {}
     with ThreadPoolExecutor() as executor:
-        future_to_image = {}
-
-        for img_path in all_image_paths:
-            if should_stop.is_set():
-                break
-
-            future = executor.submit(process_image_wrapper, img_path, gui_callback, should_stop)
-            future_to_image[future] = img_path
+        future_to_image = {executor.submit(process_image_wrapper, img_path, gui_callback, should_stop): img_path for img_path in all_image_paths}
 
         for future in as_completed(future_to_image):
             if should_stop.is_set():
@@ -212,15 +166,13 @@ def process_images_in_bulk(downloaded_images_bulk, gui_callback, should_stop):
             try:
                 result = future.result()
                 record_id = record_id_map[img_path]
-                if record_id not in processed_images:
-                    processed_images[record_id] = []
-                processed_images[record_id].append(result)
+                processed_images.setdefault(record_id, []).append(result)
             except Exception as e:
                 gui_callback(f"Error processing image {img_path}: {e}")
 
     return processed_images
 
-def upload_image(file_path, gui_callback, should_stop, max_retries=3, retry_delay=10):
+def upload_image(file_path: str, gui_callback, should_stop: threading.Event, max_retries: int = 3, retry_delay: int = 10) -> str:
     attempt = 0
 
     while attempt < max_retries:
@@ -238,31 +190,30 @@ def upload_image(file_path, gui_callback, should_stop, max_retries=3, retry_dela
                 gui_callback(f"Failed to upload image: {e}")
         return None
 
-def format_subtitle(auction_count, msrp, other_notes):
-    msrp = str(msrp)
+def format_subtitle(auction_count: int, msrp: float, other_notes: str) -> str:
+    msrp_str = f"MSRP: ${msrp}"
     if auction_count >= 4:
-        final_msrp = f"MSRP: ${msrp}"
+        final_msrp = msrp_str
     elif auction_count == 3:
-        final_msrp = f"MSRP: ${msrp} ---"
+        final_msrp = f"{msrp_str} ---"
     elif auction_count == 2:
-        final_msrp = f"MSRP: ${msrp} --"
+        final_msrp = f"{msrp_str} --"
     else:
-        final_msrp = f"MSRP: ${msrp} -"
+        final_msrp = f"{msrp_str} -"
         
-    notes_str = f"NOTES: {other_notes}" if other_notes and other_notes != " " else ""
-    final_note = str(final_msrp + " " + notes_str)[:80]
-    return final_note
+    notes_str = f"NOTES: {other_notes}" if other_notes and other_notes.strip() else ""
+    return (final_msrp + " " + notes_str)[:80]
 
-def category_converter(category):
+def category_converter(category: str) -> int:
     category_dict = {
         2830472: "appliances",
-        2830485: ["arts, crafts & sewing","arts,crafts & sewing", "arts & crafts", "arts"],
+        2830485: ["arts, crafts & sewing", "arts,crafts & sewing", "arts & crafts", "arts"],
         339711: ["automotive", "automotive parts & accessories"],
         339747: "furniture",
         2830498: "baby products",
         2830511: "beauty & personal care",
         2830524: "cell phones & accessories",
-        2830537: ["clothing", "clothing,shoes & jewelry","clothing, shoes & jewelry"],
+        2830537: ["clothing", "clothing,shoes & jewelry", "clothing, shoes & jewelry"],
         2153220: ["comics", "collectibles"],
         339723: ["electronics", "computers & accessories"],
         2830563: "grocery & gourmet food",
@@ -301,68 +252,56 @@ def category_converter(category):
 
     return 162733
 
-def get_airtable_records_list(BASE: str, TABLE: str, VIEW: str, gui_callback, airtable_token) -> List[Dict]:
+def get_airtable_records_list(BASE: str, TABLE: str, VIEW: str, gui_callback, airtable_token: str) -> List[Dict]:
     gui_callback("Getting Airtable Records...")
     responseList = []
-    pages = [str(x) for x in range(1, 16)]
     offset = ""
-    data = {}
+    
     myHeaders = {
         "Authorization": f"Bearer {airtable_token}",
         "Content-Type": "application/json",
     }
 
-    for page in pages:
+    while True:
         try:
             url = f"https://api.airtable.com/v0/{BASE}/{TABLE}?view={VIEW}"
             if offset:
                 url += f"&offset={offset}"
 
             gui_callback(f"Requesting URL: {url}")
-            print(f"Requesting URL: {url}")
-            response = requests.get(url, params=data, headers=myHeaders)
-            if response.status_code != 200:
-                gui_callback(f"Error fetching data from Airtable: {response.status_code} {response.text}")
-                print(f"Error fetching data from Airtable: {response.status_code} {response.text}")
-                break
+            response = requests.get(url, headers=myHeaders)
+            response.raise_for_status()
 
             response_json = response.json()
             records = response_json.get("records", [])
             responseList.extend(records)
-            gui_callback(f"Page {page}: Retrieved {len(records)} records")
+            gui_callback(f"Retrieved {len(records)} records")
 
-            offset = response_json.get("offset", "")
+            offset = response_json.get("offset")
             if not offset:
                 break
         except Exception as e:
             gui_callback(f"Exception occurred: {e}")
-            print(f"Exception occurred: {e}")
             break
 
     gui_callback(f"Retrieved a total of {len(responseList)} records from Airtable")
-    print(f"Retrieved a total of {len(responseList)} records from Airtable")
     return responseList
 
-def text_shortener(inputText, strLen):
+def text_shortener(inputText: str, strLen: int) -> str:
     if len(inputText) > strLen:
         end = inputText.rfind(' ', 0, strLen)
-        if end == -1:
-            return inputText[:strLen].strip()
-        return inputText[:end].strip()
+        return inputText[:end if end != -1 else strLen].strip()
     return inputText
 
-def format_msrp(msrp):
-    try:
-        if msrp >= 15:
-            return "5.00"
-        elif msrp <= 10:
-            return "1.00"
-        else:
-            return "2.50"
-    except ValueError:
-        return ""
+def format_msrp(msrp: float) -> str:
+    if msrp >= 15:
+        return "5.00"
+    elif msrp <= 10:
+        return "1.00"
+    else:
+        return "2.50"
 
-def collect_image_urls(airtable_records, should_stop):
+def collect_image_urls(airtable_records: List[Dict], should_stop: threading.Event) -> List[tuple]:
     download_tasks = []
     for record in airtable_records:
         if should_stop.is_set():
@@ -379,54 +318,39 @@ def collect_image_urls(airtable_records, should_stop):
                 image_counter += 1
     return download_tasks
 
-def download_images_bulk(download_tasks, gui_callback, should_stop):
+def download_images_bulk(download_tasks: List[tuple], gui_callback, should_stop: threading.Event) -> Dict[str, List[str]]:
     gui_callback("Downloading Images...")
     image_paths = {}
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=7) as executor:
-        futures = []
+    with ThreadPoolExecutor(max_workers=7) as executor:
+        future_to_task = {executor.submit(download_image, url, file_name, gui_callback): (record_id, file_name) for record_id, url, file_name in download_tasks}
 
-        for record_id, image_url, file_name in download_tasks:
+        for future in as_completed(future_to_task):
             if should_stop.is_set():
                 break
 
-            future = executor.submit(download_image, image_url, file_name, gui_callback)
-            futures.append((record_id, future))
-
-        for record_id, future in futures:
-            if should_stop.is_set():
-                break
-
+            record_id, file_name = future_to_task[future]
             try:
                 downloaded_path = future.result()
                 if downloaded_path:
-                    if record_id not in image_paths:
-                        image_paths[record_id] = []
-                    image_paths[record_id].append(downloaded_path)
+                    image_paths.setdefault(record_id, []).append(downloaded_path)
             except Exception as e:
-                gui_callback(f"Error downloading image: {e}")
+                gui_callback(f"Error downloading image for {file_name}: {e}")
 
     return image_paths
 
-def upload_images_and_get_urls(downloaded_images, gui_callback, should_stop):
+def upload_images_and_get_urls(downloaded_images: Dict[str, List[str]], gui_callback, should_stop: threading.Event) -> Dict[str, List[str]]:
     gui_callback("Uploading Images...")
     uploaded_image_urls = {}
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-        futures = []
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        future_to_image = {executor.submit(upload_image, image_path, gui_callback, should_stop): (record_id, image_path) for record_id, image_paths in downloaded_images.items() for image_path in image_paths}
 
-        for record_id, image_paths in downloaded_images.items():
-            for image_path in image_paths:
-                if should_stop.is_set():
-                    return uploaded_image_urls
-
-                future = executor.submit(upload_image, image_path, gui_callback, should_stop)
-                futures.append((record_id, future))
-
-        for record_id, future in futures:
+        for future in as_completed(future_to_image):
             if should_stop.is_set():
                 return uploaded_image_urls
 
+            record_id, image_path = future_to_image[future]
             try:
                 url = future.result()
                 if url:
@@ -438,26 +362,24 @@ def upload_images_and_get_urls(downloaded_images, gui_callback, should_stop):
 
     return uploaded_image_urls
 
-def format_field(label, value):
+def format_field(label: str, value: str) -> str:
     return f"{label}: {value}" if value is not None and str(value).strip() else ""
 
-def get_image_url(airtable_record, count):
-    key = f"Image {count}"
-    return airtable_record.get("fields", {}).get(key, [{}])[0].get("url", "")
+def get_image_url(airtable_record: Dict, count: int) -> str:
+    return airtable_record.get("fields", {}).get(f"Image {count}", [{}])[0].get("url", "")
 
-def upload_file_via_ftp(file_name, local_file_path, gui_callback, should_stop, max_retries=3, remote_file_path="/airtableimages.702auctions.com/public_html/", server="702auctions.com", username="702auctionsftp@702auctions.com", password="Ronch420$"):
+def upload_file_via_ftp(file_name: str, local_file_path: str, gui_callback, should_stop: threading.Event, max_retries: int = 3, remote_file_path: str = "/airtableimages.702auctions.com/public_html/", server: str = "702auctions.com", username: str = "702auctionsftp@702auctions.com", password: str = "Ronch420$") -> str:
     retries = 0
     while retries < max_retries and not should_stop.is_set():
         try:
-            ftp = ftplib.FTP(server, username, password)
-            ftp.set_pasv(True)
-            ftp.cwd('/')
-            ftp.sendcmd('TYPE I')
-            remote_path_full = os.path.join(remote_file_path, file_name)
+            with ftplib.FTP(server, username, password) as ftp:
+                ftp.set_pasv(True)
+                ftp.cwd('/')
+                ftp.sendcmd('TYPE I')
+                remote_path_full = os.path.join(remote_file_path, file_name)
 
-            with open(local_file_path, 'rb') as file:
-                ftp.storbinary(f'STOR {remote_path_full}', file)
-            ftp.quit()
+                with open(local_file_path, 'rb') as file:
+                    ftp.storbinary(f'STOR {remote_path_full}', file)
 
             formatted_url = remote_path_full.replace("/public_html", "", 1).lstrip('/')
             return f"https://{formatted_url}"
@@ -469,21 +391,16 @@ def upload_file_via_ftp(file_name, local_file_path, gui_callback, should_stop, m
         except Exception as e:
             print(f"FTP upload error: {e}.")
             break
-        finally:
-            if 'ftp' in locals() and ftp.sock:
-                ftp.quit()
+
     print("Failed to upload after maximum retries.")
     return None
 
-def format_html_field(field_name, value):
-    if value:
-        return f"<b>{field_name}</b>: {value}<br>"
-    return ""
+def format_html_field(field_name: str, value: str) -> str:
+    return f"<b>{field_name}</b>: {value}<br>" if value else ""
 
-def process_single_record(airtable_record, uploaded_image_urls, Auction_ID, selected_warehouse):
+def process_single_record(airtable_record: Dict, uploaded_image_urls: Dict[str, List[str]], Auction_ID: str, selected_warehouse: str) -> Dict:
     try:
-        record_template = {}
-        newRecord = dict(record_template)
+        newRecord = {}
         newRecord["AuctionCount"] = airtable_record["fields"].get("Auction Count", "")
         newRecord["Photo Taker"] = airtable_record["fields"].get("Clerk", "")
         newRecord["Size"] = airtable_record["fields"].get("Size", "")
@@ -527,50 +444,32 @@ def process_single_record(airtable_record, uploaded_image_urls, Auction_ID, sele
         newRecord["Seller"] = "702Auctions"
         newRecord["EventID"] = Auction_ID
         
-        # Set Region based on selected warehouse
-        if selected_warehouse == "Maule Warehouse":
-            newRecord["Region"] = "88850842"
-        elif selected_warehouse == "Sunrise Warehouse":
-            newRecord["Region"] = "88850843"
-        else:
-            newRecord["Region"] = ""
+        newRecord["Region"] = "88850842" if selected_warehouse == "Maule Warehouse" else "88850843" if selected_warehouse == "Sunrise Warehouse" else ""
 
         newRecord["Source"] = "AMZ FC"
-        newRecord["IsTaxable"] = "TRUE".upper()
+        newRecord["IsTaxable"] = "TRUE"
         newRecord["Quantity"] = "1"
-        newRecord["Seller"] = "702Auctions"
         
         title = airtable_record["fields"]["Product Name"]
         if selected_warehouse == "Sunrise Warehouse":
             title = "OFFSITE " + title
-        title = text_shortener(title, 80)
+        newRecord["Title"] = text_shortener(title, 80)
         
-        newRecord["Title"] = title
-        category_airtable = category_converter(newRecord.get("Category_not_formatted", ""))
-        newRecord["Category"] = category_airtable if category_airtable else ""
+        newRecord["Category"] = category_converter(newRecord.get("Category_not_formatted", ""))
 
-        auction_count = newRecord.get("AuctionCount", 0)
-        if auction_count == 1:
-            newRecord["Price"] = "5.00"
-        elif auction_count == 2:
-            newRecord["Price"] = "2.50"
-        elif auction_count >= 3:
-            newRecord["Price"] = "1.00"
-        else:
-            newRecord["Price"] = "5.00"
+        auction_count = int(newRecord.get("AuctionCount", 0))
+        newRecord["Price"] = "5.00" if auction_count == 1 else "2.50" if auction_count == 2 else "1.00" if auction_count >= 3 else "5.00"
 
-        formatted_subtitle = format_subtitle(
-            newRecord.get("AuctionCount", ""),
-            newRecord.get("MSRP", ""),
+        newRecord["Subtitle"] = format_subtitle(
+            int(newRecord.get("AuctionCount", 0)),
+            float(newRecord.get("MSRP", 0)),
             newRecord.get("Other Notes", "")
         )
-        newRecord["Subtitle"] = formatted_subtitle if formatted_subtitle else ""
 
         record_id = airtable_record['id']
         if record_id in uploaded_image_urls:
-            for url in uploaded_image_urls[record_id]:
-                image_number = url.split('_')[-1].split('.')[0]
-                newRecord[f'Image_{image_number}'] = url
+            for i, url in enumerate(uploaded_image_urls[record_id], 1):
+                newRecord[f'Image_{i}'] = url
 
         newRecord['Success'] = True
         return newRecord
@@ -579,22 +478,15 @@ def process_single_record(airtable_record, uploaded_image_urls, Auction_ID, sele
         error_message = f"Error processing Lot Number {lot_number}: {e}"
         return {'Lot Number': lot_number, 'Failure Message': error_message, 'Success': False}
 
-def process_records_concurrently(airtable_records, uploaded_image_urls, gui_callback, auction_id, selected_warehouse, should_stop):
+def process_records_concurrently(airtable_records: List[Dict], uploaded_image_urls: Dict[str, List[str]], gui_callback, auction_id: str, selected_warehouse: str, should_stop: threading.Event) -> Tuple[List[Dict], List[Dict]]:
     gui_callback("Creating CSV...")
     processed_records = []
     failed_records = []
 
     with ThreadPoolExecutor() as executor:
-        futures = []
+        future_to_record = {executor.submit(process_single_record, record, uploaded_image_urls, auction_id, selected_warehouse): record for record in airtable_records}
 
-        for record in airtable_records:
-            if should_stop.is_set():
-                return processed_records, failed_records
-
-            future = executor.submit(process_single_record, record, uploaded_image_urls, auction_id, selected_warehouse)
-            futures.append(future)
-
-        for future in as_completed(futures):
+        for future in as_completed(future_to_record):
             if should_stop.is_set():
                 return processed_records, failed_records
 
@@ -610,13 +502,14 @@ def process_records_concurrently(airtable_records, uploaded_image_urls, gui_call
     gui_callback(f"Processed {len(processed_records)} records, {len(failed_records)} failed.")
     return processed_records, failed_records
 
-def failed_records_csv(failed_records, Auction_ID, gui_callback):
+def failed_records_csv(failed_records: List[Dict], Auction_ID: str, gui_callback) -> str:
     failed_dataframe = pd.DataFrame(failed_records, columns=['Lot Number', 'Failure Message'])
     download_path = os.path.join(get_resources_dir('failed_csv'), f'{Auction_ID}-FAILED.csv')
     failed_dataframe.to_csv(download_path, index=False)
     gui_callback(f'Failed records have been saved to {download_path}.')
+    return download_path
 
-def processed_records_to_df(processed_records, Auction_ID, gui_callback):
+def processed_records_to_df(processed_records: List[Dict], Auction_ID: str, gui_callback) -> str:
     df = pd.DataFrame(processed_records)
     column_order = ["EventID", "LotNumber", "Seller", "Category_not_formatted", "Category", "Region", "ListingType", "Currency",
                     "Title", "Subtitle", "Description", "Price", "Quantity", "IsTaxable", "Image_1", "Image_2", "Image_3", "Image_4",
@@ -626,7 +519,6 @@ def processed_records_to_df(processed_records, Auction_ID, gui_callback):
                     "Item Condition", "ID", "Amazon ID", "HiBid", "AuctionCount", "number"]
     df = df.reindex(columns=column_order, fill_value='')
     
-    # Define the directory path
     resources_dir = os.path.join(script_dir, '..', 'resources', 'processed_csv')
     os.makedirs(resources_dir, exist_ok=True)
     
@@ -636,23 +528,23 @@ def processed_records_to_df(processed_records, Auction_ID, gui_callback):
 
     return download_path
 
-def get_resources_dir(folder):
+def get_resources_dir(folder: str) -> str:
     return os.path.join('C:\\Users\\matt9\\Desktop\\Auction_script_current\\resources', folder)
 
-def organize_images(Auction_ID):
+def organize_images(Auction_ID: str) -> None:
     file_count = 0
     directory = get_resources_dir('product_images')
-    subfolder = get_resources_dir('hibid_images') + f'/hibid_{Auction_ID}'
+    subfolder = os.path.join(get_resources_dir('hibid_images'), f'hibid_{Auction_ID}')
 
     if os.path.isdir(subfolder):
         shutil.rmtree(subfolder)
     os.mkdir(subfolder)
 
     for file in os.listdir(directory):
-        if file.endswith("_1.jpeg") or file.endswith("_1.png") or file.endswith('_1.jpg'):
+        if file.endswith(("_1.jpeg", "_1.png", '_1.jpg')):
             shutil.move(os.path.join(directory, file), subfolder)
             file_count += 1
-        elif file.endswith('.jpg') or file.endswith("png") or file.endswith(".jpeg") or file.endswith(".webp"):
+        elif file.endswith(('.jpg', "png", ".jpeg", ".webp")):
             os.remove(os.path.join(directory, file))
 
 def check_continuation(func):
@@ -664,59 +556,262 @@ def check_continuation(func):
     return wrapper
 
 class AuctionFormatter:
-    def __init__(self, auction_id, gui_callback, should_stop, callback, selected_warehouse, airtable_token, inventory_base_id, inventory_table_id, send_to_auction_view):
+    def __init__(self, auction_id, gui_callback, should_stop, callback, selected_warehouse, show_browser):
         self.Auction_ID = auction_id
         self.gui_callback = gui_callback
-        self.should_stop = should_stop if isinstance(should_stop, threading.Event) else threading.Event()
+        self.should_stop = should_stop
         self.callback = callback
         self.selected_warehouse = selected_warehouse
+        self.show_browser = show_browser
         
-        self.AIRTABLE_TOKEN = airtable_token
-        self.AIRTABLE_INVENTORY_BASE_ID = inventory_base_id
-        self.AIRTABLE_INVENTORY_TABLE_ID = inventory_table_id
-        self.AIRTABLE_SEND_TO_AUCTION_VIEW = send_to_auction_view
-        self.final_csv_path = None  # New attribute to store the final CSV path
+        config_manager.set_active_warehouse(selected_warehouse)
+        
+        self.final_csv_path = None
 
-    def should_continue(self, should_stop, gui_callback, message):
-        if should_stop.is_set():
-            gui_callback(message)
+    def configure_driver(self, url):
+        firefox_options = FirefoxOptions()
+        if not self.show_browser:
+            firefox_options.add_argument("--headless")
+        driver = webdriver.Firefox(service=FirefoxService(GeckoDriverManager().install()), options=firefox_options)
+        driver.get(url)
+        return driver
+
+    def should_continue(self, message):
+        if self.should_stop.is_set():
+            self.gui_callback(message)
             return False
         return True
 
-    @check_continuation
+    def login_to_website(self, driver, username, password):
+        if not self.should_continue("Login operation stopped by user."):
+            return False
+
+        self.gui_callback("Logging In...")
+        try:
+            # Wait for the body element to be present
+            WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+            
+            # Explicitly wait for the username field to ensure the page is fully loaded
+            self.gui_callback("Waiting for username field to be present...")
+            WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.ID, "username")))
+            
+            # Locate the username field and input the username
+            self.gui_callback("Locating username field...")
+            username_field = driver.find_element(By.ID, "username")
+            username_field.clear()
+            username_field.send_keys(username)
+            
+            # Locate the password field and input the password
+            self.gui_callback("Locating password field...")
+            password_field = driver.find_element(By.ID, "password")
+            password_field.clear()
+            password_field.send_keys(password)
+
+            if not self.should_continue("Login operation stopped before finalizing."):
+                return False
+
+            # Submit the login form
+            self.gui_callback("Submitting login form...")
+            password_field.send_keys(Keys.RETURN)
+            
+            # Wait for the next page to load and confirm the login was successful
+            self.gui_callback("Waiting for login to complete...")
+            
+            # Wait for the page to load completely
+            WebDriverWait(driver, 30).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "body"))
+            )
+            
+            # Check for elements that should be present after login
+            try:
+                WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((By.LINK_TEXT, "Sign Out"))
+                )
+                self.gui_callback("Login successful.")
+                return True
+            except:
+                self.gui_callback("Login failed: Could not find 'Sign Out' link.")
+                return False
+
+        except Exception as e:
+            self.gui_callback(f"Login failed: Unexpected error. Error: {str(e)}")
+            return False
+
+    def upload_csv_to_website(self, driver, csv_path):
+        try:
+            # Navigate to the ImportCSV page
+            self.gui_callback("Navigating to ImportCSV page...")
+            driver.get("https://bid.702auctions.com/Admin/ImportCSV")
+            
+            # Wait for the page to load
+            WebDriverWait(driver, 30).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "body"))
+            )
+            
+            # Check if we're on the correct page
+            if "ImportCSV" not in driver.current_url:
+                self.gui_callback("Failed to navigate to ImportCSV page. Current URL: " + driver.current_url)
+                return False
+            
+            # Wait for the file input element to be present
+            self.gui_callback("Waiting for file input element...")
+            file_input = WebDriverWait(driver, 20).until(
+                EC.presence_of_element_located((By.ID, "csvFile"))
+            )
+            file_input.send_keys(csv_path)
+            
+            self.gui_callback("Locating submit button...")
+            submit_button = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.CSS_SELECTOR, "input[type='submit'][value='Upload']"))
+            )
+            submit_button.click()
+            
+            self.gui_callback("Waiting for upload confirmation...")
+            WebDriverWait(driver, 30).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, ".alert-success"))
+            )
+            
+            self.gui_callback("CSV file uploaded successfully.")
+            return True
+        except Exception as e:
+            self.gui_callback(f"Failed to upload CSV: {str(e)}")
+            return False
+
+    def upload_csv_to_website(self, driver, csv_path):
+        try:
+            # Navigate to the ImportCSV page
+            self.gui_callback("Navigating to ImportCSV page...")
+            driver.get("https://bid.702auctions.com/Admin/ImportCSV")
+            
+            # Wait for the page to load
+            WebDriverWait(driver, 30).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "body"))
+            )
+            
+            # Check if we're on the correct page
+            if "ImportCSV" not in driver.current_url:
+                self.gui_callback("Failed to navigate to ImportCSV page. Current URL: " + driver.current_url)
+                return False
+            
+            # Update the email address
+            self.gui_callback("Updating email address...")
+            try:
+                email_input = WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((By.ID, "Text1"))
+                )
+                email_input.clear()
+                email_input.send_keys("matthew@702auctions.com")
+                time.sleep(2)  # Wait for 2 seconds after updating the email
+                self.gui_callback("Email address updated successfully.")
+            except Exception as e:
+                self.gui_callback(f"Failed to update email address: {str(e)}")
+            
+            # Locate and interact with the file input
+            self.gui_callback("Uploading CSV file...")
+            try:
+                # Try multiple methods to locate the file input
+                file_input = None
+                try:
+                    file_input = driver.find_element(By.ID, "CSVFile")
+                except:
+                    try:
+                        file_input = driver.find_element(By.NAME, "CSVFile")
+                    except:
+                        file_input = driver.find_element(By.CSS_SELECTOR, "input[type='file']")
+                
+                if file_input:
+                    # Ensure the file input is visible and enabled
+                    driver.execute_script("arguments[0].style.display = 'block';", file_input)
+                    driver.execute_script("arguments[0].style.visibility = 'visible';", file_input)
+                    driver.execute_script("arguments[0].style.opacity = 1;", file_input)
+                    
+                    # Send the file path
+                    file_input.send_keys(csv_path)
+                    self.gui_callback("CSV file selected successfully.")
+                else:
+                    raise Exception("Could not locate file input element")
+            except Exception as e:
+                self.gui_callback(f"Failed to select CSV file: {str(e)}")
+                return False
+            
+            # Click the "Upload CSV" button
+            self.gui_callback("Clicking Upload CSV button...")
+            try:
+                upload_button = WebDriverWait(driver, 10).until(
+                    EC.element_to_be_clickable((By.CSS_SELECTOR, "input[type='submit'][value='Upload CSV']"))
+                )
+                ActionChains(driver).move_to_element(upload_button).click().perform()
+                self.gui_callback("Upload CSV button clicked.")
+            except Exception as e:
+                self.gui_callback(f"Failed to click Upload CSV button: {str(e)}")
+                return False
+            
+            # Wait for the upload confirmation
+            self.gui_callback("Waiting for upload confirmation...")
+            try:
+                WebDriverWait(driver, 60).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, ".alert-success"))
+                )
+                self.gui_callback("CSV file uploaded successfully.")
+                return True
+            except Exception as e:
+                self.gui_callback(f"Failed to confirm CSV upload: {str(e)}")
+                return False
+
+        except Exception as e:
+            self.gui_callback(f"Failed to upload CSV: {str(e)}")
+            return False
+
     def run_auction_formatter(self):
         try:
-            print(f"AIRTABLE_TOKEN: {self.AIRTABLE_TOKEN}")
-            print(f"AIRTABLE_INVENTORY_BASE_ID: {self.AIRTABLE_INVENTORY_BASE_ID}")
-            print(f"AIRTABLE_INVENTORY_TABLE_ID: {self.AIRTABLE_INVENTORY_TABLE_ID}")
-            print(f"AIRTABLE_SEND_TO_AUCTION_VIEW: {self.AIRTABLE_SEND_TO_AUCTION_VIEW}")
-
             airtable_records = get_airtable_records_list(
-                self.AIRTABLE_INVENTORY_BASE_ID, 
-                self.AIRTABLE_INVENTORY_TABLE_ID, 
-                self.AIRTABLE_SEND_TO_AUCTION_VIEW, 
-                self.gui_callback, 
-                self.AIRTABLE_TOKEN
+                config_manager.get_warehouse_var('airtable_inventory_base_id'),
+                config_manager.get_warehouse_var('airtable_inventory_table_id'),
+                config_manager.get_warehouse_var('airtable_send_to_auction_view_id'),
+                self.gui_callback,
+                config_manager.get_warehouse_var('airtable_api_key')
             )
-            if not airtable_records:
-                self.gui_callback("No records retrieved from Airtable.")
-                return
 
             download_tasks = collect_image_urls(airtable_records, self.should_stop)
-            downloaded_images_bulk = download_images_bulk(download_tasks, self.gui_callback, self.should_stop)
-            processed_images = process_images_in_bulk(downloaded_images_bulk, self.gui_callback, self.should_stop)
+            downloaded_images = download_images_bulk(download_tasks, self.gui_callback, self.should_stop)
+            processed_images = process_images_in_bulk(downloaded_images, self.gui_callback, self.should_stop)
             uploaded_image_urls = upload_images_and_get_urls(processed_images, self.gui_callback, self.should_stop)
-            
+
             processed_records, failed_records = process_records_concurrently(
-                airtable_records, uploaded_image_urls, self.gui_callback, self.Auction_ID, self.selected_warehouse, self.should_stop
+                airtable_records, uploaded_image_urls, self.gui_callback, 
+                self.Auction_ID, self.selected_warehouse, self.should_stop
             )
 
-            if not processed_records:
-                self.gui_callback("No records processed successfully.")
-                return
+            if processed_records:
+                csv_path = processed_records_to_df(processed_records, self.Auction_ID, self.gui_callback)
+                self.final_csv_path = self.format_final_csv(csv_path)
 
-            unformatted_csv_path = processed_records_to_df(processed_records, self.Auction_ID, self.gui_callback)
-            self.final_csv_path = self.format_final_csv(unformatted_csv_path)
+            if self.final_csv_path:
+                website_url = "https://bid.702auctions.com/Account/LogOn"
+                username = config_manager.get_warehouse_var('bid_username')
+                password = config_manager.get_warehouse_var('bid_password')
+
+                driver = self.configure_driver(website_url)
+                
+                login_success = self.login_to_website(driver, username, password)
+                
+                if login_success:
+                    self.gui_callback("Login successful. Attempting to upload CSV...")
+                    csv_filename = f"{self.Auction_ID}.csv"
+                    csv_path = os.path.join("C:\\Users\\matt9\\Desktop\\auction_webapp\\auction\\resources\\processed_csv", csv_filename)
+                    if os.path.exists(csv_path):
+                        upload_success = self.upload_csv_to_website(driver, csv_path)
+                        if upload_success:
+                            self.gui_callback(f"CSV uploaded successfully to 702 Auctions.")
+                        else:
+                            self.gui_callback(f"CSV upload to 702 Auctions failed.")
+                    else:
+                        self.gui_callback(f"CSV file not found at {csv_path}")
+                else:
+                    self.gui_callback(f"Login to 702 Auctions failed.")
+                
+                self.gui_callback("Final URL: " + driver.current_url)
+                driver.quit()
 
             if failed_records:
                 self.failed_records_csv_filepath = failed_records_csv(failed_records, self.Auction_ID, self.gui_callback)
@@ -743,14 +838,13 @@ class AuctionFormatter:
 
             final_data = pd.concat([top_50_items, remaining_items]).reset_index(drop=True)
             
-            resources_dir = os.path.join(script_dir, '..', 'resources', 'processed_csv')
+            resources_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'resources', 'processed_csv')
             os.makedirs(resources_dir, exist_ok=True)
 
             output_file_path = os.path.join(resources_dir, f'{self.Auction_ID}.csv')
             final_data.to_csv(output_file_path, index=False)
 
             self.gui_callback(f"Formatted data saved to {output_file_path}")
-            self.final_csv_path = output_file_path  # Store the path
             return output_file_path
         except Exception as e:
             self.gui_callback(f"Error formatting final CSV: {e}")
