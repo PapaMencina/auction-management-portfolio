@@ -5,6 +5,7 @@ import os
 import re
 import json
 import threading
+from datetime import datetime, timedelta
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
@@ -185,14 +186,15 @@ def transform_csv_with_fixed_lines(input_csv_path):
     input_df['Title'] = input_df['Title'].apply(lambda x: truncate_title(remove_special_characters(x.replace('|', ' '))))
     input_df['Description'] = input_df['HiBid'].apply(lambda x: remove_special_characters(x.replace('|', ' ')))
 
-    transformed_df = pd.DataFrame()
-    transformed_df['Lot Number'] = input_df['LotNumber']
-    transformed_df['Seller Code'] = 1234
-    transformed_df['Description'] = input_df['Description']
-    transformed_df['Quantity'] = 1
-    transformed_df['Start Bid Each'] = 5
-    transformed_df['Sale Order'] = input_df.index + 3
-    transformed_df['Title'] = input_df['Title']
+    transformed_df = pd.DataFrame({
+        'Lot Number': input_df['LotNumber'],
+        'Seller Code': 1234,
+        'Description': input_df['Description'],
+        'Quantity': 1,
+        'Start Bid Each': 5,
+        'Sale Order': input_df.index + 3,
+        'Title': input_df['Title']
+    })
 
     final_df = pd.concat([fixed_lines_df, transformed_df], ignore_index=True)
     lot_number_list = list(final_df['Lot Number'])
@@ -201,7 +203,10 @@ def transform_csv_with_fixed_lines(input_csv_path):
         print("Lot number list is empty.")
         return None, None, None, None
 
-    output_csv_filename = get_resources_dir('hibid_csv') + f'/{auction_id}_hibid.csv'
+    # Update the output path to use the Django project structure
+    hibid_csv_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'resources', 'hibid_csv')
+    os.makedirs(hibid_csv_dir, exist_ok=True)
+    output_csv_filename = os.path.join(hibid_csv_dir, f'{auction_id}_hibid.csv')
     transformed_csv_path = os.path.abspath(output_csv_filename)
     final_df.to_csv(transformed_csv_path, index=False)
 
@@ -662,8 +667,9 @@ def format_ending_date(ending_date, gui_callback):
     date_with_fixed_time = date_object.replace(hour=18, minute=30)
 
     if date_with_fixed_time < datetime.now():
-        gui_callback("The date must be after today's date.")
-        return None, None
+        gui_callback("Warning: The ending date is in the past. Using tomorrow's date instead.")
+        date_with_fixed_time = datetime.now() + timedelta(days=1)
+        date_with_fixed_time = date_with_fixed_time.replace(hour=18, minute=30)
 
     formatted_ending_date = date_with_fixed_time.strftime('%m/%d/%Y %I:%M %p')
     formatted_date_only = date_with_fixed_time.strftime('%m/%d/%Y')
@@ -693,8 +699,11 @@ def run_upload_to_hibid(auction_id, ending_date, auction_title, gui_callback, sh
             gui_callback("Process stopped by user after login.")
             return
 
-        input_csv_path = os.path.join(os.path.expanduser('~'), 'Downloads', f'{auction_id}.csv')
+        # New input CSV path logic
+        processed_csv_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'resources', 'processed_csv')
+        input_csv_path = os.path.join(processed_csv_dir, f'{auction_id}.csv')
         gui_callback(f"Input CSV Path: {input_csv_path}")
+
         todays_date = datetime.now().strftime("%m/%d/%Y")
 
         formatted_ending_date, formatted_date_only = format_ending_date(ending_date, gui_callback)
@@ -706,14 +715,6 @@ def run_upload_to_hibid(auction_id, ending_date, auction_title, gui_callback, sh
 
         number_of_lots, auction_id, transformed_csv_path, lot_number_list = transform_csv_with_fixed_lines(input_csv_path)
         gui_callback(f"Number of lots: {number_of_lots}, auction_id: {auction_id}, transformed_csv_path: {transformed_csv_path}")
-
-        if number_of_lots is None or auction_id is None or transformed_csv_path is None or lot_number_list is None:
-            gui_callback("Error transforming CSV.")
-            return
-
-        if should_stop.is_set():
-            gui_callback("Process stopped by user before details page.")
-            return
 
         details_page(driver, auction_title, auction_id, formatted_date_only, number_of_lots, formatted_ending_date, gui_callback, selected_warehouse)
         time.sleep(2)
