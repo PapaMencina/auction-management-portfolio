@@ -1,4 +1,6 @@
 import json
+import os
+from .utils import get_resource_path  # Make sure this import path is correct
 
 config = {}
 active_warehouse = None
@@ -8,6 +10,11 @@ def load_config(config_path, warehouse_name=None):
     try:
         with open(config_path, 'r') as f:
             config = json.load(f)
+        
+        # Update file_path_702_logo for each warehouse
+        for warehouse in config['warehouses'].values():
+            warehouse['file_path_702_logo'] = get_resource_path('bid_stock_photo', '702_logo.png')
+        
         print("Configuration loaded successfully")
         if warehouse_name:
             set_active_warehouse(warehouse_name)

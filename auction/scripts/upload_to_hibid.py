@@ -29,6 +29,29 @@ def upload_to_hibid_main(auction_id, ending_date, auction_title, gui_callback, s
 if __name__ == "__main__":
     upload_to_hibid_main("sample_auction_id", "2023-12-31 18:30:00", "Sample Auction Title", print, threading.Event(), lambda: print("Callback"), 1, "sample_username", "sample_password", "Maule Warehouse")
 
+def get_resource_path(resource_type, filename=None):
+    base_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'auction', 'resources')
+    
+    resource_paths = {
+        'processed_csv': os.path.join(base_path, 'processed_csv'),
+        'hibid_csv': os.path.join(base_path, 'hibid_csv'),
+        'hibid_images': os.path.join(base_path, 'hibid_images'),
+        'bid_stock_photo': os.path.join(base_path, 'bid_stock_photo'),
+        'downloads': os.path.join(base_path, 'downloads'),
+    }
+    
+    if resource_type not in resource_paths:
+        raise ValueError(f"Unknown resource type: {resource_type}")
+    
+    path = resource_paths[resource_type]
+    
+    if filename:
+        path = os.path.join(path, filename)
+    
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    
+    return path
+
 def get_resources_dir(folder):
     base_dir = os.path.abspath("C:\\Users\\matt9\\Desktop\\Auction_script_current\\resources")
     return os.path.join(base_dir, folder)
@@ -51,7 +74,7 @@ def configure_driver(url, show_browser, gui_callback):
     firefox_options = FirefoxOptions()
     firefox_options.set_preference("browser.download.folderList", 2)
     firefox_options.set_preference("browser.download.manager.showWhenStarting", False)
-    firefox_options.set_preference("browser.download.dir", get_resources_dir('downloads'))
+    firefox_options.set_preference("browser.download.dir", get_resource_path('downloads'))
     firefox_options.set_preference("browser.helperApps.neverAsk.saveToDisk", "image/jpeg")
 
     if show_browser == 0:
@@ -286,7 +309,7 @@ def description(number_of_lots, ending_date, selected_warehouse):
 def check_image(auction_id, current_lot, gui_callback):
     possible_extensions = [".jpeg", ".jpg", ".JPEG", ".JPG", ".png"]
     folder = 'hibid stock' if current_lot in [1, 2] else f'hibid_{auction_id}'
-    base_file_path = os.path.join(get_resources_dir('hibid_images'), folder, f'{current_lot}_1')
+    base_file_path = os.path.join(get_resource_path('hibid_images', folder), f'{current_lot}_1')
 
     for ext in possible_extensions:
         file_path = base_file_path + ext
@@ -326,7 +349,7 @@ def details_page(driver, auction_title, auction_id, formatted_date_only, number_
         gui_callback('Loading Details page...')
         auction_link_url = f'https://bid.702auctions.com/Event/Details/{auction_id}?utm_source=auction&utm_medium=linkclick&utm_campaign=hibid'
         browse_link_url = f'https://bid.702auctions.com/Browse?utm_source=browse_all&utm_medium=linkclick&utm_campaign=hibid'
-        file_path_702_logo = get_resources_dir('bid_stock_photo\\702_logo.png')
+        file_path_702_logo = get_resource_path('bid_stock_photo', '702_logo.png')
 
         fill_text_field(driver, By.ID, "name", auction_title)
         time.sleep(1)
@@ -449,7 +472,7 @@ def click_import_lots_button(driver):
 
 def save_screenshot(driver, name="screenshot.png"):
     timestamp = time.strftime("%Y%m%d-%H%M%S")
-    filepath = os.path.join(os.path.expanduser('~'), 'Downloads', f"{name}_{timestamp}.png")
+    filepath = get_resource_path('downloads', f"{name}_{timestamp}.png")
     driver.save_screenshot(filepath)
     print(f"Screenshot saved to {filepath}")
 
@@ -681,7 +704,6 @@ def run_upload_to_hibid(auction_id, ending_date, auction_title, gui_callback, sh
     try:
         gui_callback("Starting the upload process...")
 
-        # Check if username or password is None
         if username is None or password is None:
             gui_callback("Error: Username or password is None. Please check your configuration.")
             return
@@ -699,9 +721,7 @@ def run_upload_to_hibid(auction_id, ending_date, auction_title, gui_callback, sh
             gui_callback("Process stopped by user after login.")
             return
 
-        # New input CSV path logic
-        processed_csv_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'resources', 'processed_csv')
-        input_csv_path = os.path.join(processed_csv_dir, f'{auction_id}.csv')
+        input_csv_path = get_resource_path('processed_csv', f'{auction_id}.csv')
         gui_callback(f"Input CSV Path: {input_csv_path}")
 
         todays_date = datetime.now().strftime("%m/%d/%Y")
