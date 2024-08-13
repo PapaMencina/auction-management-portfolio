@@ -4,12 +4,13 @@ import pandas as pd
 import os
 import re
 import json
+import threading
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import NoSuchElementException, TimeoutException, WebDriverException, StaleElementReferenceException
+from selenium.common.exceptions import NoSuchElementException, TimeoutException, WebDriverException, StaleElementReferenceException, ElementClickInterceptedException
 from selenium.webdriver.support.ui import Select
 from selenium.webdriver.firefox.service import Service as FirefoxService
 from selenium.webdriver.firefox.options import Options as FirefoxOptions
@@ -17,15 +18,15 @@ from webdriver_manager.firefox import GeckoDriverManager
 from auction.utils import config_manager
 
 # Load configurations from the config_manager
-USER_NAME = config_manager.get_global_var('hibid_user_name')
-PASSWORD = config_manager.get_global_var('hibid_password')
+# USER_NAME = config_manager.get_global_var('hibid_user_name')
+# PASSWORD = config_manager.get_global_var('hibid_password')
 BASE_URL = "https://www.auctionflex360.com/#/organization/5676/auctions/new"
 
-def upload_to_hibid_main(auction_id, ending_date, auction_title, gui_callback, should_stop, callback, show_browser, selected_warehouse):
-    run_upload_to_hibid(auction_id, ending_date, auction_title, gui_callback, should_stop, callback, show_browser, USER_NAME, PASSWORD, selected_warehouse)
+def upload_to_hibid_main(auction_id, ending_date, auction_title, gui_callback, should_stop, callback, show_browser, username, password, selected_warehouse):
+    run_upload_to_hibid(auction_id, ending_date, auction_title, gui_callback, should_stop, callback, show_browser, username, password, selected_warehouse)
 
 if __name__ == "__main__":
-    upload_to_hibid_main("sample_auction_id", "2023-12-31 18:30:00", "Sample Auction Title", print, lambda: False, lambda: print("Callback"), 1, "Maule Warehouse")
+    upload_to_hibid_main("sample_auction_id", "2023-12-31 18:30:00", "Sample Auction Title", print, threading.Event(), lambda: print("Callback"), 1, "sample_username", "sample_password", "Maule Warehouse")
 
 def get_resources_dir(folder):
     base_dir = os.path.abspath("C:\\Users\\matt9\\Desktop\\Auction_script_current\\resources")
@@ -45,7 +46,7 @@ fixed_lines_df = pd.DataFrame({
     "Sale Order": [1, 2]
 })
 
-def configure_driver(url, show_browser):
+def configure_driver(url, show_browser, gui_callback):
     firefox_options = FirefoxOptions()
     firefox_options.set_preference("browser.download.folderList", 2)
     firefox_options.set_preference("browser.download.manager.showWhenStarting", False)
@@ -54,87 +55,82 @@ def configure_driver(url, show_browser):
 
     if show_browser == 0:
         firefox_options.add_argument("--headless")
-        firefox_options.add_argument("--window-size=1920x1080")
+    firefox_options.add_argument("--window-size=1920x1080")
 
+    gui_callback("Configuring WebDriver...")
     driver = webdriver.Firefox(service=FirefoxService(GeckoDriverManager().install()), options=firefox_options)
+    driver.set_page_load_timeout(60)  # Increase timeout to 60 seconds
+    gui_callback(f"Navigating to {url}")
     driver.get(url)
     return driver
 
 def login(driver, username, password, gui_callback, should_stop):
     try:
         driver.get("https://www.auctionflex360.com/#/login")
-        gui_callback("Page loaded.")
-        print("Page loaded.")
+        gui_callback("Navigating to login page.")
 
-        # Wait for the email field to be present
-        email_field = WebDriverWait(driver, 15).until(
-            EC.presence_of_element_located((By.NAME, "email"))
-        )
-        gui_callback("Email field found.")
-        print("Email field found.")
-        
-        # Enter the email
+        WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+        gui_callback("Page loaded.")
+
+        if "login" not in driver.current_url.lower():
+            gui_callback(f"Unexpected URL after navigation: {driver.current_url}")
+            return False
+
+        # Check if username or password is None
+        if username is None or password is None:
+            gui_callback("Error: Username or password is None. Please check your configuration.")
+            return False
+
+        try:
+            email_field = WebDriverWait(driver, 30).until(EC.visibility_of_element_located((By.NAME, "email")))
+            gui_callback("Email field found.")
+        except TimeoutException:
+            gui_callback("Email field not found within 30 seconds.")
+            return False
+
         email_field.clear()
         email_field.send_keys(username)
         gui_callback(f"Email entered: {username}")
-        print(f"Email entered: {username}")
 
-        # Wait for the password field to be present
-        password_field = WebDriverWait(driver, 15).until(
-            EC.presence_of_element_located((By.NAME, "password"))
-        )
-        gui_callback("Password field found.")
-        print("Password field found.")
+        try:
+            password_field = WebDriverWait(driver, 30).until(EC.visibility_of_element_located((By.NAME, "password")))
+            gui_callback("Password field found.")
+        except TimeoutException:
+            gui_callback("Password field not found within 30 seconds.")
+            return False
 
-        # Enter the password
         password_field.clear()
         password_field.send_keys(password)
         gui_callback("Password entered.")
-        print("Password entered.")
 
         # Wait for the preloader to disappear
-        WebDriverWait(driver, 15).until(
-            EC.invisibility_of_element_located((By.CLASS_NAME, "preloader"))
-        )
-        gui_callback("Preloader disappeared.")
-        print("Preloader disappeared.")
-
-        # Wait for the login button to be clickable and click it
-        login_button = WebDriverWait(driver, 15).until(
-            EC.element_to_be_clickable((By.XPATH, "//input[@type='submit'][@value='Log In']"))
-        )
-        login_button.click()
-        gui_callback("Login button clicked.")
-        print("Login button clicked.")
-
-        # Wait for some time to allow login to process
-        time.sleep(5)
-
-        # Check for any validation messages
-        validation_error = driver.execute_script("return document.querySelector('.login-error')?.innerText")
-        if validation_error:
-            gui_callback(f"Login failed with validation error: {validation_error}")
-            print(f"Login failed with validation error: {validation_error}")
+        try:
+            WebDriverWait(driver, 30).until(EC.invisibility_of_element_located((By.CLASS_NAME, "preloader")))
+            gui_callback("Preloader disappeared.")
+        except TimeoutException:
+            gui_callback("Preloader did not disappear within 30 seconds.")
             return False
 
-        # Check if login was successful by examining the current URL
-        current_url = driver.current_url
-        gui_callback(f"Current URL after login check: {current_url}")
-        print(f"Current URL after login check: {current_url}")
-        if "/organization/" in current_url:
+        try:
+            login_button = WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, "//input[@type='submit'][@value='Log In']")))
+            login_button.click()
+            gui_callback("Login button clicked.")
+        except (TimeoutException, ElementClickInterceptedException) as e:
+            gui_callback(f"Error clicking login button: {str(e)}")
+            return False
+
+        try:
+            WebDriverWait(driver, 30).until(EC.url_contains("/organization/"))
+            gui_callback("Login successful.")
             return True
-        else:
-            gui_callback("Login failed or redirection issue.")
-            print("Login failed or redirection issue.")
+        except TimeoutException:
+            gui_callback("Login process didn't complete within 30 seconds.")
             return False
 
-    except TimeoutException:
-        gui_callback("Login fields or button not found within the timeout period.")
-        print("Login fields or button not found within the timeout period.")
-        return False
     except Exception as e:
-        gui_callback(f"Login Exception: {e}")
-        print(f"Login Exception: {e}")
+        gui_callback(f"Unexpected error during login: {str(e)}")
+        import traceback
+        gui_callback(f"Traceback: {traceback.format_exc()}")
         return False
 
 def select_dropdown_options(driver, mappings, gui_callback):
@@ -295,13 +291,13 @@ def check_image(auction_id, current_lot, gui_callback):
     gui_callback(f'Image for lot {current_lot} not found(function).')
     return None
 
-def handle_url_check(driver, page, fallback_url, gui_callback, should_stop):
+def handle_url_check(driver, page, fallback_url, gui_callback, should_stop, username, password):
     current_url = driver.current_url
     if should_stop.is_set():
         return
     if 'login' in current_url:
         gui_callback("Detected login page. Re-logging in.")
-        login(driver, USER_NAME, PASSWORD, gui_callback, should_stop)
+        login(driver, username, password, gui_callback, should_stop)
         time.sleep(2)
         if 'organization' not in current_url:
             try:
@@ -674,73 +670,86 @@ def format_ending_date(ending_date, gui_callback):
 
     return formatted_ending_date, formatted_date_only
 
-from selenium.common.exceptions import WebDriverException
-
 def run_upload_to_hibid(auction_id, ending_date, auction_title, gui_callback, should_stop, callback, show_browser, username, password, selected_warehouse):
     driver = None
     try:
+        gui_callback("Starting the upload process...")
+
+        # Check if username or password is None
+        if username is None or password is None:
+            gui_callback("Error: Username or password is None. Please check your configuration.")
+            return
+
+        driver = configure_driver(BASE_URL, show_browser, gui_callback)
+        gui_callback("WebDriver configured.")
+
+        login_successful = login(driver, username, password, gui_callback, should_stop)
+        
+        if not login_successful:
+            gui_callback("Login failed. Stopping the process.")
+            return
+
         if should_stop.is_set():
+            gui_callback("Process stopped by user after login.")
             return
 
         input_csv_path = os.path.join(os.path.expanduser('~'), 'Downloads', f'{auction_id}.csv')
         gui_callback(f"Input CSV Path: {input_csv_path}")
-        print(f"Input CSV Path: {input_csv_path}")
         todays_date = datetime.now().strftime("%m/%d/%Y")
 
         formatted_ending_date, formatted_date_only = format_ending_date(ending_date, gui_callback)
-        print(f"Formatted ending date: {formatted_ending_date}, formatted date only: {formatted_date_only}")
+        gui_callback(f"Formatted ending date: {formatted_ending_date}, formatted date only: {formatted_date_only}")
 
         if should_stop.is_set():
+            gui_callback("Process stopped by user before CSV transformation.")
             return
 
         number_of_lots, auction_id, transformed_csv_path, lot_number_list = transform_csv_with_fixed_lines(input_csv_path)
-        print(f"Number of lots: {number_of_lots}, auction_id: {auction_id}, transformed_csv_path: {transformed_csv_path}")
+        gui_callback(f"Number of lots: {number_of_lots}, auction_id: {auction_id}, transformed_csv_path: {transformed_csv_path}")
 
         if number_of_lots is None or auction_id is None or transformed_csv_path is None or lot_number_list is None:
             gui_callback("Error transforming CSV.")
             return
 
-        driver = configure_driver(BASE_URL, show_browser)
-        login_successful = login(driver, username, password, gui_callback, should_stop)
-
-        if should_stop.is_set() or not login_successful:
+        if should_stop.is_set():
+            gui_callback("Process stopped by user before details page.")
             return
-        
-        # Add a check right after the login
-        current_url = driver.current_url
-        print(f"Current URL after login check: {current_url}")
-        gui_callback(f"Current URL after login check: {current_url}")
 
         details_page(driver, auction_title, auction_id, formatted_date_only, number_of_lots, formatted_ending_date, gui_callback, selected_warehouse)
         time.sleep(2)
 
         if should_stop.is_set():
+            gui_callback("Process stopped by user before settings page.")
             return
 
         hibiduploadsettings_page(driver, formatted_ending_date, todays_date, gui_callback, selected_warehouse)
         time.sleep(2)
 
         if should_stop.is_set():
+            gui_callback("Process stopped by user before lots page.")
             return
 
         lots_page(driver, transformed_csv_path, auction_id, lot_number_list, gui_callback, should_stop)
         time.sleep(2)
 
         if should_stop.is_set():
+            gui_callback("Process stopped by user before submitting auction.")
             return
 
         submit_auction(driver, gui_callback)
+        gui_callback("Upload process completed successfully.")
+
     except WebDriverException as e:
         gui_callback(f"Selenium WebDriver error: {e}")
-        print(f"Selenium WebDriver error: {e}")
     except Exception as e:
-        gui_callback(f"Error: {e}")
-        print(f"Error: {e}")
+        gui_callback(f"Unexpected error: {e}")
+        import traceback
+        gui_callback(f"Traceback: {traceback.format_exc()}")
     finally:
         if driver:
+            gui_callback("Closing the browser...")
             try:
                 driver.quit()
-            except WebDriverException:
-                gui_callback("Error closing the Selenium WebDriver.")
-                print("Error closing the Selenium WebDriver.")
+            except Exception as e:
+                gui_callback(f"Error while closing the browser: {str(e)}")
         callback()

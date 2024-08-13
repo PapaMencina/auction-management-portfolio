@@ -9,6 +9,7 @@ import logging
 import threading
 import json
 import os
+from threading import Thread, Event
 from datetime import datetime
 from auction.utils import config_manager
 from auction.scripts.create_auction import create_auction_main
@@ -57,6 +58,13 @@ config_path = os.path.join(script_dir, 'utils', 'config.json')
 
 config_manager.load_config(config_path)
 warehouse_data = config_manager.config.get('warehouses', {})
+
+@login_required
+def get_warehouse_events(request):
+    warehouse = request.GET.get('warehouse')
+    all_events = get_auction_numbers(request)
+    filtered_events = [event for event in all_events if event['warehouse'] == warehouse]
+    return JsonResponse(filtered_events, safe=False)
 
 @login_required
 def select_warehouse(request):
@@ -271,17 +279,60 @@ def download_formatted_csv(request, auction_id):
 
 @login_required
 def upload_to_hibid_view(request):
+    warehouses = list(warehouse_data.keys())
+    auctions = get_auction_numbers(request)
+    
     if request.method == 'POST':
         auction_id = request.POST.get('auction_id')
-        ending_date = request.POST.get('ending_date')
-        auction_title = request.POST.get('auction_title')
         show_browser = 'show_browser' in request.POST
         selected_warehouse = request.POST.get('selected_warehouse')
         
-        config_manager.set_active_warehouse(selected_warehouse)
-        upload_to_hibid_main(auction_id, ending_date, auction_title, print, lambda: False, lambda: print("Callback"), show_browser, selected_warehouse)
+        if not all([auction_id, selected_warehouse]):
+            return JsonResponse({'status': 'error', 'message': "Please select both a warehouse and an event."})
         
-        result = f"Auction {auction_id} uploaded to HiBid successfully."
-        return render(request, 'auction/result.html', {'result': result})
+        # Fetch the auction details based on the auction_id
+        selected_auction = next((a for a in auctions if a['id'] == auction_id), None)
+        
+        if selected_auction:
+            ending_date = selected_auction['timestamp']  # Assuming 'timestamp' is the ending date
+            auction_title = selected_auction['title']
+            
+            config_manager.set_active_warehouse(selected_warehouse)
+
+            # Retrieve HiBid credentials
+            username = config_manager.get_warehouse_var('hibid_user_name')
+            password = config_manager.get_warehouse_var('hibid_password')
+
+            if username is None or password is None:
+                return JsonResponse({'status': 'error', 'message': "HiBid credentials are not properly configured."})
+
+            # Create the should_stop Event
+            should_stop = threading.Event()
+
+            def gui_callback(message):
+                print(message)  # You can modify this to log or handle messages as needed
+
+            try:
+                upload_to_hibid_main(
+                    auction_id, 
+                    ending_date, 
+                    auction_title, 
+                    gui_callback, 
+                    should_stop, 
+                    lambda: print("Upload completed"), 
+                    show_browser,
+                    username,  # Make sure this is defined
+                    password,  # Make sure this is defined
+                    selected_warehouse
+                )
+                return JsonResponse({'status': 'success', 'message': f"Auction {auction_id} uploaded to HiBid successfully."})
+            except Exception as e:
+                return JsonResponse({'status': 'error', 'message': f"An error occurred: {str(e)}"})
+        else:
+            return JsonResponse({'status': 'error', 'message': "Invalid auction selected."})
     
-    return render(request, 'auction/upload_to_hibid.html')
+    context = {
+        'warehouses': warehouses,
+        'auctions': json.dumps(auctions, cls=DjangoJSONEncoder),
+    }
+    return render(request, 'auction/upload_to_hibid.html', context)

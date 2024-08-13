@@ -1,13 +1,88 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Upload to HiBid</title>
+    <script>
+        // Parse the auctions JSON data passed from the view
+        const auctions = JSON.parse('{{ auctions|safe }}');
+
+        function updateAuctionDropdown() {
+            const warehouseSelect = document.getElementById('selected_warehouse');
+            const auctionSelect = document.getElementById('auction_id');
+            const selectedWarehouse = warehouseSelect.value;
+
+            // Clear existing options
+            auctionSelect.innerHTML = '<option value="">Select an auction</option>';
+
+            // Filter auctions for the selected warehouse
+            const filteredAuctions = auctions.filter(auction => auction.warehouse === selectedWarehouse);
+
+            // Add new options
+            filteredAuctions.forEach(auction => {
+                const option = document.createElement('option');
+                option.value = auction.id;
+                option.textContent = `${auction.title} (${auction.id})`;
+                auctionSelect.appendChild(option);
+            });
+        }
+
+        // Call updateAuctionDropdown when the page loads to set initial state
+        document.addEventListener('DOMContentLoaded', updateAuctionDropdown);
+
+        function uploadToHiBid(event) {
+            event.preventDefault();
+            const formData = new FormData(event.target);
+            const resultMessage = document.getElementById('result-message');
+
+            // Add the show_browser value to formData
+            const showBrowser = document.getElementById('show_browser').checked;
+            formData.append('show_browser', showBrowser ? '1' : '0');
+
+            fetch('{% url "auction:upload_to_hibid" %}', {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'X-CSRFToken': '{{ csrf_token }}'
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                resultMessage.textContent = data.message;
+            })
+            .catch(error => {
+                resultMessage.textContent = 'An error occurred: ' + error;
+            });
+        }
+    </script>
 </head>
 <body>
     <h1>Upload to HiBid</h1>
-    <form method="post">
+    <form method="post" onsubmit="uploadToHiBid(event)">
         {% csrf_token %}
+        <div>
+            <label for="selected_warehouse">Select Warehouse:</label>
+            <select id="selected_warehouse" name="selected_warehouse" onchange="updateAuctionDropdown()">
+                <option value="">Select a warehouse</option>
+                {% for warehouse in warehouses %}
+                    <option value="{{ warehouse }}">{{ warehouse }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label for="auction_id">Select Event:</label>
+            <select id="auction_id" name="auction_id" required>
+                <option value="">Select an auction</option>
+                <!-- Options will be populated dynamically by JavaScript -->
+            </select>
+        </div>
+        <div>
+            <label for="show_browser">Show Browser:</label>
+            <input type="checkbox" id="show_browser" name="show_browser" value="1">
+        </div>
         <button type="submit">Run Upload to HiBid Script</button>
     </form>
+    <div id="result-message"></div>
 </body>
 </html>
