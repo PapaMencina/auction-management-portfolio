@@ -9,21 +9,32 @@ from auction.utils import config_manager
 import sys
 import json
 
+config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'utils', 'config.json')
+config_manager.load_config(config_path)
+
 def get_valid_auctions(selected_warehouse):
-    file_path = r"C:\Users\matt9\Desktop\auction_webapp\events.json"
+    # Get the directory of the current script
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    # Navigate up to the project root (two levels up from the script)
+    project_root = os.path.dirname(os.path.dirname(script_dir))
+    
+    # Construct the path to events.json
+    events_json_path = os.path.join(project_root, 'events.json')
+    
     try:
-        if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
-            with open(file_path, "r") as file:
+        if os.path.exists(events_json_path) and os.path.getsize(events_json_path) > 0:
+            with open(events_json_path, "r") as file:
                 events = json.load(file)
             return [event["event_id"] for event in events if event.get("warehouse") == selected_warehouse]
         else:
-            print(f"events.json file not found or is empty at {file_path}.")
+            print(f"events.json file not found or is empty at {events_json_path}.")
             return []
     except json.JSONDecodeError:
-        print(f"Error decoding events.json file at {file_path}. File may be corrupted.")
+        print(f"Error decoding events.json file at {events_json_path}. File may be corrupted.")
         return []
     except Exception as e:
-        print(f"An error occurred while reading {file_path}: {e}")
+        print(f"An error occurred while reading {events_json_path}: {e}")
         return []
 
 def remove_duplicates_main(auction_number, target_msrp, warehouse_name):
@@ -44,8 +55,25 @@ def remove_duplicates_main(auction_number, target_msrp, warehouse_name):
 
     run_remove_dups(auction_number, gui_callback, should_stop, callback, target_msrp, warehouse_name)
 
-if __name__ == "__main__":
-    remove_duplicates_main("sample_auction_number", 1000, "sample_warehouse_name")
+if __name__ == '__main__':
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Remove duplicates in Airtable")
+    parser.add_argument("auction_number", help="Auction number")
+    parser.add_argument("target_msrp", type=float, help="Target MSRP")
+    parser.add_argument("warehouse_name", help="Warehouse name")
+    
+    args = parser.parse_args()
+
+    def gui_callback(message):
+        print(message)
+
+    should_stop = threading.Event()
+    
+    def callback():
+        print("Remove duplicates process completed.")
+
+    remove_duplicates_main(args.auction_number, args.target_msrp, args.warehouse_name)
 
 def update_record_if_needed(record, auction_number, table):
     """Updates the record if it needs an update based on its auction listing status."""
@@ -119,9 +147,7 @@ def update_records_in_airtable(auction_number, gui_callback, should_stop, callba
 def run_remove_dups(auction_number, gui_callback, should_stop, callback, target_msrp, warehouse_name):
     gui_callback(f"Running remove_dups for auction {auction_number} in {warehouse_name}")
     
-    # Load configuration from config.json for the selected warehouse
-    config_path = os.path.join(os.path.dirname(__file__), '..', 'utils', 'config.json')
-    config_manager.load_config(config_path, warehouse_name)
+    config_manager.set_active_warehouse(warehouse_name)
 
     AIRTABLE_TOKEN = config_manager.get_warehouse_var('airtable_api_key')
     AIRTABLE_INVENTORY_BASE_ID = config_manager.get_warehouse_var('airtable_inventory_base_id')
@@ -155,15 +181,3 @@ def run_remove_dups(auction_number, gui_callback, should_stop, callback, target_
         traceback.print_exc()
     finally:
         callback()
-
-if __name__ == '__main__':
-    if len(sys.argv) != 7:
-        print("Usage: python remove_duplicates_in_airtable.py <auction_number> <gui_callback> <should_stop> <callback> <target_msrp> <warehouse_name>")
-        sys.exit(1)
-    auction_number = sys.argv[1]
-    gui_callback = sys.argv[2]
-    should_stop = sys.argv[3]
-    callback = sys.argv[4]
-    target_msrp = float(sys.argv[5])
-    warehouse_name = sys.argv[6]
-    run_remove_dups(auction_number, gui_callback, should_stop, callback, target_msrp, warehouse_name)

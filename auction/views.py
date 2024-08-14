@@ -5,6 +5,7 @@ from django.core.serializers.json import DjangoJSONEncoder
 from django.contrib import messages
 from django.views.decorators.http import require_http_methods
 from django.utils.encoding import smart_str
+from django.conf import settings
 import logging
 import threading
 import json
@@ -20,21 +21,46 @@ from auction.scripts.upload_to_hibid import upload_to_hibid_main
 
 logger = logging.getLogger(__name__)
 
+# Load initial config
+script_dir = os.path.dirname(os.path.abspath(__file__))
+config_path = os.path.join(script_dir, 'utils', 'config.json')
+
+config_manager.load_config(config_path)
+warehouse_data = config_manager.config.get('warehouses', {})
+
+# Set a default warehouse if one exists
+if warehouse_data:
+    default_warehouse = next(iter(warehouse_data))
+    config_manager.set_active_warehouse(default_warehouse)
+
 @login_required
 def home(request):
+    warehouses = list(warehouse_data.keys())
+    active_warehouse = config_manager.active_warehouse or (warehouses[0] if warehouses else None)
     context = {
-        'warehouses': list(warehouse_data.keys()),
-        'default_warehouse': request.session.get('selected_warehouse') or list(warehouse_data.keys())[0] if warehouse_data else None,
+        'warehouses': warehouses,
+        'default_warehouse': active_warehouse,
     }
     return render(request, 'auction/home.html', context)
 
 @login_required
 def load_events(request):
-    file_path = r"C:\Users\matt9\Desktop\auction_webapp\events.json"
-    if os.path.exists(file_path):
-        with open(file_path, "r") as file:
-            return json.load(file)
-    return []
+    try:
+        # Use Django's settings to get the base directory of your project
+        base_dir = settings.BASE_DIR
+        
+        # Construct the path to events.json relative to your project root
+        file_path = os.path.join(base_dir, 'events.json')
+        
+        if os.path.exists(file_path):
+            with open(file_path, "r") as file:
+                return json.load(file)
+        else:
+            logger.warning(f"Events file not found at {file_path}")
+            return []
+    except Exception as e:
+        logger.error(f"Error loading events: {str(e)}")
+        return []
 
 @login_required
 def get_auction_numbers(request):

@@ -14,12 +14,17 @@ from selenium.common.exceptions import TimeoutException, WebDriverException
 from selenium.webdriver.firefox.service import Service as FirefoxService
 from selenium.webdriver.firefox.options import Options as FirefoxOptions
 from webdriver_manager.firefox import GeckoDriverManager
+from auction.utils import config_manager
+
+# Load configuration
+config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'utils', 'config.json')
+config_manager.load_config(config_path)
 
 # Define a lock for thread-safe file operations
 file_lock = threading.Lock()
 
 def save_event_to_file(event_data):
-    file_path = r"C:\Users\matt9\Desktop\auction_webapp\events.json"
+    file_path = os.path.join(get_resources_dir(''), 'events.json')
     print(f"Attempting to save event to {file_path}")
     with file_lock:
         try:
@@ -49,26 +54,28 @@ def save_event_to_file(event_data):
             print(f"File exists: {os.path.exists(file_path)}")
             print(f"File is writable: {os.access(file_path, os.W_OK) if os.path.exists(file_path) else 'N/A'}")
 
-def get_resources_dir():
-    """Return the path to the resources/event_images directory."""
-    return r"C:\Users\matt9\Desktop\auction_webapp\auction\resources\event_images"
+def get_resources_dir(folder=''):
+    base_path = os.environ.get('AUCTION_RESOURCES_PATH', os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'resources'))
+    return os.path.join(base_path, folder)
 
 def wait_for_download(gui_callback, timeout=60):
     """Waits for a new file to appear in the resources directory and ensures the download is complete."""
-    download_dir = get_resources_dir()
-    initial_files = os.listdir(download_dir)
+    download_dir = get_resources_dir('event_images')  # Specify the correct subdirectory
+    initial_files = set(os.listdir(download_dir))
     start_time = time.time()
 
     while True:
-        current_files = os.listdir(download_dir)
-        new_files = set(current_files) - set(initial_files)
+        current_files = set(os.listdir(download_dir))
+        new_files = current_files - initial_files
 
-        if new_files:
-            for file in new_files:
-                if not file.endswith(".part"):
-                    downloaded_file = os.path.join(download_dir, file)
-                    gui_callback(f"Download complete: {downloaded_file}")
-                    return downloaded_file
+        for file in new_files:
+            file_path = os.path.join(download_dir, file)
+            if not file.endswith(".part") and not file.endswith(".crdownload"):
+                # Wait a bit to ensure the file is fully written
+                time.sleep(2)
+                if os.path.getsize(file_path) > 0:
+                    gui_callback(f"Download complete: {file_path}")
+                    return file_path
 
         elapsed_time = time.time() - start_time
         if elapsed_time > timeout:
@@ -81,12 +88,11 @@ def wait_for_download(gui_callback, timeout=60):
         time.sleep(1)
 
 def configure_driver(url, show_browser):
-    """Configures and returns a Firefox WebDriver."""
-    firefox_options = FirefoxOptions()
 
+    firefox_options = FirefoxOptions()
     firefox_options.set_preference("browser.download.folderList", 2)
     firefox_options.set_preference("browser.download.manager.showWhenStarting", False)
-    firefox_options.set_preference("browser.download.dir", get_resources_dir())
+    firefox_options.set_preference("browser.download.dir", get_resources_dir('event_images'))
     firefox_options.set_preference("browser.helperApps.neverAsk.saveToDisk", "image/jpeg")
 
     if not show_browser:
@@ -149,10 +155,11 @@ def element_value_is_not_empty(driver, element_id):
     return element.get_attribute('value') != ''
 
 def get_image(driver, ending_date_input, relaythat_url, gui_callback, selected_warehouse):
-    """Logs in to RelayThat, sets the end date, and downloads the event image."""
     try:
         gui_callback('Getting auction image...')
-        login(driver, (By.ID, "user_email"), (By.ID, "user_password"), "rtl3wd@gmail.com", "##RelayThat702..", relaythat_url, gui_callback)
+        relaythat_email = config_manager.get_global_var('relaythat_email')
+        relaythat_password = config_manager.get_global_var('relaythat_password')
+        login(driver, (By.ID, "user_email"), (By.ID, "user_password"), relaythat_email, relaythat_password, relaythat_url, gui_callback)
     except Exception as e:
         gui_callback(f"Error logging in: {e}")
         driver.quit()
@@ -170,26 +177,31 @@ def get_image(driver, ending_date_input, relaythat_url, gui_callback, selected_w
         time.sleep(1)
         click_element(driver, (By.XPATH, "//*[@id='main_container']/div/div[2]/div[1]/div/div[2]/div[1]/div[2]/div[2]/button"))
 
-        downloaded_file_path = wait_for_download(gui_callback)
+        # Wait for the download to complete
+        downloaded_file_path = wait_for_download(gui_callback, timeout=120)  # Increased timeout
         if downloaded_file_path:
+            gui_callback(f"Image downloaded: {downloaded_file_path}")
             return downloaded_file_path
         else:
             gui_callback("No file was downloaded.")
+            return None
     except Exception as e:
-        gui_callback(f"An error occurred: {e}")
+        gui_callback(f"An error occurred while getting the image: {e}")
+        return None
 
 def create_auction(driver, auction_title, image_path, formatted_start_date, bid_formatted_ending_date, gui_callback, selected_warehouse):
-    """Creates an auction on the specified bid website."""
     try:
         gui_callback('Creating auction on bid...')
-        bid_url = "https://bid.702auctions.com/Event/CreateEvent"
+        bid_url = config_manager.get_global_var('bid_url')
         driver.get(bid_url)
     except Exception as e:
         gui_callback(f"Error configuring driver: {e}")
         return
 
     try:
-        login(driver, (By.ID, "username"), (By.ID, "password"), "702marketplace@gmail.com", "Ronch420$", bid_url, gui_callback)
+        bid_username = config_manager.get_warehouse_var('bid_username')
+        bid_password = config_manager.get_warehouse_var('bid_password')
+        login(driver, (By.ID, "username"), (By.ID, "password"), bid_username, bid_password, bid_url, gui_callback)
     except Exception as e:
         gui_callback(f"Error logging in: {e}")
         return
@@ -306,13 +318,11 @@ class SharedEvents:
         save_event_to_file(event_data)
 
 def create_auction_main(auction_title, ending_date, show_browser, selected_warehouse):
-    # Select the relaythat_url based on the selected warehouse
-    if selected_warehouse == "Maule Warehouse":
-        relaythat_url = "https://app.relaythat.com/composition/2126969"
-    elif selected_warehouse == "Sunrise Warehouse":
-        relaythat_url = "https://app.relaythat.com/composition/1992064"
-    else:
-        print("Invalid warehouse selected.")
+    config_manager.set_active_warehouse(selected_warehouse)
+    
+    relaythat_url = config_manager.get_warehouse_var('relaythat_url')
+    if not relaythat_url:
+        print("Invalid warehouse selected or missing relaythat_url in config.")
         return
 
     def gui_callback(message):
@@ -324,6 +334,7 @@ def create_auction_main(auction_title, ending_date, show_browser, selected_wareh
         print("Auction creation process completed.")
 
     driver = None
+    event_id = None  # Initialize event_id to None
 
     try:
         gui_callback("Creating Auction...")

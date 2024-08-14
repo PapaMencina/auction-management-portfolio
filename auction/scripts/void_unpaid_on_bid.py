@@ -20,10 +20,21 @@ from auction.utils import config_manager
 config_path = os.path.join(os.path.dirname(__file__), '..', 'utils', 'config.json')
 
 def get_resources_dir(folder):
-    base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    return os.path.join(base_path, 'resources', folder)
+    # Get the directory of the current script
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    # Navigate up to the project root (two levels up from the script)
+    project_root = os.path.dirname(os.path.dirname(script_dir))
+    
+    # Construct the path to the resources directory
+    resources_dir = os.path.join(project_root, 'auction', 'resources', folder)
+    
+    # Ensure the directory exists
+    os.makedirs(resources_dir, exist_ok=True)
+    
+    return resources_dir
 
-# Constants
+# Update the DOWNLOAD_DIR constant
 DOWNLOAD_DIR = get_resources_dir('voided_csv')
 AIRTABLE_URL = lambda base_id, table_id: f'https://api.airtable.com/v0/{base_id}/{table_id}'
 
@@ -42,7 +53,17 @@ def void_unpaid_main(auction_id, upload_choice, show_browser, warehouse):
     start_selenium_process(auction_id, upload_choice, gui_callback, should_stop, callback, show_browser)
 
 if __name__ == "__main__":
-    void_unpaid_main("sample_auction_id", 1, True, "Maule Warehouse")
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Void unpaid transactions")
+    parser.add_argument("auction_id", help="Auction ID")
+    parser.add_argument("upload_choice", type=int, choices=[0, 1], help="Upload choice (0: No upload, 1: Upload to Airtable)")
+    parser.add_argument("show_browser", type=int, choices=[0, 1], help="Show browser (0: Headless, 1: Show browser)")
+    parser.add_argument("warehouse", help="Warehouse name")
+    
+    args = parser.parse_args()
+
+    void_unpaid_main(args.auction_id, args.upload_choice, bool(args.show_browser), args.warehouse)
 
 def configure_driver(url, show_browser):
     firefox_options = Options()
@@ -58,7 +79,11 @@ def configure_driver(url, show_browser):
         firefox_options.add_argument("--headless")
         firefox_options.add_argument("--window-size=1920x1080")
 
-    driver = webdriver.Firefox(service=FirefoxService(GeckoDriverManager().install()), options=firefox_options)
+    driver_path = config_manager.get_global_var('webdriver_path')
+    if driver_path == "auto" or not driver_path:
+        driver = webdriver.Firefox(service=FirefoxService(GeckoDriverManager().install()), options=firefox_options)
+    else:
+        driver = webdriver.Firefox(service=FirefoxService(driver_path), options=firefox_options)
     driver.get(url)
     return driver
 
@@ -319,7 +344,8 @@ def check_date(driver):
 
 def start_selenium_process(event_id, upload_choice, gui_callback, should_stop, callback, show_browser):
     csv_filepath = None
-    original_url = f"https://bid.702auctions.com/Account/EventSalesTransactionReport?EventID={event_id}&page=0&sort=DateTime&descending=True&dateStart=&dateEnd=&lotNumber=&description=&priceLow=&priceHigh=&quantity=&totalPriceLow=&totalPriceHigh=&invoiceID=&payer=&firstName=&lastName=&isPaid=2"
+    bid_url = config_manager.get_global_var('bid_url')
+    original_url = f"{bid_url}/Account/EventSalesTransactionReport?EventID={event_id}&page=0&sort=DateTime&descending=True&dateStart=&dateEnd=&lotNumber=&description=&priceLow=&priceHigh=&quantity=&totalPriceLow=&totalPriceHigh=&invoiceID=&payer=&firstName=&lastName=&isPaid=2"
     gui_callback("Loading Bid...")
     driver = configure_driver(original_url, show_browser)
 

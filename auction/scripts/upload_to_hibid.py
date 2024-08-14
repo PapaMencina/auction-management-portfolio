@@ -5,6 +5,9 @@ import os
 import re
 import json
 import threading
+from django.conf import settings
+from auction.utils import config_manager
+import logging
 from datetime import datetime, timedelta
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -18,19 +21,24 @@ from selenium.webdriver.firefox.options import Options as FirefoxOptions
 from webdriver_manager.firefox import GeckoDriverManager
 from auction.utils import config_manager
 
-# Load configurations from the config_manager
-# USER_NAME = config_manager.get_global_var('hibid_user_name')
-# PASSWORD = config_manager.get_global_var('hibid_password')
+logger = logging.getLogger(__name__)
+
+config_path = os.path.join(os.path.dirname(__file__), '..', 'utils', 'config.json')
+config_manager.load_config(config_path)
+
 BASE_URL = "https://www.auctionflex360.com/#/organization/5676/auctions/new"
 
-def upload_to_hibid_main(auction_id, ending_date, auction_title, gui_callback, should_stop, callback, show_browser, username, password, selected_warehouse):
-    run_upload_to_hibid(auction_id, ending_date, auction_title, gui_callback, should_stop, callback, show_browser, username, password, selected_warehouse)
+def upload_to_hibid_main(auction_id, ending_date, auction_title, gui_callback, should_stop, callback, show_browser, selected_warehouse):
+    config_manager.set_active_warehouse(selected_warehouse)
+    run_upload_to_hibid(auction_id, ending_date, auction_title, gui_callback, should_stop, callback, show_browser, selected_warehouse)
 
 if __name__ == "__main__":
     upload_to_hibid_main("sample_auction_id", "2023-12-31 18:30:00", "Sample Auction Title", print, threading.Event(), lambda: print("Callback"), 1, "sample_username", "sample_password", "Maule Warehouse")
 
 def get_resource_path(resource_type, filename=None):
-    base_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'auction', 'resources')
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(os.path.dirname(script_dir))
+    base_path = os.path.join(project_root, 'auction', 'resources')
     
     resource_paths = {
         'processed_csv': os.path.join(base_path, 'processed_csv'),
@@ -82,8 +90,12 @@ def configure_driver(url, show_browser, gui_callback):
     firefox_options.add_argument("--window-size=1920x1080")
 
     gui_callback("Configuring WebDriver...")
-    driver = webdriver.Firefox(service=FirefoxService(GeckoDriverManager().install()), options=firefox_options)
-    driver.set_page_load_timeout(60)  # Increase timeout to 60 seconds
+    driver_path = config_manager.get_global_var('webdriver_path')
+    if driver_path == "auto" or not driver_path:
+        driver = webdriver.Firefox(service=FirefoxService(GeckoDriverManager().install()), options=firefox_options)
+    else:
+        driver = webdriver.Firefox(service=FirefoxService(driver_path), options=firefox_options)
+    driver.set_page_load_timeout(60)
     gui_callback(f"Navigating to {url}")
     driver.get(url)
     return driver
@@ -474,7 +486,7 @@ def save_screenshot(driver, name="screenshot.png"):
     timestamp = time.strftime("%Y%m%d-%H%M%S")
     filepath = get_resource_path('downloads', f"{name}_{timestamp}.png")
     driver.save_screenshot(filepath)
-    print(f"Screenshot saved to {filepath}")
+    logger.info(f"Screenshot saved to {filepath}")
 
 def wait_for_element_to_be_clickable(driver, by, locator, timeout=30):
     return WebDriverWait(driver, timeout).until(EC.element_to_be_clickable((by, locator)))
@@ -699,10 +711,13 @@ def format_ending_date(ending_date, gui_callback):
 
     return formatted_ending_date, formatted_date_only
 
-def run_upload_to_hibid(auction_id, ending_date, auction_title, gui_callback, should_stop, callback, show_browser, username, password, selected_warehouse):
+def run_upload_to_hibid(auction_id, ending_date, auction_title, gui_callback, should_stop, callback, show_browser, selected_warehouse):
     driver = None
     try:
         gui_callback("Starting the upload process...")
+
+        username = config_manager.get_warehouse_var('hibid_user_name')
+        password = config_manager.get_warehouse_var('hibid_password')
 
         if username is None or password is None:
             gui_callback("Error: Username or password is None. Please check your configuration.")
@@ -761,16 +776,15 @@ def run_upload_to_hibid(auction_id, ending_date, auction_title, gui_callback, sh
         gui_callback("Upload process completed successfully.")
 
     except WebDriverException as e:
-        gui_callback(f"Selenium WebDriver error: {e}")
+        logger.error(f"Selenium WebDriver error: {e}")
     except Exception as e:
-        gui_callback(f"Unexpected error: {e}")
-        import traceback
-        gui_callback(f"Traceback: {traceback.format_exc()}")
+        logger.error(f"Unexpected error: {e}")
+        logger.exception("Traceback:")
     finally:
         if driver:
             gui_callback("Closing the browser...")
             try:
                 driver.quit()
             except Exception as e:
-                gui_callback(f"Error while closing the browser: {str(e)}")
+                logger.error(f"Error while closing the browser: {str(e)}")
         callback()

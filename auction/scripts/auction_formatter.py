@@ -25,8 +25,7 @@ from webdriver_manager.firefox import GeckoDriverManager
 from auction.utils import config_manager
 
 # Load configuration
-script_dir = os.path.dirname(os.path.abspath(__file__))
-config_path = os.path.join(script_dir, '..', 'utils', 'config.json')
+config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'utils', 'config.json')
 config_manager.load_config(config_path)
 
 def auction_formatter_main(auction_id, selected_warehouse, gui_callback, should_stop, callback, show_browser):
@@ -368,7 +367,12 @@ def format_field(label: str, value: str) -> str:
 def get_image_url(airtable_record: Dict, count: int) -> str:
     return airtable_record.get("fields", {}).get(f"Image {count}", [{}])[0].get("url", "")
 
-def upload_file_via_ftp(file_name: str, local_file_path: str, gui_callback, should_stop: threading.Event, max_retries: int = 3, remote_file_path: str = "/airtableimages.702auctions.com/public_html/", server: str = "702auctions.com", username: str = "702auctionsftp@702auctions.com", password: str = "Ronch420$") -> str:
+def upload_file_via_ftp(file_name: str, local_file_path: str, gui_callback, should_stop: threading.Event, max_retries: int = 3) -> str:
+    remote_file_path = config_manager.get_global_var('ftp_remote_path')
+    server = config_manager.get_global_var('ftp_server')
+    username = config_manager.get_global_var('ftp_username')
+    password = config_manager.get_global_var('ftp_password')
+    
     retries = 0
     while retries < max_retries and not should_stop.is_set():
         try:
@@ -519,7 +523,7 @@ def processed_records_to_df(processed_records: List[Dict], Auction_ID: str, gui_
                     "Item Condition", "ID", "Amazon ID", "HiBid", "AuctionCount", "number"]
     df = df.reindex(columns=column_order, fill_value='')
     
-    resources_dir = os.path.join(script_dir, '..', 'resources', 'processed_csv')
+    resources_dir = get_resources_dir('processed_csv')
     os.makedirs(resources_dir, exist_ok=True)
     
     download_path = os.path.join(resources_dir, f'unformatted_{Auction_ID}.csv')
@@ -529,7 +533,8 @@ def processed_records_to_df(processed_records: List[Dict], Auction_ID: str, gui_
     return download_path
 
 def get_resources_dir(folder: str) -> str:
-    return os.path.join('C:\\Users\\matt9\\Desktop\\Auction_script_current\\resources', folder)
+    base_path = os.environ.get('AUCTION_RESOURCES_PATH', os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'resources'))
+    return os.path.join(base_path, folder)
 
 def organize_images(Auction_ID: str) -> None:
     file_count = 0
@@ -567,12 +572,19 @@ class AuctionFormatter:
         config_manager.set_active_warehouse(selected_warehouse)
         
         self.final_csv_path = None
+        self.website_login_url = config_manager.get_global_var('website_login_url')
+        self.import_csv_url = config_manager.get_global_var('import_csv_url')
+        self.notification_email = config_manager.get_global_var('notification_email')
 
     def configure_driver(self, url):
         firefox_options = FirefoxOptions()
         if not self.show_browser:
             firefox_options.add_argument("--headless")
-        driver = webdriver.Firefox(service=FirefoxService(GeckoDriverManager().install()), options=firefox_options)
+        driver_path = config_manager.get_global_var('webdriver_path')
+        if driver_path == "auto" or not driver_path:
+            driver = webdriver.Firefox(service=FirefoxService(GeckoDriverManager().install()), options=firefox_options)
+        else:
+            driver = webdriver.Firefox(service=FirefoxService(driver_path), options=firefox_options)
         driver.get(url)
         return driver
 
@@ -641,7 +653,7 @@ class AuctionFormatter:
         try:
             # Navigate to the ImportCSV page
             self.gui_callback("Navigating to ImportCSV page...")
-            driver.get("https://bid.702auctions.com/Admin/ImportCSV")
+            driver.get(self.import_csv_url)
             
             # Wait for the page to load
             WebDriverWait(driver, 30).until(
@@ -653,26 +665,71 @@ class AuctionFormatter:
                 self.gui_callback("Failed to navigate to ImportCSV page. Current URL: " + driver.current_url)
                 return False
             
-            # Wait for the file input element to be present
-            self.gui_callback("Waiting for file input element...")
-            file_input = WebDriverWait(driver, 20).until(
-                EC.presence_of_element_located((By.ID, "csvFile"))
-            )
-            file_input.send_keys(csv_path)
+            # Update the email address
+            self.gui_callback("Updating email address...")
+            try:
+                email_input = WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((By.ID, "Text1"))
+                )
+                email_input.clear()
+                email_input.send_keys(self.notification_email)
+                time.sleep(2)  # Wait for 2 seconds after updating the email
+                self.gui_callback("Email address updated successfully.")
+            except Exception as e:
+                self.gui_callback(f"Failed to update email address: {str(e)}")
             
-            self.gui_callback("Locating submit button...")
-            submit_button = WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable((By.CSS_SELECTOR, "input[type='submit'][value='Upload']"))
-            )
-            submit_button.click()
+            # Locate and interact with the file input
+            self.gui_callback("Uploading CSV file...")
+            try:
+                # Try multiple methods to locate the file input
+                file_input = None
+                try:
+                    file_input = driver.find_element(By.ID, "CSVFile")
+                except:
+                    try:
+                        file_input = driver.find_element(By.NAME, "CSVFile")
+                    except:
+                        file_input = driver.find_element(By.CSS_SELECTOR, "input[type='file']")
+                
+                if file_input:
+                    # Ensure the file input is visible and enabled
+                    driver.execute_script("arguments[0].style.display = 'block';", file_input)
+                    driver.execute_script("arguments[0].style.visibility = 'visible';", file_input)
+                    driver.execute_script("arguments[0].style.opacity = 1;", file_input)
+                    
+                    # Send the file path
+                    file_input.send_keys(csv_path)
+                    self.gui_callback("CSV file selected successfully.")
+                else:
+                    raise Exception("Could not locate file input element")
+            except Exception as e:
+                self.gui_callback(f"Failed to select CSV file: {str(e)}")
+                return False
             
+            # Click the "Upload CSV" button
+            self.gui_callback("Clicking Upload CSV button...")
+            try:
+                upload_button = WebDriverWait(driver, 10).until(
+                    EC.element_to_be_clickable((By.CSS_SELECTOR, "input[type='submit'][value='Upload CSV']"))
+                )
+                ActionChains(driver).move_to_element(upload_button).click().perform()
+                self.gui_callback("Upload CSV button clicked.")
+            except Exception as e:
+                self.gui_callback(f"Failed to click Upload CSV button: {str(e)}")
+                return False
+            
+            # Wait for the upload confirmation
             self.gui_callback("Waiting for upload confirmation...")
-            WebDriverWait(driver, 30).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, ".alert-success"))
-            )
-            
-            self.gui_callback("CSV file uploaded successfully.")
-            return True
+            try:
+                WebDriverWait(driver, 60).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, ".alert-success"))
+                )
+                self.gui_callback("CSV file uploaded successfully.")
+                return True
+            except Exception as e:
+                self.gui_callback(f"Failed to confirm CSV upload: {str(e)}")
+                return False
+
         except Exception as e:
             self.gui_callback(f"Failed to upload CSV: {str(e)}")
             return False
@@ -787,18 +844,17 @@ class AuctionFormatter:
                 self.final_csv_path = self.format_final_csv(csv_path)
 
             if self.final_csv_path:
-                website_url = "https://bid.702auctions.com/Account/LogOn"
+                driver = self.configure_driver(self.website_login_url)
+                
                 username = config_manager.get_warehouse_var('bid_username')
                 password = config_manager.get_warehouse_var('bid_password')
 
-                driver = self.configure_driver(website_url)
-                
                 login_success = self.login_to_website(driver, username, password)
                 
                 if login_success:
                     self.gui_callback("Login successful. Attempting to upload CSV...")
                     csv_filename = f"{self.Auction_ID}.csv"
-                    csv_path = os.path.join("C:\\Users\\matt9\\Desktop\\auction_webapp\\auction\\resources\\processed_csv", csv_filename)
+                    csv_path = os.path.join(get_resources_dir('processed_csv'), csv_filename)
                     if os.path.exists(csv_path):
                         upload_success = self.upload_csv_to_website(driver, csv_path)
                         if upload_success:
