@@ -693,22 +693,26 @@ def save_screenshot(driver, name="screenshot.png"):
     print(f"Screenshot saved to {filepath}")
 
 def format_ending_date(ending_date, gui_callback):
-    try:
-        date_object = datetime.strptime(ending_date, '%Y-%m-%d %H:%M:%S')
-    except ValueError:
-        gui_callback("The provided date string does not match the expected format.")
-        return None, None
+    gui_callback("Formatting ending date...")
+    
+    if isinstance(ending_date, str):
+        try:
+            date_object = datetime.strptime(ending_date, '%Y-%m-%d %H:%M:%S')
+        except ValueError:
+            gui_callback(f"Error: Invalid date format. Expected 'YYYY-MM-DD HH:MM:SS', got '{ending_date}'")
+            raise
+    elif isinstance(ending_date, datetime):
+        date_object = ending_date
+    else:
+        gui_callback(f"Error: Unexpected type for ending_date: {type(ending_date)}")
+        raise ValueError(f"Unexpected type for ending_date: {type(ending_date)}")
 
-    date_with_fixed_time = date_object.replace(hour=18, minute=30)
-
-    if date_with_fixed_time < datetime.now():
-        gui_callback("Warning: The ending date is in the past. Using tomorrow's date instead.")
-        date_with_fixed_time = datetime.now() + timedelta(days=1)
-        date_with_fixed_time = date_with_fixed_time.replace(hour=18, minute=30)
-
-    formatted_ending_date = date_with_fixed_time.strftime('%m/%d/%Y %I:%M %p')
-    formatted_date_only = date_with_fixed_time.strftime('%m/%d/%Y')
-
+    formatted_ending_date = date_object.strftime("%m/%d/%Y %I:%M %p")
+    formatted_date_only = date_object.strftime("%m/%d/%Y")
+    
+    gui_callback(f"Formatted ending date: {formatted_ending_date}")
+    gui_callback(f"Formatted date only: {formatted_date_only}")
+    
     return formatted_ending_date, formatted_date_only
 
 def run_upload_to_hibid(auction_id, ending_date, auction_title, gui_callback, should_stop, callback, show_browser, selected_warehouse):

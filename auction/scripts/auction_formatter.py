@@ -5,6 +5,7 @@ import re
 import ftplib
 import json
 import shutil
+import random
 from typing import List, Dict, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -541,6 +542,9 @@ def organize_images(Auction_ID: str) -> None:
     directory = get_resources_dir('product_images')
     subfolder = os.path.join(get_resources_dir('hibid_images'), f'hibid_{Auction_ID}')
 
+    # Create the subfolder if it doesn't exist
+    os.makedirs(subfolder, exist_ok=True)
+
     if os.path.isdir(subfolder):
         shutil.rmtree(subfolder)
     os.mkdir(subfolder)
@@ -651,168 +655,73 @@ class AuctionFormatter:
 
     def upload_csv_to_website(self, driver, csv_path):
         try:
-            # Navigate to the ImportCSV page
-            self.gui_callback("Navigating to ImportCSV page...")
-            driver.get(self.import_csv_url)
-            
-            # Wait for the page to load
-            WebDriverWait(driver, 30).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "body"))
-            )
-            
-            # Check if we're on the correct page
-            if "ImportCSV" not in driver.current_url:
-                self.gui_callback("Failed to navigate to ImportCSV page. Current URL: " + driver.current_url)
-                return False
-            
-            # Update the email address
-            self.gui_callback("Updating email address...")
-            try:
-                email_input = WebDriverWait(driver, 10).until(
-                    EC.presence_of_element_located((By.ID, "Text1"))
-                )
-                email_input.clear()
-                email_input.send_keys(self.notification_email)
-                time.sleep(2)  # Wait for 2 seconds after updating the email
-                self.gui_callback("Email address updated successfully.")
-            except Exception as e:
-                self.gui_callback(f"Failed to update email address: {str(e)}")
-            
-            # Locate and interact with the file input
-            self.gui_callback("Uploading CSV file...")
-            try:
-                # Try multiple methods to locate the file input
-                file_input = None
-                try:
-                    file_input = driver.find_element(By.ID, "CSVFile")
-                except:
-                    try:
-                        file_input = driver.find_element(By.NAME, "CSVFile")
-                    except:
-                        file_input = driver.find_element(By.CSS_SELECTOR, "input[type='file']")
-                
-                if file_input:
-                    # Ensure the file input is visible and enabled
-                    driver.execute_script("arguments[0].style.display = 'block';", file_input)
-                    driver.execute_script("arguments[0].style.visibility = 'visible';", file_input)
-                    driver.execute_script("arguments[0].style.opacity = 1;", file_input)
-                    
-                    # Send the file path
-                    file_input.send_keys(csv_path)
-                    self.gui_callback("CSV file selected successfully.")
-                else:
-                    raise Exception("Could not locate file input element")
-            except Exception as e:
-                self.gui_callback(f"Failed to select CSV file: {str(e)}")
-                return False
-            
-            # Click the "Upload CSV" button
-            self.gui_callback("Clicking Upload CSV button...")
-            try:
-                upload_button = WebDriverWait(driver, 10).until(
-                    EC.element_to_be_clickable((By.CSS_SELECTOR, "input[type='submit'][value='Upload CSV']"))
-                )
-                ActionChains(driver).move_to_element(upload_button).click().perform()
-                self.gui_callback("Upload CSV button clicked.")
-            except Exception as e:
-                self.gui_callback(f"Failed to click Upload CSV button: {str(e)}")
-                return False
-            
-            # Wait for the upload confirmation
-            self.gui_callback("Waiting for upload confirmation...")
-            try:
-                WebDriverWait(driver, 60).until(
-                    EC.presence_of_element_located((By.CSS_SELECTOR, ".alert-success"))
-                )
-                self.gui_callback("CSV file uploaded successfully.")
-                return True
-            except Exception as e:
-                self.gui_callback(f"Failed to confirm CSV upload: {str(e)}")
-                return False
-
-        except Exception as e:
-            self.gui_callback(f"Failed to upload CSV: {str(e)}")
-            return False
-
-    def upload_csv_to_website(self, driver, csv_path):
-        try:
-            # Navigate to the ImportCSV page
-            self.gui_callback("Navigating to ImportCSV page...")
+            self.gui_callback("Navigating to upload page...")
             driver.get("https://bid.702auctions.com/Admin/ImportCSV")
-            
-            # Wait for the page to load
-            WebDriverWait(driver, 30).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "body"))
-            )
-            
-            # Check if we're on the correct page
-            if "ImportCSV" not in driver.current_url:
-                self.gui_callback("Failed to navigate to ImportCSV page. Current URL: " + driver.current_url)
-                return False
-            
-            # Update the email address
-            self.gui_callback("Updating email address...")
-            try:
-                email_input = WebDriverWait(driver, 10).until(
-                    EC.presence_of_element_located((By.ID, "Text1"))
-                )
-                email_input.clear()
-                email_input.send_keys("matthew@702auctions.com")
-                time.sleep(2)  # Wait for 2 seconds after updating the email
-                self.gui_callback("Email address updated successfully.")
-            except Exception as e:
-                self.gui_callback(f"Failed to update email address: {str(e)}")
-            
-            # Locate and interact with the file input
+
+            self.gui_callback("Waiting for page to load...")
+            WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "import_csv")))
+
             self.gui_callback("Uploading CSV file...")
+            file_input = driver.find_element(By.ID, "import_csv")
+            file_input.send_keys(csv_path)
+
+            self.gui_callback("Unchecking 'Validate Data ONLY' checkbox...")
             try:
-                # Try multiple methods to locate the file input
-                file_input = None
-                try:
-                    file_input = driver.find_element(By.ID, "CSVFile")
-                except:
-                    try:
-                        file_input = driver.find_element(By.NAME, "CSVFile")
-                    except:
-                        file_input = driver.find_element(By.CSS_SELECTOR, "input[type='file']")
+                uncheck_script = """
+                return new Promise((resolve) => {
+                    var checkbox = document.querySelector('input[name="validate"][type="hidden"]');
+                    var toggle = document.querySelector('.fs-checkbox.fs-checkbox-toggle');
+                    if (checkbox && toggle) {
+                        checkbox.value = 'false';
+                        var event = new Event('change', { bubbles: true });
+                        checkbox.dispatchEvent(event);
+                        
+                        // Update the visual representation
+                        toggle.classList.remove('fs-checkbox-checked');
+                        
+                        // Ensure the checkbox remains unchecked after form submission
+                        var form = document.querySelector('form');
+                        form.addEventListener('submit', function(e) {
+                            setTimeout(function() {
+                                checkbox.value = 'false';
+                                toggle.classList.remove('fs-checkbox-checked');
+                            }, 0);
+                        });
+                        
+                        // Give the page some time to process the change
+                        setTimeout(() => {
+                            resolve(checkbox.value === 'false' && !toggle.classList.contains('fs-checkbox-checked'));
+                        }, 1000);  // Wait for 1 second
+                    } else {
+                        resolve(false);
+                    }
+                });
+                """
+                checkbox_unchecked = driver.execute_script(uncheck_script)
                 
-                if file_input:
-                    # Ensure the file input is visible and enabled
-                    driver.execute_script("arguments[0].style.display = 'block';", file_input)
-                    driver.execute_script("arguments[0].style.visibility = 'visible';", file_input)
-                    driver.execute_script("arguments[0].style.opacity = 1;", file_input)
-                    
-                    # Send the file path
-                    file_input.send_keys(csv_path)
-                    self.gui_callback("CSV file selected successfully.")
+                if checkbox_unchecked:
+                    self.gui_callback("'Validate Data ONLY' checkbox unchecked successfully.")
                 else:
-                    raise Exception("Could not locate file input element")
+                    self.gui_callback("Failed to uncheck 'Validate Data ONLY' checkbox.")
+
             except Exception as e:
-                self.gui_callback(f"Failed to select CSV file: {str(e)}")
-                return False
-            
-            # Click the "Upload CSV" button
-            self.gui_callback("Clicking Upload CSV button...")
-            try:
-                upload_button = WebDriverWait(driver, 10).until(
-                    EC.element_to_be_clickable((By.CSS_SELECTOR, "input[type='submit'][value='Upload CSV']"))
-                )
-                ActionChains(driver).move_to_element(upload_button).click().perform()
-                self.gui_callback("Upload CSV button clicked.")
-            except Exception as e:
-                self.gui_callback(f"Failed to click Upload CSV button: {str(e)}")
-                return False
-            
-            # Wait for the upload confirmation
-            self.gui_callback("Waiting for upload confirmation...")
-            try:
-                WebDriverWait(driver, 60).until(
-                    EC.presence_of_element_located((By.CSS_SELECTOR, ".alert-success"))
-                )
-                self.gui_callback("CSV file uploaded successfully.")
+                self.gui_callback(f"Error unchecking checkbox: {str(e)}")
+
+            self.gui_callback("Submitting form...")
+            submit_button = driver.find_element(By.XPATH, "//button[@type='submit']")
+            submit_button.click()
+
+            self.gui_callback("Waiting for upload to complete...")
+            WebDriverWait(driver, 60).until(EC.presence_of_element_located((By.ID, "flash-message")))
+
+            flash_message = driver.find_element(By.ID, "flash-message").text
+            self.gui_callback(f"Upload result: {flash_message}")
+
+            if "successfully" in flash_message.lower():
+                self.gui_callback("CSV uploaded successfully!")
                 return True
-            except Exception as e:
-                self.gui_callback(f"Failed to confirm CSV upload: {str(e)}")
+            else:
+                self.gui_callback("CSV upload failed.")
                 return False
 
         except Exception as e:
@@ -889,11 +798,16 @@ class AuctionFormatter:
             sorted_data = data.sort_values(by='MSRP', ascending=False)
 
             top_50_items = sorted_data[~sorted_data['Subtitle'].str.contains('missing|damaged|no', case=False, na=False)].head(50)
-
             remaining_items = sorted_data[~sorted_data.index.isin(top_50_items.index)].sample(frac=1).reset_index(drop=True)
 
-            final_data = pd.concat([top_50_items, remaining_items]).reset_index(drop=True)
-            
+            # Process top 50 items
+            processed_top_50 = self.process_items_avoid_adjacency(top_50_items)
+
+            # Process remaining items
+            processed_remaining = self.process_items_avoid_adjacency(remaining_items)
+
+            final_data = pd.concat([processed_top_50, processed_remaining]).reset_index(drop=True)
+
             resources_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'resources', 'processed_csv')
             os.makedirs(resources_dir, exist_ok=True)
 
@@ -905,3 +819,40 @@ class AuctionFormatter:
         except Exception as e:
             self.gui_callback(f"Error formatting final CSV: {e}")
             return None
+
+    def process_items_avoid_adjacency(self, items):
+        processed_items = []
+        title_buffer = {}
+
+        for _, row in items.iterrows():
+            title = row['Title']
+            if title in title_buffer:
+                title_buffer[title].append(row)
+            else:
+                if processed_items and processed_items[-1]['Title'] == title:
+                    title_buffer[title] = [row]
+                else:
+                    processed_items.append(row)
+
+            # Randomly insert buffered items
+            if random.random() < 0.2:  # 20% chance to insert a buffered item
+                for buffered_title in list(title_buffer.keys()):
+                    if buffered_title != title and title_buffer[buffered_title]:
+                        processed_items.append(title_buffer[buffered_title].pop(0))
+                        if not title_buffer[buffered_title]:
+                            del title_buffer[buffered_title]
+                        break
+
+        # Add any remaining buffered items
+        for buffered_items in title_buffer.values():
+            for item in buffered_items:
+                insert_position = self.find_insert_position(processed_items, item['Title'])
+                processed_items.insert(insert_position, item)
+
+        return pd.DataFrame(processed_items)
+
+    def find_insert_position(self, processed_items, title):
+        for i in range(len(processed_items) - 1, -1, -1):
+            if processed_items[i]['Title'] != title:
+                return i + 1
+        return 0

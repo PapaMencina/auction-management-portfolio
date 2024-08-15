@@ -15,6 +15,7 @@ import os
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+print(f"Django BASE_DIR: {BASE_DIR}")
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 # Quick-start development settings - unsuitable for production
@@ -135,7 +136,7 @@ LOGGING = {
     },
     'root': {
         'handlers': ['console'],
-        'level': 'INFO',
+        'level': 'DEBUG',  # Changed from INFO to DEBUG
     },
 }
 

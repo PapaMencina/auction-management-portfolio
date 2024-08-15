@@ -11,7 +11,7 @@ import threading
 import json
 import os
 from threading import Thread, Event
-from datetime import datetime
+from datetime import datetime, timezone
 from auction.utils import config_manager
 from auction.scripts.create_auction import create_auction_main
 from auction.scripts.void_unpaid_on_bid import void_unpaid_main
@@ -50,32 +50,44 @@ def load_events(request):
         base_dir = settings.BASE_DIR
         
         # Construct the path to events.json relative to your project root
-        file_path = os.path.join(base_dir, 'events.json')
+        file_path = os.path.join(base_dir, 'auction', 'resources', 'events.json')
+        
+        logger.info(f"Attempting to read events.json from: {file_path}")
         
         if os.path.exists(file_path):
+            logger.info(f"events.json file found at {file_path}")
             with open(file_path, "r") as file:
-                return json.load(file)
+                events = json.load(file)
+            logger.info(f"Loaded {len(events)} events")
+            return events
         else:
             logger.warning(f"Events file not found at {file_path}")
             return []
     except Exception as e:
         logger.error(f"Error loading events: {str(e)}")
+        logger.exception("Full traceback:")
         return []
 
 @login_required
 def get_auction_numbers(request):
     try:
         events = load_events(request)
-        return [
+        logger.debug(f"Loaded events: {events}")
+        auction_numbers = [
             {
                 'id': event['event_id'],
                 'title': event['title'],
                 'timestamp': event['timestamp'],
+                'ending_date': event.get('ending_date'),  # Include ending_date if available
                 'warehouse': event['warehouse']
             }
             for event in events
         ]
-    except (FileNotFoundError, json.JSONDecodeError):
+        logger.debug(f"Processed auction numbers: {auction_numbers}")
+        return auction_numbers
+    except Exception as e:
+        logger.error(f"Error in get_auction_numbers: {str(e)}")
+        logger.exception("Full traceback:")
         return []
 
 # Load initial config
@@ -304,6 +316,7 @@ def download_formatted_csv(request, auction_id):
         return HttpResponse(f"CSV file not found at {csv_path}", status=404)
 
 @login_required
+@require_http_methods(["GET", "POST"])
 def upload_to_hibid_view(request):
     warehouses = list(warehouse_data.keys())
     auctions = get_auction_numbers(request)
@@ -316,47 +329,58 @@ def upload_to_hibid_view(request):
         if not all([auction_id, selected_warehouse]):
             return JsonResponse({'status': 'error', 'message': "Please select both a warehouse and an event."})
         
-        # Fetch the auction details based on the auction_id
         selected_auction = next((a for a in auctions if a['id'] == auction_id), None)
         
-        if selected_auction:
-            ending_date = selected_auction['timestamp']  # Assuming 'timestamp' is the ending date
-            auction_title = selected_auction['title']
-            
-            config_manager.set_active_warehouse(selected_warehouse)
-
-            # Retrieve HiBid credentials
-            username = config_manager.get_warehouse_var('hibid_user_name')
-            password = config_manager.get_warehouse_var('hibid_password')
-
-            if username is None or password is None:
-                return JsonResponse({'status': 'error', 'message': "HiBid credentials are not properly configured."})
-
-            # Create the should_stop Event
-            should_stop = threading.Event()
-
-            def gui_callback(message):
-                print(message)  # You can modify this to log or handle messages as needed
-
-            try:
-                upload_to_hibid_main(
-                    auction_id, 
-                    ending_date, 
-                    auction_title, 
-                    gui_callback, 
-                    should_stop, 
-                    lambda: print("Upload completed"), 
-                    show_browser,
-                    username,  # Make sure this is defined
-                    password,  # Make sure this is defined
-                    selected_warehouse
-                )
-                return JsonResponse({'status': 'success', 'message': f"Auction {auction_id} uploaded to HiBid successfully."})
-            except Exception as e:
-                return JsonResponse({'status': 'error', 'message': f"An error occurred: {str(e)}"})
-        else:
+        if not selected_auction:
+            logger.warning(f"Invalid auction selected: {auction_id}")
             return JsonResponse({'status': 'error', 'message': "Invalid auction selected."})
+
+        logger.info(f"Selected auction details: {selected_auction}")
+        
+        ending_date_str = selected_auction.get('ending_date') or selected_auction.get('timestamp')
+        
+        if not ending_date_str:
+            logger.error(f"No valid ending date found for auction {auction_id}")
+            return JsonResponse({'status': 'error', 'message': "No valid ending date found for the selected auction."})
+        
+        try:
+            ending_date = datetime.fromisoformat(ending_date_str.rstrip('Z')).replace(tzinfo=timezone.utc)
+            logger.info(f"Parsed ending date: {ending_date}")
+            ending_date_str = ending_date.strftime('%Y-%m-%d %H:%M:%S')
+        except (ValueError, AttributeError) as e:
+            logger.error(f"Failed to parse ending date: {ending_date_str}. Error: {str(e)}")
+            return JsonResponse({'status': 'error', 'message': "Invalid date format in auction data."})
+
+        auction_title = selected_auction['title']
+        
+        config_manager.set_active_warehouse(selected_warehouse)
+
+        should_stop = threading.Event()
+
+        def gui_callback(message):
+            logger.info(f"GUI Callback: {message}")
+
+        def callback():
+            logger.info("Upload completed")
+
+        try:
+            logger.info(f"Starting upload for auction {auction_id}, ending on {ending_date_str}")
+            upload_to_hibid_main(
+                auction_id, 
+                ending_date_str,
+                auction_title, 
+                gui_callback, 
+                should_stop, 
+                callback, 
+                show_browser,
+                selected_warehouse
+            )
+            return JsonResponse({'status': 'success', 'message': f"Auction {auction_id} uploaded to HiBid successfully."})
+        except Exception as e:
+            logger.exception(f"Error during upload to HiBid for auction {auction_id}")
+            return JsonResponse({'status': 'error', 'message': f"An error occurred: {str(e)}"})
     
+    # GET request handling
     context = {
         'warehouses': warehouses,
         'auctions': json.dumps(auctions, cls=DjangoJSONEncoder),

@@ -6,35 +6,50 @@ import threading
 import random
 import math
 from auction.utils import config_manager
+from django.conf import settings
+from auction.utils.config_manager import get_warehouse_var, get_global_var, set_active_warehouse
 import sys
 import json
+import logging
+
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'utils', 'config.json')
 config_manager.load_config(config_path)
 
 def get_valid_auctions(selected_warehouse):
-    # Get the directory of the current script
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    
-    # Navigate up to the project root (two levels up from the script)
-    project_root = os.path.dirname(os.path.dirname(script_dir))
-    
-    # Construct the path to events.json
-    events_json_path = os.path.join(project_root, 'events.json')
-    
+    logger.debug(f"get_valid_auctions called with selected_warehouse: {selected_warehouse}")
+
     try:
-        if os.path.exists(events_json_path) and os.path.getsize(events_json_path) > 0:
-            with open(events_json_path, "r") as file:
-                events = json.load(file)
-            return [event["event_id"] for event in events if event.get("warehouse") == selected_warehouse]
+        # Set the active warehouse
+        set_active_warehouse(selected_warehouse)
+
+        # Get the base directory from Django settings
+        base_dir = settings.BASE_DIR
+        logger.debug(f"Base directory from Django settings: {base_dir}")
+
+        # Construct the path to events.json
+        events_json_path = os.path.join(base_dir, 'auction', 'resources', 'events.json')
+        logger.debug(f"Constructed events.json path: {events_json_path}")
+
+        if os.path.exists(events_json_path):
+            logger.debug(f"events.json file found at {events_json_path}")
+            if os.path.getsize(events_json_path) > 0:
+                with open(events_json_path, "r") as file:
+                    events = json.load(file)
+                logger.debug(f"Loaded events: {events}")
+                valid_auctions = [event["event_id"] for event in events if event.get("warehouse") == selected_warehouse]
+                logger.debug(f"Found {len(valid_auctions)} valid auctions for warehouse {selected_warehouse}: {valid_auctions}")
+                return valid_auctions
+            else:
+                logger.warning(f"events.json file is empty at {events_json_path}")
         else:
-            print(f"events.json file not found or is empty at {events_json_path}.")
-            return []
-    except json.JSONDecodeError:
-        print(f"Error decoding events.json file at {events_json_path}. File may be corrupted.")
+            logger.error(f"events.json file not found at {events_json_path}")
         return []
     except Exception as e:
-        print(f"An error occurred while reading {events_json_path}: {e}")
+        logger.error(f"An error occurred while processing events: {str(e)}")
+        logger.exception("Full traceback:")
         return []
 
 def remove_duplicates_main(auction_number, target_msrp, warehouse_name):
