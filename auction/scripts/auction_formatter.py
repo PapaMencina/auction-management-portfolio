@@ -657,73 +657,69 @@ class AuctionFormatter:
         try:
             self.gui_callback("Navigating to upload page...")
             driver.get("https://bid.702auctions.com/Admin/ImportCSV")
-
+            
             self.gui_callback("Waiting for page to load...")
-            WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "import_csv")))
-
+            WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.ID, "CsvImportForm")))
+            
             self.gui_callback("Uploading CSV file...")
-            file_input = driver.find_element(By.ID, "import_csv")
+            file_input = driver.find_element(By.ID, "file")
+            driver.execute_script("arguments[0].style.display = 'block';", file_input)
             file_input.send_keys(csv_path)
-
+            
             self.gui_callback("Unchecking 'Validate Data ONLY' checkbox...")
-            try:
-                uncheck_script = """
-                return new Promise((resolve) => {
-                    var checkbox = document.querySelector('input[name="validate"][type="hidden"]');
-                    var toggle = document.querySelector('.fs-checkbox.fs-checkbox-toggle');
-                    if (checkbox && toggle) {
-                        checkbox.value = 'false';
-                        var event = new Event('change', { bubbles: true });
-                        checkbox.dispatchEvent(event);
-                        
-                        // Update the visual representation
-                        toggle.classList.remove('fs-checkbox-checked');
-                        
-                        // Ensure the checkbox remains unchecked after form submission
-                        var form = document.querySelector('form');
-                        form.addEventListener('submit', function(e) {
-                            setTimeout(function() {
-                                checkbox.value = 'false';
-                                toggle.classList.remove('fs-checkbox-checked');
-                            }, 0);
-                        });
-                        
-                        // Give the page some time to process the change
-                        setTimeout(() => {
-                            resolve(checkbox.value === 'false' && !toggle.classList.contains('fs-checkbox-checked'));
-                        }, 1000);  // Wait for 1 second
-                    } else {
-                        resolve(false);
-                    }
-                });
-                """
-                checkbox_unchecked = driver.execute_script(uncheck_script)
-                
-                if checkbox_unchecked:
-                    self.gui_callback("'Validate Data ONLY' checkbox unchecked successfully.")
-                else:
-                    self.gui_callback("Failed to uncheck 'Validate Data ONLY' checkbox.")
-
-            except Exception as e:
-                self.gui_callback(f"Error unchecking checkbox: {str(e)}")
-
+            checkbox_script = """
+            var checkbox = document.querySelector('input[name="validate"]');
+            var toggle = document.querySelector('.fs-checkbox-toggle');
+            if (checkbox && toggle) {
+                checkbox.value = 'false';
+                toggle.classList.remove('fs-checkbox-checked');
+                toggle.classList.add('fs-checkbox-unchecked');
+            }
+            """
+            driver.execute_script(checkbox_script)
+            
+            self.gui_callback("Updating email address...")
+            email_input = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.ID, "Text1"))
+            )
+            email_input.clear()
+            email_input.send_keys("matthew@702auctions.com")
+            
+            # Add a small delay to ensure all changes are registered
+            time.sleep(2)
+            
             self.gui_callback("Submitting form...")
-            submit_button = driver.find_element(By.XPATH, "//button[@type='submit']")
-            submit_button.click()
-
+            submit_button = WebDriverWait(driver, 20).until(
+                EC.element_to_be_clickable((By.CSS_SELECTOR, "input.btn.btn-info.btn-sm[type='submit'][value='Upload CSV']"))
+            )
+            
+            # Scroll the button into view
+            driver.execute_script("arguments[0].scrollIntoView(true);", submit_button)
+            time.sleep(1)  # Give time for any scrolling to complete
+            
+            # Try multiple click methods
+            try:
+                submit_button.click()
+            except:
+                try:
+                    driver.execute_script("arguments[0].click();", submit_button)
+                except:
+                    actions = ActionChains(driver)
+                    actions.move_to_element(submit_button).click().perform()
+            
             self.gui_callback("Waiting for upload to complete...")
-            WebDriverWait(driver, 60).until(EC.presence_of_element_located((By.ID, "flash-message")))
-
-            flash_message = driver.find_element(By.ID, "flash-message").text
-            self.gui_callback(f"Upload result: {flash_message}")
-
-            if "successfully" in flash_message.lower():
-                self.gui_callback("CSV uploaded successfully!")
+            WebDriverWait(driver, 120).until(EC.presence_of_element_located((By.CLASS_NAME, "alert-success")))
+            
+            success_message = driver.find_element(By.CLASS_NAME, "alert-success").text
+            self.gui_callback(f"Upload result: {success_message}")
+            
+            if "CSV listing import has started" in success_message:
+                self.gui_callback("CSV upload initiated successfully!")
                 return True
             else:
                 self.gui_callback("CSV upload failed.")
                 return False
-
+            
         except Exception as e:
             self.gui_callback(f"Failed to upload CSV: {str(e)}")
             return False
