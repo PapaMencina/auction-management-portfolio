@@ -73,6 +73,7 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'auction_webapp.wsgi.application'
 
+AUTH_USER_MODEL = 'auction.CustomUser'
 
 # Database
 # https://docs.djangoproject.com/en/5.0/ref/settings/#databases
@@ -151,5 +152,7 @@ SESSION_ENGINE = 'django.contrib.sessions.backends.db'
 SESSION_COOKIE_SAMESITE = 'Strict'
 
 LOGIN_URL = '/login/'
-LOGIN_REDIRECT_URL = '/'
+LOGIN_REDIRECT_URL = '/auction/'
 LOGOUT_REDIRECT_URL = '/login/'
+
+MESSAGE_STORAGE = 'django.contrib.messages.storage.session.SessionStorage'
