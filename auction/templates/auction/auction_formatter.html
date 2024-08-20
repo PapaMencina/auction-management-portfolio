@@ -37,9 +37,11 @@
             const resultMessage = document.getElementById('result-message');
             const downloadButton = document.getElementById('download-csv');
 
-            // Add the show_browser value to formData
-            const showBrowser = document.getElementById('show_browser').checked;
-            formData.append('show_browser', showBrowser ? '1' : '0');
+            // Add the show_browser value to formData if the element exists
+            const showBrowserElement = document.getElementById('show_browser');
+            if (showBrowserElement) {
+                formData.append('show_browser', showBrowserElement.checked ? '1' : '0');
+            }
 
             fetch('{% url "auction:auction_formatter" %}', {
                 method: 'POST',
@@ -92,10 +94,12 @@
                 <!-- Options will be populated dynamically by JavaScript -->
             </select>
         </div>
+        {% if can_use_show_browser %}
         <div>
             <label for="show_browser">Show Browser:</label>
             <input type="checkbox" id="show_browser" name="show_browser" value="1">
         </div>
+        {% endif %}
         <button type="submit">Format Auction</button>
     </form>
     <div id="result-message"></div>

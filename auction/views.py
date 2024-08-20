@@ -121,7 +121,7 @@ def create_auction_view(request):
     if request.method == 'POST':
         auction_title = request.POST.get('auction_title')
         ending_date = datetime.strptime(request.POST.get('ending_date'), '%Y-%m-%d')
-        show_browser = 'show_browser' in request.POST
+        show_browser = 'show_browser' in request.POST and request.user.has_perm('auction.can_use_show_browser')
         selected_warehouse = request.POST.get('selected_warehouse')
 
         config_manager.set_active_warehouse(selected_warehouse)
@@ -129,9 +129,12 @@ def create_auction_view(request):
         result = f"Auction '{auction_title}' created successfully."
         return render(request, 'auction/result.html', {'result': result})
     
-    # This is the only line you need to change
     warehouses = list(warehouse_data.keys())
-    return render(request, 'auction/create_auction.html', {'warehouses': warehouses})
+    can_use_show_browser = request.user.has_perm('auction.can_use_show_browser')
+    return render(request, 'auction/create_auction.html', {
+        'warehouses': warehouses,
+        'can_use_show_browser': can_use_show_browser
+    })
 
 @login_required
 @require_http_methods(["GET", "POST"])
@@ -139,11 +142,13 @@ def void_unpaid_view(request):
     warehouses = list(warehouse_data.keys())
     default_warehouse = warehouses[0] if warehouses else None
     events = load_events(request)
+    can_use_show_browser = request.user.has_perm('auction.can_use_show_browser')
 
     if request.method == 'GET':
         context = {
             'warehouses': warehouses,
             'default_warehouse': default_warehouse,
+            'can_use_show_browser': can_use_show_browser,
         }
         return render(request, 'auction/void_unpaid.html', context)
 
@@ -161,7 +166,7 @@ def void_unpaid_view(request):
             warehouse = data.get('warehouse')
             auction_id = data.get('auction_id')
             upload_choice = data.get('upload_choice')
-            show_browser = data.get('show_browser')
+            show_browser = data.get('show_browser') and can_use_show_browser
             
             logger.info(f"warehouse: {warehouse}")
             logger.info(f"auction_id: {auction_id}")
@@ -169,7 +174,7 @@ def void_unpaid_view(request):
             logger.info(f"show_browser: {show_browser}")
 
             # Check for missing parameters
-            required_params = ['warehouse', 'auction_id', 'upload_choice', 'show_browser']
+            required_params = ['warehouse', 'auction_id', 'upload_choice']
             missing = [param for param in required_params if data.get(param) is None]
             if missing:
                 return JsonResponse({'error': f'Missing required parameters: {", ".join(missing)}'}, status=400)
@@ -201,8 +206,9 @@ def void_unpaid_view(request):
 
 @login_required
 def remove_duplicates_view(request):
-    auctions = get_auction_numbers(request)  # Pass the request here
+    auctions = get_auction_numbers(request)
     warehouses = list(warehouse_data.keys())
+    can_use_show_browser = request.user.has_perm('auction.can_use_show_browser')
     
     print("All auctions:", auctions)  # Debug print
     
@@ -210,8 +216,9 @@ def remove_duplicates_view(request):
         auction_number = request.POST.get('auction_number')
         target_msrp_str = request.POST.get('target_msrp')
         warehouse_name = request.POST.get('warehouse_name')
+        show_browser = request.POST.get('show_browser') == 'on' and can_use_show_browser
         
-        print(f"Selected: auction={auction_number}, warehouse={warehouse_name}, target_msrp={target_msrp_str}")  # Debug print
+        print(f"Selected: auction={auction_number}, warehouse={warehouse_name}, target_msrp={target_msrp_str}, show_browser={show_browser}")  # Debug print
         
         try:
             target_msrp = float(target_msrp_str)
@@ -223,7 +230,7 @@ def remove_duplicates_view(request):
         
         try:
             config_manager.set_active_warehouse(warehouse_name)
-            remove_duplicates_main(auction_number, target_msrp, warehouse_name)
+            remove_duplicates_main(auction_number, target_msrp, warehouse_name, show_browser)
             result = f"Duplicates removed successfully for auction {auction_number}."
             return render(request, 'auction/result.html', {'result': result})
         except Exception as e:
@@ -234,6 +241,7 @@ def remove_duplicates_view(request):
     context = {
         'auctions_json': json.dumps(auctions, cls=DjangoJSONEncoder),
         'warehouses': warehouses,
+        'can_use_show_browser': can_use_show_browser,
     }
     return render(request, 'auction/remove_duplicates.html', context)
 
@@ -241,11 +249,12 @@ def remove_duplicates_view(request):
 def auction_formatter_view(request):
     warehouses = list(config_manager.config.get('warehouses', {}).keys())
     auctions = get_auction_numbers(request)
+    can_use_show_browser = request.user.has_perm('auction.can_use_show_browser')
 
     if request.method == 'POST':
         auction_id = request.POST.get('auction_id')
         selected_warehouse = request.POST.get('selected_warehouse')
-        show_browser = request.POST.get('show_browser') == '1'  # Convert to boolean
+        show_browser = request.POST.get('show_browser') == '1' and can_use_show_browser
 
         config_manager.set_active_warehouse(selected_warehouse)
 
@@ -264,7 +273,7 @@ def auction_formatter_view(request):
                 gui_callback, 
                 should_stop, 
                 callback,
-                show_browser  # Pass the show_browser parameter
+                show_browser
             )
             
             if formatter and formatter.final_csv_path and os.path.exists(formatter.final_csv_path):
@@ -290,6 +299,7 @@ def auction_formatter_view(request):
     context = {
         'warehouses': warehouses,
         'auctions': json.dumps(auctions, cls=DjangoJSONEncoder),
+        'can_use_show_browser': can_use_show_browser,
     }
     return render(request, 'auction/auction_formatter.html', context)
 
@@ -320,10 +330,11 @@ def download_formatted_csv(request, auction_id):
 def upload_to_hibid_view(request):
     warehouses = list(warehouse_data.keys())
     auctions = get_auction_numbers(request)
+    can_use_show_browser = request.user.has_perm('auction.can_use_show_browser')
     
     if request.method == 'POST':
         auction_id = request.POST.get('auction_id')
-        show_browser = 'show_browser' in request.POST
+        show_browser = 'show_browser' in request.POST and can_use_show_browser
         selected_warehouse = request.POST.get('selected_warehouse')
         
         if not all([auction_id, selected_warehouse]):
@@ -384,5 +395,6 @@ def upload_to_hibid_view(request):
     context = {
         'warehouses': warehouses,
         'auctions': json.dumps(auctions, cls=DjangoJSONEncoder),
+        'can_use_show_browser': can_use_show_browser,
     }
     return render(request, 'auction/upload_to_hibid.html', context)

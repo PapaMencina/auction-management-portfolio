@@ -43,10 +43,12 @@
             <label for="ending_date">Ending Date (YYYY-MM-DD):</label>
             <input type="date" id="ending_date" name="ending_date" required>
         </div>
+        {% if can_use_show_browser %}
         <div>
             <label for="show_browser">Show Browser:</label>
             <input type="checkbox" id="show_browser" name="show_browser">
         </div>
+        {% endif %}
         <button type="submit">Run Create Auction Script</button>
     </form>
 </body>

@@ -31,10 +31,12 @@
             <input type="radio" id="upload_no" name="upload_choice" value="0" required>
             <label for="upload_no">No</label>
         </div>
+        {% if can_use_show_browser %}
         <div>
             <label for="show_browser">Show Browser:</label>
             <input type="checkbox" id="show_browser" name="show_browser">
         </div>
+        {% endif %}
         <button type="submit">Void Unpaid Transactions</button>
     </form>
 
@@ -55,7 +57,7 @@
             warehouse: form.warehouse.value,
             auction_id: form.auction_id.value,
             upload_choice: parseInt(form.upload_choice.value),
-            show_browser: form.show_browser.checked,
+            show_browser: form.show_browser ? form.show_browser.checked : false,
         };
         
         console.log("Sending data:", data);

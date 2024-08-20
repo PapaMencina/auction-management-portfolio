@@ -21,6 +21,14 @@
     <input type="number" name="target_msrp" id="target_msrp" required>
     <br><br>
     
+    {% if can_use_show_browser %}
+    <div>
+        <label for="show_browser">Show Browser:</label>
+        <input type="checkbox" id="show_browser" name="show_browser">
+    </div>
+    <br><br>
+    {% endif %}
+    
     <input type="submit" value="Remove Duplicates">
 </form>
 
