@@ -18,6 +18,9 @@ from auction.scripts.void_unpaid_on_bid import void_unpaid_main
 from auction.scripts.remove_duplicates_in_airtable import remove_duplicates_main
 from auction.scripts.auction_formatter import auction_formatter_main
 from auction.scripts.upload_to_hibid import upload_to_hibid_main
+from uuid import uuid4
+from django.http import JsonResponse
+from auction.utils.progress_tracker import ProgressTracker
 
 logger = logging.getLogger(__name__)
 
@@ -125,9 +128,19 @@ def create_auction_view(request):
         selected_warehouse = request.POST.get('selected_warehouse')
 
         config_manager.set_active_warehouse(selected_warehouse)
-        create_auction_main(auction_title, ending_date, show_browser, selected_warehouse)
-        result = f"Auction '{auction_title}' created successfully."
-        return render(request, 'auction/result.html', {'result': result})
+        
+        task_id = str(uuid4())
+        
+        # Start the auction creation process in a separate thread
+        Thread(target=create_auction_main, kwargs={
+            'auction_title': auction_title,
+            'ending_date': ending_date,
+            'show_browser': show_browser,
+            'selected_warehouse': selected_warehouse,
+            'task_id': task_id
+        }).start()
+        
+        return JsonResponse({'task_id': task_id})
     
     warehouses = list(warehouse_data.keys())
     can_use_show_browser = request.user.has_perm('auction.can_use_show_browser')
@@ -135,6 +148,13 @@ def create_auction_view(request):
         'warehouses': warehouses,
         'can_use_show_browser': can_use_show_browser
     })
+
+@login_required
+def get_task_progress(request, task_id):
+    progress = ProgressTracker.get_progress(task_id)
+    if 'error' in progress:
+        return JsonResponse({'error': progress['error']}, status=500)
+    return JsonResponse(progress)
 
 @login_required
 @require_http_methods(["GET", "POST"])
@@ -153,35 +173,12 @@ def void_unpaid_view(request):
         return render(request, 'auction/void_unpaid.html', context)
 
     elif request.method == 'POST':
-        logger.info("Received POST request to void_unpaid_view")
-        logger.info(f"Request headers: {request.headers}")
-
         try:
-            body = request.body.decode('utf-8')
-            logger.info(f"Request body: {body}")
-            
-            data = json.loads(body)
-            logger.info(f"Parsed JSON data: {data}")
-            
+            data = json.loads(request.body)
             warehouse = data.get('warehouse')
             auction_id = data.get('auction_id')
-            upload_choice = data.get('upload_choice')
+            upload_choice = int(data.get('upload_choice'))
             show_browser = data.get('show_browser') and can_use_show_browser
-            
-            logger.info(f"warehouse: {warehouse}")
-            logger.info(f"auction_id: {auction_id}")
-            logger.info(f"upload_choice: {upload_choice}")
-            logger.info(f"show_browser: {show_browser}")
-
-            # Check for missing parameters
-            required_params = ['warehouse', 'auction_id', 'upload_choice']
-            missing = [param for param in required_params if data.get(param) is None]
-            if missing:
-                return JsonResponse({'error': f'Missing required parameters: {", ".join(missing)}'}, status=400)
-
-            # Convert types
-            upload_choice = int(upload_choice)
-            show_browser = bool(show_browser)
 
             # Validate auction ID against the selected warehouse
             valid_auction = any(event for event in events if event['event_id'] == auction_id and event['warehouse'] == warehouse)
@@ -189,17 +186,20 @@ def void_unpaid_view(request):
             if not valid_auction:
                 return JsonResponse({'error': 'Invalid Auction ID - Please confirm the auction ID and Warehouse, then try again.'}, status=400)
 
-            # Call the main function with the warehouse parameter
-            config_manager.set_active_warehouse(warehouse)
-            void_unpaid_main(auction_id, upload_choice, show_browser, warehouse)
-            return JsonResponse({'message': 'Void unpaid process started successfully'})
+            task_id = str(uuid4())
+            
+            Thread(target=void_unpaid_main, kwargs={
+                'auction_id': auction_id,
+                'upload_choice': upload_choice,
+                'show_browser': show_browser,
+                'warehouse': warehouse,
+                'task_id': task_id
+            }).start()
 
-        except json.JSONDecodeError as e:
-            logger.error(f"JSON Decode Error: {str(e)}")
-            return JsonResponse({'error': f'Invalid JSON: {str(e)}'}, status=400)
-        except ValueError as e:
-            logger.error(f"Value Error: {str(e)}")
-            return JsonResponse({'error': f'Invalid value for a parameter: {str(e)}'}, status=400)
+            return JsonResponse({'task_id': task_id})
+
+        except json.JSONDecodeError:
+            return JsonResponse({'error': 'Invalid JSON data'}, status=400)
         except Exception as e:
             logger.exception("Unexpected error in void_unpaid_view")
             return JsonResponse({'error': f'An unexpected error occurred: {str(e)}'}, status=500)
@@ -210,33 +210,23 @@ def remove_duplicates_view(request):
     warehouses = list(warehouse_data.keys())
     can_use_show_browser = request.user.has_perm('auction.can_use_show_browser')
     
-    print("All auctions:", auctions)  # Debug print
-    
     if request.method == 'POST':
         auction_number = request.POST.get('auction_number')
-        target_msrp_str = request.POST.get('target_msrp')
+        target_msrp = float(request.POST.get('target_msrp'))
         warehouse_name = request.POST.get('warehouse_name')
         show_browser = request.POST.get('show_browser') == 'on' and can_use_show_browser
         
-        print(f"Selected: auction={auction_number}, warehouse={warehouse_name}, target_msrp={target_msrp_str}, show_browser={show_browser}")  # Debug print
+        task_id = str(uuid4())
         
-        try:
-            target_msrp = float(target_msrp_str)
-        except ValueError:
-            return JsonResponse({'status': 'error', 'message': 'Invalid target MSRP value'})
+        Thread(target=remove_duplicates_main, kwargs={
+            'auction_number': auction_number,
+            'target_msrp': target_msrp,
+            'warehouse_name': warehouse_name,
+            'show_browser': show_browser,
+            'task_id': task_id
+        }).start()
         
-        if not auction_number or not warehouse_name:
-            return JsonResponse({'status': 'error', 'message': 'Missing auction number or warehouse name'})
-        
-        try:
-            config_manager.set_active_warehouse(warehouse_name)
-            remove_duplicates_main(auction_number, target_msrp, warehouse_name, show_browser)
-            result = f"Duplicates removed successfully for auction {auction_number}."
-            return render(request, 'auction/result.html', {'result': result})
-        except Exception as e:
-            error_message = f"An error occurred: {str(e)}"
-            print(error_message)  # Log the error
-            return JsonResponse({'status': 'error', 'message': error_message})
+        return JsonResponse({'task_id': task_id})
     
     context = {
         'auctions_json': json.dumps(auctions, cls=DjangoJSONEncoder),
@@ -258,43 +248,16 @@ def auction_formatter_view(request):
 
         config_manager.set_active_warehouse(selected_warehouse)
 
-        def gui_callback(message):
-            logger.info(message)
+        task_id = str(uuid4())
 
-        should_stop = threading.Event()
+        Thread(target=auction_formatter_main, kwargs={
+            'auction_id': auction_id,
+            'selected_warehouse': selected_warehouse,
+            'show_browser': show_browser,
+            'task_id': task_id
+        }).start()
 
-        def callback():
-            logger.info("Auction formatting process completed.")
-
-        try:
-            formatter = auction_formatter_main(
-                auction_id, 
-                selected_warehouse, 
-                gui_callback, 
-                should_stop, 
-                callback,
-                show_browser
-            )
-            
-            if formatter and formatter.final_csv_path and os.path.exists(formatter.final_csv_path):
-                result = f"Auction {auction_id} formatted successfully. CSV file is ready for download."
-                return JsonResponse({
-                    'status': 'success',
-                    'message': result,
-                    'show_download': True,
-                    'auction_id': auction_id
-                })
-            else:
-                return JsonResponse({
-                    'status': 'error',
-                    'message': f"Auction {auction_id} formatted, but CSV file was not created."
-                })
-        except Exception as e:
-            logger.exception("Error in auction formatting process")
-            return JsonResponse({
-                'status': 'error',
-                'message': f"An error occurred: {str(e)}"
-            })
+        return JsonResponse({'task_id': task_id})
 
     context = {
         'warehouses': warehouses,
@@ -343,53 +306,35 @@ def upload_to_hibid_view(request):
         selected_auction = next((a for a in auctions if a['id'] == auction_id), None)
         
         if not selected_auction:
-            logger.warning(f"Invalid auction selected: {auction_id}")
             return JsonResponse({'status': 'error', 'message': "Invalid auction selected."})
 
-        logger.info(f"Selected auction details: {selected_auction}")
-        
         ending_date_str = selected_auction.get('ending_date') or selected_auction.get('timestamp')
         
         if not ending_date_str:
-            logger.error(f"No valid ending date found for auction {auction_id}")
             return JsonResponse({'status': 'error', 'message': "No valid ending date found for the selected auction."})
         
         try:
             ending_date = datetime.fromisoformat(ending_date_str.rstrip('Z')).replace(tzinfo=timezone.utc)
-            logger.info(f"Parsed ending date: {ending_date}")
             ending_date_str = ending_date.strftime('%Y-%m-%d %H:%M:%S')
         except (ValueError, AttributeError) as e:
-            logger.error(f"Failed to parse ending date: {ending_date_str}. Error: {str(e)}")
             return JsonResponse({'status': 'error', 'message': "Invalid date format in auction data."})
 
         auction_title = selected_auction['title']
         
         config_manager.set_active_warehouse(selected_warehouse)
 
-        should_stop = threading.Event()
+        task_id = str(uuid4())
 
-        def gui_callback(message):
-            logger.info(f"GUI Callback: {message}")
+        Thread(target=upload_to_hibid_main, kwargs={
+            'auction_id': auction_id,
+            'ending_date': ending_date_str,
+            'auction_title': auction_title,
+            'show_browser': show_browser,
+            'selected_warehouse': selected_warehouse,
+            'task_id': task_id
+        }).start()
 
-        def callback():
-            logger.info("Upload completed")
-
-        try:
-            logger.info(f"Starting upload for auction {auction_id}, ending on {ending_date_str}")
-            upload_to_hibid_main(
-                auction_id, 
-                ending_date_str,
-                auction_title, 
-                gui_callback, 
-                should_stop, 
-                callback, 
-                show_browser,
-                selected_warehouse
-            )
-            return JsonResponse({'status': 'success', 'message': f"Auction {auction_id} uploaded to HiBid successfully."})
-        except Exception as e:
-            logger.exception(f"Error during upload to HiBid for auction {auction_id}")
-            return JsonResponse({'status': 'error', 'message': f"An error occurred: {str(e)}"})
+        return JsonResponse({'task_id': task_id})
     
     # GET request handling
     context = {

@@ -4,6 +4,29 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Void Unpaid Transactions</title>
+    <style>
+        .progress-container {
+            margin-top: 10px;
+            display: none;
+        }
+        .progress-bar {
+            width: 100%;
+            background-color: #f0f0f0;
+            padding: 1px;
+            border: 1px solid #ccc;
+        }
+        .progress-bar-fill {
+            display: block;
+            height: 20px;
+            background-color: #4CAF50;
+            width: 0%;
+            transition: width 500ms ease-in-out;
+        }
+        #progressText {
+            margin-top: 5px;
+            font-size: 14px;
+        }
+    </style>
 </head>
 <body>
     <h1>Void Unpaid Transactions</h1>
@@ -40,58 +63,93 @@
         <button type="submit">Void Unpaid Transactions</button>
     </form>
 
+    <div class="progress-container" id="progressContainer">
+        <div class="progress-bar">
+            <span class="progress-bar-fill"></span>
+        </div>
+        <div id="progressText"></div>
+    </div>
+
     <div id="result"></div>
 
     <script>
-    document.addEventListener('DOMContentLoaded', function() {
-        document.getElementById('voidUnpaidForm').addEventListener('submit', function(e) {
-            e.preventDefault();
-            voidUnpaid();
+        document.addEventListener('DOMContentLoaded', function() {
+            document.getElementById('voidUnpaidForm').addEventListener('submit', function(e) {
+                e.preventDefault();
+                voidUnpaid();
+            });
         });
-    });
-
-    function voidUnpaid() {
-        console.log("voidUnpaid function called");
-        const form = document.getElementById('voidUnpaidForm');
-        const data = {
-            warehouse: form.warehouse.value,
-            auction_id: form.auction_id.value,
-            upload_choice: parseInt(form.upload_choice.value),
-            show_browser: form.show_browser ? form.show_browser.checked : false,
-        };
         
-        console.log("Sending data:", data);
-
-        document.querySelector('button[type="submit"]').disabled = true;
-        document.getElementById('result').textContent = 'Processing...';
-
-        fetch('{% url "auction:void_unpaid" %}', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRFToken': '{{ csrf_token }}'
-            },
-            body: JSON.stringify(data)
-        })
-        .then(response => {
-            if (!response.ok) {
-                return response.json().then(data => { throw new Error(data.error); });
-            }
-            return response.json();
-        })
-        .then(data => {
-            console.log("Response data:", data);
-            document.getElementById('result').textContent = "Success: " + data.message;
-        })
-        .catch(error => {
-            console.error('Error:', error);
-            document.getElementById('result').textContent = "Error: " + error.message;
-        })
-        .finally(() => {
-            document.querySelector('button[type="submit"]').disabled = false;
-        });
-    }
-    </script>
+        function voidUnpaid() {
+            const form = document.getElementById('voidUnpaidForm');
+            const data = {
+                warehouse: form.warehouse.value,
+                auction_id: form.auction_id.value,
+                upload_choice: parseInt(form.upload_choice.value),
+                show_browser: form.show_browser ? form.show_browser.checked : false,
+            };
+        
+            document.querySelector('button[type="submit"]').disabled = true;
+            document.getElementById('result').textContent = '';
+            document.getElementById('progressContainer').style.display = 'block';
+            updateProgress(0, 'Starting process...');
+        
+            fetch('{% url "auction:void_unpaid" %}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': '{{ csrf_token }}'
+                },
+                body: JSON.stringify(data)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.task_id) {
+                    pollProgress(data.task_id);
+                } else if (data.error) {
+                    throw new Error(data.error);
+                } else {
+                    updateProgress(100, 'Process completed');
+                    document.getElementById('result').textContent = "Success: " + data.message;
+                }
+            })
+            .catch(error => {
+                document.getElementById('result').textContent = "Error: " + error.message;
+                document.getElementById('progressContainer').style.display = 'none';
+            })
+            .finally(() => {
+                document.querySelector('button[type="submit"]').disabled = false;
+            });
+        }
+        
+        function pollProgress(taskId) {
+            fetch(`/auction/task_progress/${taskId}/`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        throw new Error(data.error);
+                    }
+                    if (data.progress < 100) {
+                        updateProgress(data.progress, data.status);
+                        setTimeout(() => pollProgress(taskId), 1000);
+                    } else {
+                        updateProgress(100, 'Process completed');
+                        document.getElementById('result').textContent = "Success: Task completed";
+                    }
+                })
+                .catch(error => {
+                    document.getElementById('result').textContent = "Error: " + error.message;
+                    document.getElementById('progressContainer').style.display = 'none';
+                });
+        }
+        
+        function updateProgress(percent, status) {
+            const progressBar = document.querySelector('.progress-bar-fill');
+            const progressText = document.getElementById('progressText');
+            progressBar.style.width = `${percent}%`;
+            progressText.textContent = status ? `${percent}% - ${status}` : `${percent}%`;
+        }
+        </script>
 
     <p><a href="{% url 'auction:home' %}">Back to Home</a></p>
 </body>

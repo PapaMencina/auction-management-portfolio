@@ -15,13 +15,53 @@ from selenium.webdriver.firefox.service import Service as FirefoxService
 from selenium.webdriver.firefox.options import Options as FirefoxOptions
 from webdriver_manager.firefox import GeckoDriverManager
 from auction.utils import config_manager
+from auction.utils.progress_tracker import ProgressTracker, run_with_progress
+import logging
 
 # Load configuration
 config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'utils', 'config.json')
 config_manager.load_config(config_path)
 
+logger = logging.getLogger(__name__)
+
 # Define a lock for thread-safe file operations
 file_lock = threading.Lock()
+
+def wait_for_element(driver, locator, timeout=30, poll_frequency=0.5):
+    """Wait for an element to be present and return it."""
+    return WebDriverWait(driver, timeout, poll_frequency).until(
+        EC.presence_of_element_located(locator)
+    )
+
+def wait_for_loading_to_complete(driver, timeout=30):
+    """Wait for the loading indicator to disappear."""
+    try:
+        WebDriverWait(driver, timeout).until_not(
+            EC.presence_of_element_located((By.XPATH, "//div[contains(@class, 'loading')]"))
+        )
+    except TimeoutException:
+        logger.warning("Loading indicator not found or did not disappear")
+
+def wait_for_download(download_dir, timeout=300):
+    """Wait for a file to be downloaded and return its path."""
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        files = os.listdir(download_dir)
+        complete_files = [f for f in files if not f.endswith('.part') and not f.endswith('.crdownload')]
+        if complete_files:
+            return os.path.join(download_dir, complete_files[0])
+        time.sleep(1)
+    return None
+
+def get_browser_logs(driver):
+    """Attempt to retrieve browser logs and log any severe errors."""
+    try:
+        logs = driver.get_log('browser')
+        for log in logs:
+            if log['level'] == 'SEVERE':
+                logger.error(f"Browser error: {log['message']}")
+    except Exception as e:
+        logger.warning(f"Unable to retrieve browser logs: {e}")
 
 def save_event_to_file(event_data):
     file_path = os.path.join(get_resources_dir(''), 'events.json')
@@ -58,9 +98,9 @@ def get_resources_dir(folder=''):
     base_path = os.environ.get('AUCTION_RESOURCES_PATH', os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'resources'))
     return os.path.join(base_path, folder)
 
-def wait_for_download(gui_callback, timeout=60):
-    """Waits for a new file to appear in the resources directory and ensures the download is complete."""
-    download_dir = get_resources_dir('event_images')  # Specify the correct subdirectory
+def wait_for_download(gui_callback, timeout=300):
+    download_dir = get_resources_dir('event_images')
+    logger.debug(f"Waiting for download in directory: {download_dir}")
     initial_files = set(os.listdir(download_dir))
     start_time = time.time()
 
@@ -70,20 +110,20 @@ def wait_for_download(gui_callback, timeout=60):
 
         for file in new_files:
             file_path = os.path.join(download_dir, file)
-            if not file.endswith(".part") and not file.endswith(".crdownload"):
-                # Wait a bit to ensure the file is fully written
+            logger.debug(f"New file detected: {file_path}")
+            if not file.endswith((".part", ".crdownload")) and file.endswith((".jpg", ".png")):
                 time.sleep(2)
-                if os.path.getsize(file_path) > 0:
-                    gui_callback(f"Download complete: {file_path}")
+                if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
+                    logger.info(f"Download complete: {file_path}")
                     return file_path
 
         elapsed_time = time.time() - start_time
         if elapsed_time > timeout:
-            gui_callback("Download timed out.")
+            logger.error(f"Download timed out after {timeout} seconds.")
             return None
 
-        if int(elapsed_time) % 5 == 0:
-            gui_callback(f"Waiting for download... {int(elapsed_time)}s elapsed")
+        if int(elapsed_time) % 10 == 0:
+            logger.debug(f"Still waiting for download... {int(elapsed_time)}s elapsed")
 
         time.sleep(1)
 
@@ -93,7 +133,7 @@ def configure_driver(url, show_browser):
     firefox_options.set_preference("browser.download.folderList", 2)
     firefox_options.set_preference("browser.download.manager.showWhenStarting", False)
     firefox_options.set_preference("browser.download.dir", get_resources_dir('event_images'))
-    firefox_options.set_preference("browser.helperApps.neverAsk.saveToDisk", "image/jpeg")
+    firefox_options.set_preference("browser.helperApps.neverAsk.saveToDisk", "image/jpeg,image/png")
 
     if not show_browser:
         firefox_options.add_argument("--headless")
@@ -132,13 +172,13 @@ def enter_text(driver, locator, text, clear_first=True, timeout=10):
     time.sleep(1)
     element.send_keys(text)
 
-def login(driver, user_locator, pass_locator, username, password, url, gui_callback):
+def login(driver, user_locator, pass_locator, username, password, url, update_progress):
     """Logs in to the specified URL using provided credentials."""
     try:
         enter_text(driver, user_locator, username)
         enter_text(driver, pass_locator, password + Keys.RETURN)
     except Exception as e:
-        gui_callback(f"Login failed: {e}")
+        update_progress(0, f"Login failed: {e}")
         driver.get(url)
 
 def set_content_in_ckeditor(driver, iframe_title, formatted_text):
@@ -154,59 +194,73 @@ def element_value_is_not_empty(driver, element_id):
     element = driver.find_element(By.ID, element_id)
     return element.get_attribute('value') != ''
 
-def get_image(driver, ending_date_input, relaythat_url, gui_callback, selected_warehouse):
+def get_image(driver, ending_date_input, relaythat_url, update_progress, selected_warehouse):
     try:
-        gui_callback('Getting auction image...')
+        logger.info('Logging in to RelayThat...')
+        update_progress(30, 'Logging in to RelayThat...')
         relaythat_email = config_manager.get_global_var('relaythat_email')
         relaythat_password = config_manager.get_global_var('relaythat_password')
-        login(driver, (By.ID, "user_email"), (By.ID, "user_password"), relaythat_email, relaythat_password, relaythat_url, gui_callback)
-    except Exception as e:
-        gui_callback(f"Error logging in: {e}")
-        driver.quit()
-        return
+        login(driver, (By.ID, "user_email"), (By.ID, "user_password"), relaythat_email, relaythat_password, relaythat_url, update_progress)
 
-    try:
-        if selected_warehouse == "Sunrise Warehouse":
-            image_text = "OFFSITE"
+        logger.info('Generating auction image...')
+        update_progress(40, 'Generating auction image...')
+        image_text = "OFFSITE" if selected_warehouse == "Sunrise Warehouse" else f"Ending {ending_date_input}"
+
+        text_input = wait_for_element(driver, (By.XPATH, "//*[@id='asset-inputs-text']/div[1]/div[1]/form/textarea"))
+        text_input.clear()
+        text_input.send_keys(image_text)
+
+        generate_button = WebDriverWait(driver, 30).until(
+            EC.element_to_be_clickable((By.XPATH, "//*[@id='main_container']/div/div[2]/div[1]/div/div[2]/div[1]/button"))
+        )
+        generate_button.click()
+        wait_for_loading_to_complete(driver)
+
+        download_button = WebDriverWait(driver, 30).until(
+            EC.element_to_be_clickable((By.XPATH, "//*[@id='main_container']/div/div[2]/div[1]/div/div[2]/div[1]/div[2]/div[2]/button"))
+        )
+        download_button.click()
+        wait_for_loading_to_complete(driver)
+
+        logger.info("Waiting for image download...")
+        update_progress(45, 'Waiting for image download...')
+        download_dir = get_resources_dir('event_images')
+        downloaded_file = wait_for_download(download_dir)
+        if downloaded_file:
+            logger.info(f"Image downloaded: {downloaded_file}")
+            update_progress(48, f"Image downloaded: {downloaded_file}")
+            return downloaded_file
         else:
-            image_text = f"Ending {ending_date_input}"
-
-        enter_text(driver, (By.XPATH, "//*[@id='asset-inputs-text']/div[1]/div[1]/form/textarea"), image_text)
-        time.sleep(1)
-        click_element(driver, (By.XPATH, "//*[@id='main_container']/div/div[2]/div[1]/div/div[2]/div[1]/button"))
-        time.sleep(1)
-        click_element(driver, (By.XPATH, "//*[@id='main_container']/div/div[2]/div[1]/div/div[2]/div[1]/div[2]/div[2]/button"))
-
-        # Wait for the download to complete
-        downloaded_file_path = wait_for_download(gui_callback, timeout=120)  # Increased timeout
-        if downloaded_file_path:
-            gui_callback(f"Image downloaded: {downloaded_file_path}")
-            return downloaded_file_path
-        else:
-            gui_callback("No file was downloaded.")
+            logger.error("No file was downloaded.")
+            update_progress(48, "No file was downloaded.")
             return None
+
     except Exception as e:
-        gui_callback(f"An error occurred while getting the image: {e}")
+        logger.error(f"An error occurred: {e}")
+        logger.error(traceback.format_exc())
+        update_progress(48, f"An error occurred: {e}")
         return None
 
-def create_auction(driver, auction_title, image_path, formatted_start_date, bid_formatted_ending_date, gui_callback, selected_warehouse):
+def create_auction(driver, auction_title, image_path, formatted_start_date, bid_formatted_ending_date, update_progress, selected_warehouse):
     try:
-        gui_callback('Creating auction on bid...')
+        update_progress(55, 'Navigating to auction creation page...')
         bid_url = config_manager.get_global_var('bid_url')
         driver.get(bid_url)
     except Exception as e:
-        gui_callback(f"Error configuring driver: {e}")
+        update_progress(55, f"Error configuring driver: {e}")
         return
 
     try:
+        update_progress(60, 'Logging in to auction site...')
         bid_username = config_manager.get_warehouse_var('bid_username')
         bid_password = config_manager.get_warehouse_var('bid_password')
-        login(driver, (By.ID, "username"), (By.ID, "password"), bid_username, bid_password, bid_url, gui_callback)
+        login(driver, (By.ID, "username"), (By.ID, "password"), bid_username, bid_password, bid_url, update_progress)
     except Exception as e:
-        gui_callback(f"Error logging in: {e}")
+        update_progress(60, f"Error logging in: {e}")
         return
 
     try:
+        update_progress(65, 'Filling auction details...')
         enter_text(driver, (By.ID, "Title"), auction_title)
 
         # Customize information based on the selected warehouse
@@ -270,12 +324,13 @@ def create_auction(driver, auction_title, image_path, formatted_start_date, bid_
                 <p>Pickup only!!&nbsp;<b><a href="https://www.google.com/maps/place/Action+Discount+Sales/@36.1622141,-115.1056554,15z/data=!4m5!3m4!1s0x80c8c37738ffc453:0x74f8f3ddc1379320!8m2!3d36.1622141!4d-115.1056554" target="_blank">3201 SUNRISE AVE&nbsp;Las Vegas, NV 89101</a></b>&nbsp;Tuesday-Friday 10am-4pm&nbsp;within 10 days. Once payment is received, you will receive an email with a link to schedule a pickup time and pickup instructions. We offer contactless pickup options and take all possible measures to ensure your safety.</p>
             """
 
-        # Enter the rest of the fields using the selected warehouse details
+        update_progress(70, 'Setting auction details...')
         enter_text(driver, (By.ID, "Subtitle"), Summary_field_text)
         set_content_in_ckeditor(driver, "EventDescription", formatted_text_event_description)
         set_content_in_ckeditor(driver, "TermsAndConditions", formatted_text_terms_and_conditions)
         set_content_in_ckeditor(driver, "ShippingInfo", formatted_text_shipping_info)
 
+        update_progress(75, 'Uploading auction image...')
         file_input_html5 = find_element(driver, (By.ID, "html5files_EventImage"))
         if file_input_html5.get_attribute('type') == 'hidden':
             driver.execute_script("arguments[0].type = 'file';", file_input_html5)
@@ -285,10 +340,13 @@ def create_auction(driver, auction_title, image_path, formatted_start_date, bid_
             EC.text_to_be_present_in_element((By.CSS_SELECTOR, "#progress_bar_EventImage .percent"), "100%"))
         WebDriverWait(driver, 10).until(lambda driver: element_value_is_not_empty(driver, "ThumbnailRendererState_EventImage"))
 
+        update_progress(80, 'Setting auction dates...')
         enter_text(driver, (By.ID, "StartDate"), formatted_start_date)
         enter_text(driver, (By.ID, "StartTime"), '1:00 AM')
         enter_text(driver, (By.ID, "EndDate"), bid_formatted_ending_date)
         enter_text(driver, (By.ID, "EndTime"), '6:30 PM')
+        
+        update_progress(85, 'Creating auction...')
         click_element(driver, (By.ID, "create"))
 
         find_element(driver, (By.CLASS_NAME, "alert-success"))
@@ -297,13 +355,13 @@ def create_auction(driver, auction_title, image_path, formatted_start_date, bid_
         match = re.search(r'/Event/EventConfirmation/(\d+)', current_url)
         if match:
             event_id = match.group(1)
-            gui_callback(f"Event {event_id} created")
+            update_progress(90, f"Event {event_id} created")
             return event_id
         else:
-            gui_callback("Event ID not found in the URL.")
+            update_progress(90, "Event ID not found in the URL.")
             return None
     except Exception as e:
-        gui_callback(f"An error occurred: {e}")
+        update_progress(90, f"An error occurred: {e}")
         return None
 
 class SharedEvents:
@@ -317,49 +375,34 @@ class SharedEvents:
         }
         save_event_to_file(event_data)
 
-def create_auction_main(auction_title, ending_date, show_browser, selected_warehouse):
+@run_with_progress
+def create_auction_main(auction_title, ending_date, show_browser, selected_warehouse, update_progress):
     config_manager.set_active_warehouse(selected_warehouse)
     
     relaythat_url = config_manager.get_warehouse_var('relaythat_url')
     if not relaythat_url:
-        print("Invalid warehouse selected or missing relaythat_url in config.")
+        update_progress(0, "Invalid warehouse selected or missing relaythat_url in config.")
         return
 
-    def gui_callback(message):
-        print(message)
-
-    should_stop = threading.Event()
-
-    def callback():
-        print("Auction creation process completed.")
-
     driver = None
-    event_id = None  # Initialize event_id to None
+    event_id = None
 
     try:
-        gui_callback("Creating Auction...")
-        if should_stop.is_set():
-            return
-
+        update_progress(5, "Initializing auction creation process...")
+        
         month_formatted_date, bid_formatted_ending_date = format_date(ending_date)
+        update_progress(10, "Date formatting completed")
+        
         driver = configure_driver(relaythat_url, show_browser)
-
-        if should_stop.is_set():
-            driver.quit()
-            return
+        update_progress(20, "Driver configured")
 
         formatted_start_date = datetime.now().strftime('%m/%d/%Y')
-        event_image = get_image(driver, month_formatted_date, relaythat_url, gui_callback, selected_warehouse)
-
-        if should_stop.is_set():
-            driver.quit()
-            return
+        update_progress(25, "Getting auction image...")
+        event_image = get_image(driver, month_formatted_date, relaythat_url, update_progress, selected_warehouse)
 
         if event_image:
-            event_id = create_auction(driver, auction_title, event_image, formatted_start_date, bid_formatted_ending_date, gui_callback, selected_warehouse)
-            if should_stop.is_set():
-                driver.quit()
-                return
+            update_progress(50, "Image downloaded, creating auction...")
+            event_id = create_auction(driver, auction_title, event_image, formatted_start_date, bid_formatted_ending_date, update_progress, selected_warehouse)
 
             if event_id:
                 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -372,20 +415,20 @@ def create_auction_main(auction_title, ending_date, show_browser, selected_wareh
                     "timestamp": timestamp
                 }
                 save_event_to_file(event_data)
-                gui_callback(f"Event {event_id} created at {timestamp}")
+                update_progress(90, f"Event {event_id} created at {timestamp}")
             else:
-                gui_callback("Failed to obtain event ID.")
+                update_progress(80, "Failed to obtain event ID.")
         else:
-            gui_callback("Failed to download the event image.")
+            update_progress(40, "Failed to download the event image.")
     except Exception as e:
-        gui_callback(f"Error: {e}")
+        update_progress(95, f"Error: {str(e)}")
         traceback.print_exc()
     finally:
         if driver:
             driver.quit()
-        callback()
+        update_progress(100, "Auction creation process completed.")
 
-    return event_id  # Return the event_id if you need it in the calling function
+    return event_id
 
 if __name__ == "__main__":
     create_auction_main("Sample Auction", datetime.now(), show_browser=True, selected_warehouse="Maule Warehouse")
