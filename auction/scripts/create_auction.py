@@ -244,8 +244,8 @@ def get_image(driver, ending_date_input, relaythat_url, update_progress, selecte
 def create_auction(driver, auction_title, image_path, formatted_start_date, bid_formatted_ending_date, update_progress, selected_warehouse):
     try:
         update_progress(55, 'Navigating to auction creation page...')
-        bid_url = config_manager.get_global_var('bid_url')
-        driver.get(bid_url)
+        bid_create_event = config_manager.get_global_var('bid_create_event')
+        driver.get(bid_create_event)
     except Exception as e:
         update_progress(55, f"Error configuring driver: {e}")
         return
@@ -254,7 +254,7 @@ def create_auction(driver, auction_title, image_path, formatted_start_date, bid_
         update_progress(60, 'Logging in to auction site...')
         bid_username = config_manager.get_warehouse_var('bid_username')
         bid_password = config_manager.get_warehouse_var('bid_password')
-        login(driver, (By.ID, "username"), (By.ID, "password"), bid_username, bid_password, bid_url, update_progress)
+        login(driver, (By.ID, "username"), (By.ID, "password"), bid_username, bid_password, bid_create_event, update_progress)
     except Exception as e:
         update_progress(60, f"Error logging in: {e}")
         return
