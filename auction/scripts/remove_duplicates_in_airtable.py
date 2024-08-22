@@ -8,6 +8,7 @@ import math
 from auction.utils import config_manager
 from django.conf import settings
 from auction.utils.config_manager import get_warehouse_var, get_global_var, set_active_warehouse
+from auction.utils.progress_tracker import ProgressTracker, run_with_progress
 import sys
 import json
 import logging
@@ -52,23 +53,16 @@ def get_valid_auctions(selected_warehouse):
         logger.exception("Full traceback:")
         return []
 
-def remove_duplicates_main(auction_number, target_msrp, warehouse_name):
-    def gui_callback(message):
-        print(message)
-
-    should_stop = threading.Event()  # Create the Event object here
-
-    def callback():
-        print("Remove duplicates process completed.")
-
-    print(f"Starting remove duplicates process for auction {auction_number} with target MSRP ${target_msrp}")
+@run_with_progress
+def remove_duplicates_main(auction_number, target_msrp, warehouse_name, update_progress):
+    update_progress(5, f"Starting remove duplicates process for auction {auction_number}")
     
     valid_auctions = get_valid_auctions(warehouse_name)
     if auction_number not in valid_auctions:
-        print(f"Auction {auction_number} is not a valid auction for {warehouse_name}. Aborting process.")
+        update_progress(10, f"Auction {auction_number} is not a valid auction for {warehouse_name}. Aborting process.")
         return
 
-    run_remove_dups(auction_number, gui_callback, should_stop, callback, target_msrp, warehouse_name)
+    run_remove_dups(auction_number, update_progress, target_msrp, warehouse_name)
 
 if __name__ == '__main__':
     import argparse
@@ -79,14 +73,6 @@ if __name__ == '__main__':
     parser.add_argument("warehouse_name", help="Warehouse name")
     
     args = parser.parse_args()
-
-    def gui_callback(message):
-        print(message)
-
-    should_stop = threading.Event()
-    
-    def callback():
-        print("Remove duplicates process completed.")
 
     remove_duplicates_main(args.auction_number, args.target_msrp, args.warehouse_name)
 
@@ -113,14 +99,14 @@ def get_fields_to_update(record, auction_number):
     print(f"Auction {auction_number} already exists in record")
     return {}
 
-def update_records_in_airtable(auction_number, gui_callback, should_stop, callback, target_msrp, table, view_name):
+def update_records_in_airtable(auction_number, update_progress, target_msrp, table, view_name):
     """Main function to update records in Airtable based on the auction number."""
     try:
-        gui_callback(f"Starting to update records for auction {auction_number}")
+        update_progress(35, f"Starting to update records for auction {auction_number}")
         
         # Fetch records with specified fields only to optimize performance
         records = table.all(view=view_name, fields=['Product Name', 'Auctions', 'MSRP'])
-        gui_callback(f"Fetched {len(records)} records from Airtable")
+        update_progress(40, f"Fetched {len(records)} records from Airtable")
 
         groups = {}
         for record in records:
@@ -129,13 +115,14 @@ def update_records_in_airtable(auction_number, gui_callback, should_stop, callba
             if product_name:
                 groups.setdefault(product_name, []).append(record)
 
-        gui_callback(f"Grouped records into {len(groups)} unique product names")
+        update_progress(45, f"Grouped records into {len(groups)} unique product names")
 
         update_count, total_msrp_reached = 0, 0
+        total_groups = len(groups)
 
         # Process groups in random order by converting dict_keys to a list for random.sample
-        for product_name in random.sample(list(groups.keys()), len(groups)):
-            if should_stop.is_set() or total_msrp_reached >= target_msrp:
+        for i, product_name in enumerate(random.sample(list(groups.keys()), total_groups)):
+            if total_msrp_reached >= target_msrp:
                 break
 
             # Sort by 'Auction Count' after filtering out records with the current auction number
@@ -145,22 +132,24 @@ def update_records_in_airtable(auction_number, gui_callback, should_stop, callba
             )[:math.ceil(len(groups[product_name]) / 2)]
 
             for record in records_to_update:
-                if should_stop.is_set() or total_msrp_reached >= target_msrp:
+                if total_msrp_reached >= target_msrp:
                     break
                 if update_record_if_needed(record, auction_number, table):
                     update_count += 1
                     total_msrp_reached += record['fields'].get('MSRP', 0)
-                    gui_callback(f"Updated record {record['id']} for product {product_name}")
+            
+            # Update progress every 10% of groups processed
+            if i % (total_groups // 10) == 0:
+                progress = 50 + int((i / total_groups) * 40)  # Progress from 50% to 90%
+                update_progress(progress, f"Processed {i}/{total_groups} groups")
 
-        gui_callback(f"Auction {auction_number} has been added to {update_count} items with total MSRP of ${total_msrp_reached}.")
+        update_progress(90, f"Auction {auction_number} has been added to {update_count} items with total MSRP of ${total_msrp_reached:.2f}")
     except Exception as e:
-        gui_callback(f"Error occurred: {e}")
-        traceback.print_exc()
-    finally:
-        callback()  # Re-enable UI components or similar post-processing
+        update_progress(95, f"Error occurred: {e}")
+        logger.exception("Full traceback:")
 
-def run_remove_dups(auction_number, gui_callback, should_stop, callback, target_msrp, warehouse_name):
-    gui_callback(f"Running remove_dups for auction {auction_number} in {warehouse_name}")
+def run_remove_dups(auction_number, update_progress, target_msrp, warehouse_name):
+    update_progress(15, f"Running remove_dups for auction {auction_number} in {warehouse_name}")
     
     config_manager.set_active_warehouse(warehouse_name)
 
@@ -171,28 +160,24 @@ def run_remove_dups(auction_number, gui_callback, should_stop, callback, target_
 
     # Check if all required configuration variables are present
     if not all([AIRTABLE_TOKEN, AIRTABLE_INVENTORY_BASE_ID, AIRTABLE_INVENTORY_TABLE_ID, AIRTABLE_REMOVE_DUPS_VIEW]):
-        error_msg = "Missing Airtable configuration. Please check your config.json file."
-        gui_callback(error_msg)
-        callback()
+        update_progress(20, "Missing Airtable configuration. Please check your config.json file.")
         return
 
-    gui_callback(f"Airtable configuration: Token: {AIRTABLE_TOKEN[:5]}..., Base ID: {AIRTABLE_INVENTORY_BASE_ID}, Table ID: {AIRTABLE_INVENTORY_TABLE_ID}, View: {AIRTABLE_REMOVE_DUPS_VIEW}")
+    update_progress(25, "Airtable configuration loaded successfully")
 
     # Initialize Table
     try:
         table = Table(AIRTABLE_TOKEN, AIRTABLE_INVENTORY_BASE_ID, AIRTABLE_INVENTORY_TABLE_ID)
-        gui_callback("Airtable Table initialized successfully")
+        update_progress(30, "Airtable Table initialized successfully")
     except Exception as e:
-        error_msg = f"Failed to initialize Airtable: {str(e)}"
-        gui_callback(error_msg)
-        callback()
+        update_progress(30, f"Failed to initialize Airtable: {str(e)}")
         return
 
     # Run the update process
     try:
-        update_records_in_airtable(auction_number, gui_callback, should_stop, callback, target_msrp, table, AIRTABLE_REMOVE_DUPS_VIEW)
+        update_records_in_airtable(auction_number, update_progress, target_msrp, table, AIRTABLE_REMOVE_DUPS_VIEW)
     except Exception as e:
-        gui_callback(f"An error occurred during the update process: {str(e)}")
-        traceback.print_exc()
+        update_progress(95, f"An error occurred during the update process: {str(e)}")
+        logger.exception("Full traceback:")
     finally:
-        callback()
+        update_progress(100, "Remove duplicates process completed.")

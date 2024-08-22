@@ -22,5 +22,13 @@
         "start_date": "08/20/2024",
         "ending_date": "2024-08-25 00:00:00",
         "timestamp": "2024-08-20 12:34:40"
+    },
+    {
+        "warehouse": "Maule Warehouse",
+        "title": "Test Auction",
+        "event_id": "94887234",
+        "start_date": "08/22/2024",
+        "ending_date": "2024-09-03 00:00:00",
+        "timestamp": "2024-08-22 16:12:50"
     }
 ]

@@ -78,10 +78,10 @@ def get_auction_numbers(request):
         logger.debug(f"Loaded events: {events}")
         auction_numbers = [
             {
-                'id': event['event_id'],
+                'id': event.get('event_id') or event.get('id'),  # Use 'id' if 'event_id' is not present
                 'title': event['title'],
                 'timestamp': event['timestamp'],
-                'ending_date': event.get('ending_date'),  # Include ending_date if available
+                'ending_date': event.get('ending_date'),
                 'warehouse': event['warehouse']
             }
             for event in events
@@ -208,13 +208,11 @@ def void_unpaid_view(request):
 def remove_duplicates_view(request):
     auctions = get_auction_numbers(request)
     warehouses = list(warehouse_data.keys())
-    can_use_show_browser = request.user.has_perm('auction.can_use_show_browser')
     
     if request.method == 'POST':
         auction_number = request.POST.get('auction_number')
         target_msrp = float(request.POST.get('target_msrp'))
         warehouse_name = request.POST.get('warehouse_name')
-        show_browser = request.POST.get('show_browser') == 'on' and can_use_show_browser
         
         task_id = str(uuid4())
         
@@ -222,16 +220,19 @@ def remove_duplicates_view(request):
             'auction_number': auction_number,
             'target_msrp': target_msrp,
             'warehouse_name': warehouse_name,
-            'show_browser': show_browser,
             'task_id': task_id
         }).start()
         
         return JsonResponse({'task_id': task_id})
     
     context = {
-        'auctions_json': json.dumps(auctions, cls=DjangoJSONEncoder),
+        'auctions_json': json.dumps([{
+            'id': event.get('event_id') or event.get('id'),  # Use 'id' if 'event_id' is not present
+            'warehouse': event['warehouse'],
+            'title': event['title'],
+            'timestamp': event['timestamp']
+        } for event in auctions], cls=DjangoJSONEncoder),
         'warehouses': warehouses,
-        'can_use_show_browser': can_use_show_browser,
     }
     return render(request, 'auction/remove_duplicates.html', context)
 

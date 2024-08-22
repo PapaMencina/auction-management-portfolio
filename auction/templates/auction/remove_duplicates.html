@@ -21,52 +21,103 @@
     <input type="number" name="target_msrp" id="target_msrp" required>
     <br><br>
     
-    {% if can_use_show_browser %}
-    <div>
-        <label for="show_browser">Show Browser:</label>
-        <input type="checkbox" id="show_browser" name="show_browser">
-    </div>
-    <br><br>
-    {% endif %}
-    
     <input type="submit" value="Remove Duplicates">
 </form>
 
+<div id="progressContainer" style="display: none;">
+    <progress id="progressBar" value="0" max="100"></progress>
+    <p id="progressMessage"></p>
+</div>
+
 <script>
     const auctions = {{ auctions_json|safe }};
+    console.log('Loaded Auctions:', auctions);
 
     function updateAuctions() {
         const warehouseSelect = document.getElementById('warehouse_name');
         const auctionSelect = document.getElementById('auction_number');
         const selectedWarehouse = warehouseSelect.value;
 
+        console.log('Selected Warehouse:', selectedWarehouse);
+        console.log('All Auctions:', auctions);
+
         auctionSelect.innerHTML = '<option value="">Select an auction</option>';
         auctionSelect.disabled = !selectedWarehouse;
 
         if (selectedWarehouse) {
             const filteredAuctions = auctions.filter(auction => auction.warehouse === selectedWarehouse);
+            console.log('Filtered Auctions:', filteredAuctions);
+            
             filteredAuctions.forEach(auction => {
                 const option = document.createElement('option');
                 option.value = auction.id;
                 option.textContent = `${auction.id} - ${auction.title} (${auction.timestamp})`;
                 auctionSelect.appendChild(option);
             });
-        }
 
-        console.log('Selected Warehouse:', selectedWarehouse);
-        console.log('Filtered Auctions:', filteredAuctions);
+            auctionSelect.disabled = filteredAuctions.length === 0;
+        }
     }
 
     document.getElementById('removeDuplicatesForm').onsubmit = function(event) {
+        event.preventDefault();
         const warehouseSelect = document.getElementById('warehouse_name');
         const auctionSelect = document.getElementById('auction_number');
         
         if (!warehouseSelect.value || !auctionSelect.value) {
-            event.preventDefault();
             alert('Please select both a warehouse and an auction.');
+            return;
         }
+
+        const formData = new FormData(this);
+        const progressContainer = document.getElementById('progressContainer');
+        const progressBar = document.getElementById('progressBar');
+        const progressMessage = document.getElementById('progressMessage');
+
+        progressContainer.style.display = 'block';
+        
+        fetch(this.action, {
+            method: 'POST',
+            body: formData,
+            headers: {
+                'X-CSRFToken': formData.get('csrfmiddlewaretoken')
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.task_id) {
+                checkProgress(data.task_id);
+            } else {
+                progressMessage.textContent = 'Error: No task ID received';
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            progressMessage.textContent = 'An error occurred while submitting the form';
+        });
     };
 
-    // Initialize auctions on page load
-    updateAuctions();
+    function checkProgress(taskId) {
+        fetch(`/auction/task_progress/${taskId}/`)
+        .then(response => response.json())
+        .then(data => {
+            const progressBar = document.getElementById('progressBar');
+            const progressMessage = document.getElementById('progressMessage');
+            
+            progressBar.value = data.progress;
+            progressMessage.textContent = data.status;
+            
+            if (data.progress < 100) {
+                setTimeout(() => checkProgress(taskId), 1000);  // Check again in 1 second
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            progressMessage.textContent = 'An error occurred while checking progress';
+        });
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+        updateAuctions();
+    });
 </script>
