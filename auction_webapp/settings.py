@@ -137,7 +137,7 @@ LOGGING = {
     },
     'root': {
         'handlers': ['console'],
-        'level': 'DEBUG',  # Changed from INFO to DEBUG
+        'level': 'INFO',  # Changed from INFO to DEBUG
     },
 }
 

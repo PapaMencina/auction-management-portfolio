@@ -88,42 +88,45 @@ def configure_driver(url, show_browser):
     return driver
 
 def login(driver, username, password, update_progress, should_stop):
-    if not should_continue(should_stop, lambda msg: update_progress(None, msg), "Login operation stopped by user."):
+    if not should_continue(should_stop, lambda msg: update_progress(20, msg), "Login operation stopped by user."):
         return False
 
-    update_progress(None, "Waiting for login form...")
+    update_progress(22, "Waiting for login form...")
     try:
         username_field = WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.ID, "username")))
         password_field = WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.ID, "password")))
     except TimeoutException:
-        update_progress(None, "Login form not found. The page might not have loaded correctly.")
-        update_progress(None, f"Current URL: {driver.current_url}")
-        update_progress(None, "Page source:")
-        update_progress(None, driver.page_source[:1000])  # First 1000 characters of page source
+        update_progress(23, "Login form not found. The page might not have loaded correctly.")
+        update_progress(24, f"Current URL: {driver.current_url}")
         return False
 
-    update_progress(None, "Entering credentials...")
+    update_progress(25, "Entering credentials...")
     username_field.clear()
     username_field.send_keys(username)
     password_field.clear()
     password_field.send_keys(password)
-
-    if not should_continue(should_stop, lambda msg: update_progress(None, msg), "Login operation stopped before finalizing."):
+    
+    if not should_continue(should_stop, lambda msg: update_progress(27, msg), "Login operation stopped before finalizing."):
         return False
 
-    update_progress(None, "Submitting login form...")
+    update_progress(28, "Submitting login form...")
     password_field.send_keys(Keys.RETURN)
+
+    time.sleep(5)
     
-    update_progress(None, "Waiting for login to complete...")
+    update_progress(30, "Waiting for login to complete...")
     try:
-        WebDriverWait(driver, 30).until(EC.url_contains("/Account/EventSalesTransactionReport"))
-        update_progress(None, "Login successful.")
+        def url_changed(driver):
+            return "LogOn" not in driver.current_url
+
+        WebDriverWait(driver, 30).until(url_changed)
+        update_progress(35, f"Login successful. Current URL: {driver.current_url}")
         return True
     except TimeoutException:
-        update_progress(None, "Login might have failed. Current URL: " + driver.current_url)
+        update_progress(35, f"Login might have failed. Current URL: {driver.current_url}")
         return False
     except Exception as e:
-        update_progress(None, f"Login failed: {str(e)}")
+        update_progress(35, f"Login failed: {str(e)}")
         return False
 
 def handle_captcha(driver, update_progress):
@@ -143,15 +146,17 @@ def handle_captcha(driver, update_progress):
         # No captcha found, or it wasn't solved in time
         return False
 
-# Add this function to your script
 def check_login_status(driver):
     try:
         # Check for elements that are typically present after a successful login
         WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.ID, "logoutForm"))
+            EC.presence_of_element_located((By.LINK_TEXT, "Sign Out"))
         )
         return True
     except TimeoutException:
+        current_url = driver.current_url
+        if "bid.702auctions.com" in current_url and not current_url.endswith("/Account/LogOn"):
+            return True
         return False
 
 def should_continue(should_stop, gui_callback, message):
@@ -280,39 +285,39 @@ def update_sleep_time(current_sleep_time, max_sleep_time):
     return min(current_sleep_time * 2, max_sleep_time)
 
 def void_unpaid_transactions(driver, report_url, update_progress, should_stop, timeout=1000, max_retries=5):
-    update_progress(None, "Starting the voiding process for unpaid transactions...")
+    update_progress(60, "Starting the voiding process for unpaid transactions...")
     start_time = time.time()
     count = 0
     retries = 0
 
     while not should_stop.is_set():
         if time.time() - start_time > timeout:
-            update_progress(None, "Timeout reached, stopping voiding process.")
+            update_progress(75, "Timeout reached, stopping voiding process.")
             break
 
         if retries >= max_retries:
-            update_progress(None, "Maximum retries reached, stopping voiding process.")
+            update_progress(75, "Maximum retries reached, stopping voiding process.")
             break
 
         try:
-            handle_network_error(driver, report_url, lambda msg: update_progress(None, msg))
+            handle_network_error(driver, report_url, lambda msg: update_progress(65, msg))
             if are_transactions_voided(driver):
-                update_progress(None, f"All {count} unpaid transactions have been voided.")
+                update_progress(75, f"All {count} unpaid transactions have been voided.")
                 break
             void_transaction(driver)
             count += 1
-            update_progress(None, f"Voided {count} transactions...")
+            update_progress(65 + min(count, 10), f"Voided {count} transactions...")
             retries = 0  # Reset retries after successful operation
 
         except (NoSuchElementException, TimeoutException) as e:
-            handle_retry(driver, report_url, e, retries, lambda msg: update_progress(None, msg))
+            handle_retry(driver, report_url, e, retries, lambda msg: update_progress(65, msg))
             retries += 1
 
         except Exception as e:
-            update_progress(None, f"Unexpected error during voiding: {e}")
+            update_progress(75, f"Unexpected error during voiding: {e}")
             break
 
-    update_progress(None, f"Voiding process completed. Total transactions voided: {count}")
+    update_progress(75, f"Voiding process completed. Total transactions voided: {count}")
 
 def has_timed_out(start_time, timeout):
     return time.time() - start_time > timeout
@@ -382,6 +387,7 @@ def start_selenium_process(event_id, upload_choice, update_progress, should_stop
     login_url = config_manager.get_global_var('website_login_url')
     bid_home_page = config_manager.get_global_var('bid_home_page')
     report_url = f"{bid_home_page}/Account/EventSalesTransactionReport?EventID={event_id}&page=0&sort=DateTime&descending=True&dateStart=&dateEnd=&lotNumber=&description=&priceLow=&priceHigh=&quantity=&totalPriceLow=&totalPriceHigh=&invoiceID=&payer=&firstName=&lastName=&isPaid=2"
+    print("Report URL: " + report_url)
     
     update_progress(5, "Initializing browser...")
     driver = configure_driver(login_url, show_browser)
@@ -398,53 +404,76 @@ def start_selenium_process(event_id, upload_choice, update_progress, should_stop
             return
 
         update_progress(20, "Attempting login...")
-        login_success = retry_operation(
-            driver, 
-            lambda: login(driver, username, password, update_progress, should_stop),
-            "Login",
-            login_url,
-            3,
-            update_progress,
-            should_stop
-        )
+        login_success = login(driver, username, password, update_progress, should_stop)
 
         if not login_success:
-            update_progress(25, "Login failed after multiple attempts. Aborting process.")
+            update_progress(40, "Login failed. Aborting process.")
             return
 
-        update_progress(30, "Navigating to report page...")
-        driver.get(report_url)
-
-        update_progress(40, "Exporting CSV...")
-        csv_filepath = retry_operation(
-            driver,
-            lambda: export_csv(driver, event_id, update_progress, should_stop),
-            "CSV Download",
-            report_url,
-            3,
-            update_progress,
-            should_stop
+        update_progress(45, "Login successful. Current URL: " + driver.current_url)
+        
+        # Wait for the page to load completely
+        WebDriverWait(driver, 30).until(
+            lambda d: d.execute_script('return document.readyState') == 'complete'
         )
 
-        if csv_filepath:
-            update_progress(60, "CSV exported successfully. Uploading to Airtable...")
-            send_to_airtable(upload_choice, csv_filepath, update_progress, should_stop)
-        else:
-            update_progress(60, "CSV filepath not set due to an error. Skipping Upload to Airtable.")
+        update_progress(50, "Navigating to report page...")
+        driver.get(report_url)
+        
+        # Wait for the report page to load
+        try:
+            WebDriverWait(driver, 30).until(
+                EC.presence_of_element_located((By.ID, "ReportResults"))
+            )
+            update_progress(60, f"Report page loaded. Current URL: {driver.current_url}")
+        except TimeoutException:
+            update_progress(60, f"Timeout waiting for report page. Current URL: {driver.current_url}")
+            
+            if "Account/LogOn" in driver.current_url:
+                update_progress(65, "Redirected to login page. Session might have expired. Attempting to log in again...")
+                login_success = login(driver, username, password, update_progress, should_stop)
+                if not login_success:
+                    update_progress(70, "Login failed. Aborting process.")
+                    return
+                
+                update_progress(75, "Navigating to report page after re-login...")
+                driver.get(report_url)
+                
+                try:
+                    WebDriverWait(driver, 30).until(
+                        EC.presence_of_element_located((By.ID, "ReportResults"))
+                    )
+                    update_progress(80, f"Report page loaded after re-login. Current URL: {driver.current_url}")
+                except TimeoutException:
+                    update_progress(80, f"Failed to load report page after re-login. Current URL: {driver.current_url}")
+                    return
 
-        update_progress(80, "Starting to void unpaid transactions...")
+        if not check_login_status(driver):
+            update_progress(85, "Not logged in on report page. Aborting process.")
+            return
+
+        update_progress(90, "Starting to void unpaid transactions...")
         void_unpaid_transactions(driver, report_url, update_progress, should_stop)
 
+        update_progress(95, "Exporting CSV...")
+        csv_filepath = export_csv(driver, event_id, update_progress, should_stop)
+
+        if csv_filepath:
+            update_progress(97, "CSV exported successfully. Uploading to Airtable...")
+            send_to_airtable(upload_choice, csv_filepath, update_progress, should_stop)
+        else:
+            update_progress(97, "CSV filepath not set due to an error. Skipping Upload to Airtable.")
+
     except Exception as e:
-        update_progress(95, f"An error occurred: {str(e)}")
+        update_progress(98, f"An error occurred: {str(e)}")
         should_stop.set()
     finally:
         if driver:
             driver.quit()
         if csv_filepath:
-            update_progress(98, f"Process completed. CSV Filepath: {csv_filepath}")
+            update_progress(99, f"Process completed. CSV Filepath: {csv_filepath}")
         else:
-            update_progress(98, "Process completed, but CSV filepath was not set.")
+            update_progress(99, "Process completed, but CSV filepath was not set.")
         callback()
 
 def run_void_unpaid_on_bid(auction_id, upload_choice, gui_callback, should_stop, callback, show_browser):
