@@ -5,72 +5,113 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Void Unpaid Transactions</title>
     <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f4;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+        }
+        form div {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+        }
+        select, input[type="text"], input[type="radio"], button {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            font-size: 16px;
+            border: none;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
         .progress-container {
-            margin-top: 10px;
             display: none;
+            margin-top: 20px;
+            max-width: 100%;
+            background-color: #f0f0f0;
+            padding: 3px;
+            border-radius: 3px;
+            box-shadow: inset 0 1px 3px rgba(0, 0, 0, .2);
         }
         .progress-bar {
-            width: 100%;
-            background-color: #f0f0f0;
-            padding: 1px;
-            border: 1px solid #ccc;
-        }
-        .progress-bar-fill {
-            display: block;
-            height: 20px;
-            background-color: #4CAF50;
-            width: 0%;
+            height: 22px;
+            background-color: #659cef;
+            border-radius: 3px;
             transition: width 500ms ease-in-out;
+            text-align: center;
+            line-height: 22px;
+            color: white;
+            font-weight: bold;
         }
-        #progressText {
-            margin-top: 5px;
-            font-size: 14px;
+        .status-message {
+            margin-top: 10px;
+            text-align: center;
+            color: #333;
         }
     </style>
 </head>
 <body>
-    <h1>Void Unpaid Transactions</h1>
-
-    <form id="voidUnpaidForm" method="post">
-        {% csrf_token %}
-        <div>
-            <label for="warehouseSelect">Select Warehouse:</label>
-            <select name="warehouse" id="warehouseSelect" required>
-                {% for warehouse in warehouses %}
-                    <option value="{{ warehouse }}" {% if warehouse == default_warehouse %}selected{% endif %}>
-                        {{ warehouse }}
-                    </option>
-                {% endfor %}
-            </select>
+    <div class="container">
+        <h1>Void Unpaid Transactions</h1>
+        <form id="voidUnpaidForm" method="post">
+            {% csrf_token %}
+            <div>
+                <label for="warehouseSelect">Select Warehouse:</label>
+                <select name="warehouse" id="warehouseSelect" required>
+                    {% for warehouse in warehouses %}
+                        <option value="{{ warehouse }}" {% if warehouse == default_warehouse %}selected{% endif %}>
+                            {{ warehouse }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label for="auction_id">Auction ID:</label>
+                <input type="text" id="auction_id" name="auction_id" required>
+            </div>
+            <div>
+                <label>Upload to Airtable:</label>
+                <input type="radio" id="upload_yes" name="upload_choice" value="1" required>
+                <label for="upload_yes">Yes</label>
+                <input type="radio" id="upload_no" name="upload_choice" value="0" required>
+                <label for="upload_no">No</label>
+            </div>
+            {% if can_use_show_browser %}
+            <div>
+                <label for="show_browser">Show Browser:</label>
+                <input type="checkbox" id="show_browser" name="show_browser">
+            </div>
+            {% endif %}
+            <button type="submit">Void Unpaid Transactions</button>
+        </form>
+        <div class="progress-container" id="progressContainer">
+            <div class="progress-bar" id="progress-bar" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">0%</div>
         </div>
-        <div>
-            <label for="auction_id">Auction ID:</label>
-            <input type="text" id="auction_id" name="auction_id" required>
-        </div>
-        <div>
-            <label>Upload to Airtable:</label>
-            <input type="radio" id="upload_yes" name="upload_choice" value="1" required>
-            <label for="upload_yes">Yes</label>
-            <input type="radio" id="upload_no" name="upload_choice" value="0" required>
-            <label for="upload_no">No</label>
-        </div>
-        {% if can_use_show_browser %}
-        <div>
-            <label for="show_browser">Show Browser:</label>
-            <input type="checkbox" id="show_browser" name="show_browser">
-        </div>
-        {% endif %}
-        <button type="submit">Void Unpaid Transactions</button>
-    </form>
-
-    <div class="progress-container" id="progressContainer">
-        <div class="progress-bar">
-            <span class="progress-bar-fill"></span>
-        </div>
-        <div id="progressText"></div>
+        <div class="status-message" id="progressText"></div>
+        <div id="result"></div>
     </div>
-
-    <div id="result"></div>
 
     <script>
         document.addEventListener('DOMContentLoaded', function() {
@@ -79,7 +120,7 @@
                 voidUnpaid();
             });
         });
-        
+
         function voidUnpaid() {
             const form = document.getElementById('voidUnpaidForm');
             const data = {
@@ -88,12 +129,12 @@
                 upload_choice: parseInt(form.upload_choice.value),
                 show_browser: form.show_browser ? form.show_browser.checked : false,
             };
-        
+
             document.querySelector('button[type="submit"]').disabled = true;
             document.getElementById('result').textContent = '';
             document.getElementById('progressContainer').style.display = 'block';
             updateProgress(0, 'Starting process...');
-        
+
             fetch('{% url "auction:void_unpaid" %}', {
                 method: 'POST',
                 headers: {
@@ -121,7 +162,7 @@
                 document.querySelector('button[type="submit"]').disabled = false;
             });
         }
-        
+
         function pollProgress(taskId) {
             fetch(`/auction/task_progress/${taskId}/`)
                 .then(response => response.json())
@@ -142,15 +183,14 @@
                     document.getElementById('progressContainer').style.display = 'none';
                 });
         }
-        
+
         function updateProgress(percent, status) {
-            const progressBar = document.querySelector('.progress-bar-fill');
+            const progressBar = document.querySelector('.progress-bar');
             const progressText = document.getElementById('progressText');
             progressBar.style.width = `${percent}%`;
+            progressBar.textContent = `${percent}%`;
             progressText.textContent = status ? `${percent}% - ${status}` : `${percent}%`;
         }
-        </script>
-
-    <p><a href="{% url 'auction:home' %}">Back to Home</a></p>
+    </script>
 </body>
 </html>

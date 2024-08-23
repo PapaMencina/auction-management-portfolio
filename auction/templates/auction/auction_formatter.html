@@ -7,22 +7,21 @@
     <style>
         body {
             font-family: Arial, sans-serif;
-            line-height: 1.6;
+            background-color: #f4f4f4;
             margin: 0;
             padding: 20px;
-            background-color: #f4f4f4;
         }
-        .auction-container {
+        .container {
             max-width: 600px;
             margin: 0 auto;
             background-color: #fff;
             padding: 20px;
             border-radius: 5px;
-            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
         }
         h1 {
-            color: #333;
             text-align: center;
+            color: #333;
         }
         form div {
             margin-bottom: 15px;
@@ -31,32 +30,32 @@
             display: block;
             margin-bottom: 5px;
         }
-        select, input[type="checkbox"], button {
+        select, input[type="text"], input[type="date"], button {
             width: 100%;
-            padding: 8px;
+            padding: 10px;
             border: 1px solid #ddd;
             border-radius: 4px;
         }
         button {
             background-color: #4CAF50;
             color: white;
+            font-size: 16px;
             border: none;
             cursor: pointer;
-            font-size: 16px;
         }
         button:hover {
             background-color: #45a049;
         }
-        #progress-bar {
-            width: 100%;
+        .progress-container {
+            display: none;
+            margin-top: 20px;
+            max-width: 100%;
             background-color: #f0f0f0;
             padding: 3px;
             border-radius: 3px;
             box-shadow: inset 0 1px 3px rgba(0, 0, 0, .2);
-            margin-top: 20px;
         }
-        #progress-bar-fill {
-            display: block;
+        .progress-bar {
             height: 22px;
             background-color: #659cef;
             border-radius: 3px;
@@ -66,11 +65,51 @@
             color: white;
             font-weight: bold;
         }
-        #status-message, #result-message {
+        .status-message, .result-message {
             margin-top: 10px;
             text-align: center;
+            color: #333;
         }
     </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Auction Formatter</h1>
+        <form method="post" onsubmit="formatAuction(event)">
+            {% csrf_token %}
+            <div>
+                <label for="selected_warehouse">Selected Warehouse:</label>
+                <select id="selected_warehouse" name="selected_warehouse" onchange="updateAuctionDropdown()">
+                    <option value="">Select a warehouse</option>
+                    {% for warehouse in warehouses %}
+                        <option value="{{ warehouse }}">{{ warehouse }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label for="auction_id">Auction ID:</label>
+                <select id="auction_id" name="auction_id" required>
+                    <option value="">Select an auction</option>
+                    <!-- Options will be populated dynamically by JavaScript -->
+                </select>
+            </div>
+            {% if can_use_show_browser %}
+            <div>
+                <label for="show_browser">
+                    <input type="checkbox" id="show_browser" name="show_browser" value="1">
+                    Show Browser
+                </label>
+            </div>
+            {% endif %}
+            <button type="submit">Format Auction</button>
+        </form>
+        <div class="progress-container" id="progress-bar">
+            <div class="progress-bar" id="progress-bar-fill" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">0%</div>
+        </div>
+        <div class="status-message" id="status-message"></div>
+        <div class="result-message" id="result-message"></div>
+    </div>
+
     <script>
         // Parse the auctions JSON data passed from the view
         const auctions = JSON.parse('{{ auctions|safe }}');
@@ -94,9 +133,6 @@
                 auctionSelect.appendChild(option);
             });
         }
-
-        // Call updateAuctionDropdown when the page loads to set initial state
-        document.addEventListener('DOMContentLoaded', updateAuctionDropdown);
 
         function formatAuction(event) {
             event.preventDefault();
@@ -158,44 +194,8 @@
             progressBarFill.textContent = `${progress}%`;
             statusMessage.textContent = status;
         }
+
+        document.addEventListener('DOMContentLoaded', updateAuctionDropdown);
     </script>
-</head>
-<body>
-    <div class="auction-container">
-        <h1>Auction Formatter</h1>
-        <form method="post" onsubmit="formatAuction(event)">
-            {% csrf_token %}
-            <div>
-                <label for="selected_warehouse">Selected Warehouse:</label>
-                <select id="selected_warehouse" name="selected_warehouse" onchange="updateAuctionDropdown()">
-                    <option value="">Select a warehouse</option>
-                    {% for warehouse in warehouses %}
-                        <option value="{{ warehouse }}">{{ warehouse }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div>
-                <label for="auction_id">Auction ID:</label>
-                <select id="auction_id" name="auction_id" required>
-                    <option value="">Select an auction</option>
-                    <!-- Options will be populated dynamically by JavaScript -->
-                </select>
-            </div>
-            {% if can_use_show_browser %}
-            <div>
-                <label for="show_browser">
-                    <input type="checkbox" id="show_browser" name="show_browser" value="1">
-                    Show Browser
-                </label>
-            </div>
-            {% endif %}
-            <button type="submit">Format Auction</button>
-        </form>
-        <div id="progress-bar" style="display: none;">
-            <span id="progress-bar-fill" style="width: 0%;">0%</span>
-        </div>
-        <div id="status-message"></div>
-        <div id="result-message"></div>
-    </div>
 </body>
 </html>
