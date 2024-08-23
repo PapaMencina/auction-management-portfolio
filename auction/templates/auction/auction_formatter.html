@@ -4,6 +4,73 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Auction Formatter</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            background-color: #f4f4f4;
+        }
+        .auction-container {
+            max-width: 600px;
+            margin: 0 auto;
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        form div {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+        }
+        select, input[type="checkbox"], button {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        #progress-bar {
+            width: 100%;
+            background-color: #f0f0f0;
+            padding: 3px;
+            border-radius: 3px;
+            box-shadow: inset 0 1px 3px rgba(0, 0, 0, .2);
+            margin-top: 20px;
+        }
+        #progress-bar-fill {
+            display: block;
+            height: 22px;
+            background-color: #659cef;
+            border-radius: 3px;
+            transition: width 500ms ease-in-out;
+            text-align: center;
+            line-height: 22px;
+            color: white;
+            font-weight: bold;
+        }
+        #status-message, #result-message {
+            margin-top: 10px;
+            text-align: center;
+        }
+    </style>
     <script>
         // Parse the auctions JSON data passed from the view
         const auctions = JSON.parse('{{ auctions|safe }}');
@@ -35,7 +102,11 @@
             event.preventDefault();
             const formData = new FormData(event.target);
             const resultMessage = document.getElementById('result-message');
-            const downloadButton = document.getElementById('download-csv');
+            const progressBar = document.getElementById('progress-bar');
+            const progressBarFill = document.getElementById('progress-bar-fill');
+
+            // Show progress bar
+            progressBar.style.display = 'block';
 
             // Add the show_browser value to formData if the element exists
             const showBrowserElement = document.getElementById('show_browser');
@@ -52,57 +123,79 @@
             })
             .then(response => response.json())
             .then(data => {
-                resultMessage.textContent = data.message;
-                if (data.status === 'success' && data.show_download) {
-                    showDownloadButton(data.auction_id);
+                if (data.task_id) {
+                    checkProgress(data.task_id);
                 } else {
-                    downloadButton.style.display = 'none';
+                    resultMessage.textContent = data.message;
                 }
             })
             .catch(error => {
                 resultMessage.textContent = 'An error occurred: ' + error;
-                downloadButton.style.display = 'none';
+                progressBar.style.display = 'none';
             });
         }
 
-        function showDownloadButton(auctionId) {
-            const downloadButton = document.getElementById('download-csv');
-            downloadButton.style.display = 'block';
-            downloadButton.onclick = function() {
-                window.location.href = '{% url "auction:download_formatted_csv" auction_id="0" %}'.replace('0', auctionId);
-            };
+        function checkProgress(taskId) {
+            fetch(`/auction/task_progress/${taskId}/`)
+                .then(response => response.json())
+                .then(data => {
+                    updateProgressBar(data.progress, data.status);
+                    if (data.progress < 100) {
+                        setTimeout(() => checkProgress(taskId), 1000);
+                    } else {
+                        document.getElementById('result-message').textContent = 'Process completed!';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                });
+        }
+
+        function updateProgressBar(progress, status) {
+            const progressBarFill = document.getElementById('progress-bar-fill');
+            const statusMessage = document.getElementById('status-message');
+            progressBarFill.style.width = `${progress}%`;
+            progressBarFill.textContent = `${progress}%`;
+            statusMessage.textContent = status;
         }
     </script>
 </head>
 <body>
-    <h1>Auction Formatter</h1>
-    <form method="post" onsubmit="formatAuction(event)">
-        {% csrf_token %}
-        <div>
-            <label for="selected_warehouse">Selected Warehouse:</label>
-            <select id="selected_warehouse" name="selected_warehouse" onchange="updateAuctionDropdown()">
-                <option value="">Select a warehouse</option>
-                {% for warehouse in warehouses %}
-                    <option value="{{ warehouse }}">{{ warehouse }}</option>
-                {% endfor %}
-            </select>
+    <div class="auction-container">
+        <h1>Auction Formatter</h1>
+        <form method="post" onsubmit="formatAuction(event)">
+            {% csrf_token %}
+            <div>
+                <label for="selected_warehouse">Selected Warehouse:</label>
+                <select id="selected_warehouse" name="selected_warehouse" onchange="updateAuctionDropdown()">
+                    <option value="">Select a warehouse</option>
+                    {% for warehouse in warehouses %}
+                        <option value="{{ warehouse }}">{{ warehouse }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label for="auction_id">Auction ID:</label>
+                <select id="auction_id" name="auction_id" required>
+                    <option value="">Select an auction</option>
+                    <!-- Options will be populated dynamically by JavaScript -->
+                </select>
+            </div>
+            {% if can_use_show_browser %}
+            <div>
+                <label for="show_browser">
+                    <input type="checkbox" id="show_browser" name="show_browser" value="1">
+                    Show Browser
+                </label>
+            </div>
+            {% endif %}
+            <button type="submit">Format Auction</button>
+        </form>
+        <div id="progress-bar" style="display: none;">
+            <span id="progress-bar-fill" style="width: 0%;">0%</span>
         </div>
-        <div>
-            <label for="auction_id">Auction ID:</label>
-            <select id="auction_id" name="auction_id" required>
-                <option value="">Select an auction</option>
-                <!-- Options will be populated dynamically by JavaScript -->
-            </select>
-        </div>
-        {% if can_use_show_browser %}
-        <div>
-            <label for="show_browser">Show Browser:</label>
-            <input type="checkbox" id="show_browser" name="show_browser" value="1">
-        </div>
-        {% endif %}
-        <button type="submit">Format Auction</button>
-    </form>
-    <div id="result-message"></div>
-    <button id="download-csv" style="display: none;">Download CSV</button>
+        <div id="status-message"></div>
+        <div id="result-message"></div>
+    </div>
 </body>
 </html>

@@ -8,7 +8,7 @@ import math
 from auction.utils import config_manager
 from django.conf import settings
 from auction.utils.config_manager import get_warehouse_var, get_global_var, set_active_warehouse
-from auction.utils.progress_tracker import ProgressTracker, run_with_progress
+from auction.utils.progress_tracker import ProgressTracker, with_progress_tracking
 import sys
 import json
 import logging
@@ -53,7 +53,7 @@ def get_valid_auctions(selected_warehouse):
         logger.exception("Full traceback:")
         return []
 
-@run_with_progress
+@with_progress_tracking
 def remove_duplicates_main(auction_number, target_msrp, warehouse_name, update_progress):
     update_progress(5, f"Starting remove duplicates process for auction {auction_number}")
     

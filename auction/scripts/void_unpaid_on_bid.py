@@ -18,7 +18,7 @@ from selenium.webdriver.firefox.service import Service as FirefoxService
 from selenium.webdriver.firefox.options import Options
 from webdriver_manager.firefox import GeckoDriverManager
 from auction.utils import config_manager
-from auction.utils.progress_tracker import ProgressTracker, run_with_progress
+from auction.utils.progress_tracker import ProgressTracker, with_progress_tracking
 
 config_path = os.path.join(os.path.dirname(__file__), '..', 'utils', 'config.json')
 
@@ -41,7 +41,7 @@ def get_resources_dir(folder):
 DOWNLOAD_DIR = get_resources_dir('voided_csv')
 AIRTABLE_URL = lambda base_id, table_id: f'https://api.airtable.com/v0/{base_id}/{table_id}'
 
-@run_with_progress
+@with_progress_tracking
 def void_unpaid_main(auction_id, upload_choice, show_browser, warehouse, update_progress):
     config_manager.load_config(config_path)
     config_manager.set_active_warehouse(warehouse)

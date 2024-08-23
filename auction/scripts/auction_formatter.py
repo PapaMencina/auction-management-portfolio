@@ -22,6 +22,14 @@ from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.action_chains import ActionChains
 from webdriver_manager.firefox import GeckoDriverManager
+from auction.utils.progress_tracker import with_progress_tracking
+
+@with_progress_tracking
+def auction_formatter_main(auction_id, selected_warehouse, gui_callback, should_stop, callback, show_browser, update_progress):
+    config_manager.set_active_warehouse(selected_warehouse)
+    formatter = AuctionFormatter(auction_id, gui_callback, should_stop, callback, selected_warehouse, show_browser)
+    formatter.run_auction_formatter(update_progress)
+    return formatter
 
 from auction.utils import config_manager
 
@@ -29,10 +37,11 @@ from auction.utils import config_manager
 config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'utils', 'config.json')
 config_manager.load_config(config_path)
 
-def auction_formatter_main(auction_id, selected_warehouse, gui_callback, should_stop, callback, show_browser):
+@with_progress_tracking
+def auction_formatter_main(auction_id, selected_warehouse, gui_callback, should_stop, callback, show_browser, update_progress):
     config_manager.set_active_warehouse(selected_warehouse)
     formatter = AuctionFormatter(auction_id, gui_callback, should_stop, callback, selected_warehouse, show_browser)
-    formatter.run_auction_formatter()
+    formatter.run_auction_formatter(update_progress)
     return formatter
 
 def get_extension_from_content_disposition(content_disposition: str) -> str:
@@ -604,20 +613,16 @@ class AuctionFormatter:
 
         self.gui_callback("Logging In...")
         try:
-            # Wait for the body element to be present
             WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
             
-            # Explicitly wait for the username field to ensure the page is fully loaded
             self.gui_callback("Waiting for username field to be present...")
             WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.ID, "username")))
             
-            # Locate the username field and input the username
             self.gui_callback("Locating username field...")
             username_field = driver.find_element(By.ID, "username")
             username_field.clear()
             username_field.send_keys(username)
             
-            # Locate the password field and input the password
             self.gui_callback("Locating password field...")
             password_field = driver.find_element(By.ID, "password")
             password_field.clear()
@@ -626,23 +631,15 @@ class AuctionFormatter:
             if not self.should_continue("Login operation stopped before finalizing."):
                 return False
 
-            # Submit the login form
             self.gui_callback("Submitting login form...")
             password_field.send_keys(Keys.RETURN)
             
-            # Wait for the next page to load and confirm the login was successful
             self.gui_callback("Waiting for login to complete...")
             
-            # Wait for the page to load completely
-            WebDriverWait(driver, 30).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "body"))
-            )
+            WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CSS_SELECTOR, "body")))
             
-            # Check for elements that should be present after login
             try:
-                WebDriverWait(driver, 10).until(
-                    EC.presence_of_element_located((By.LINK_TEXT, "Sign Out"))
-                )
+                WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.LINK_TEXT, "Sign Out")))
                 self.gui_callback("Login successful.")
                 return True
             except:
@@ -679,13 +676,10 @@ class AuctionFormatter:
             driver.execute_script(checkbox_script)
             
             self.gui_callback("Updating email address...")
-            email_input = WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.ID, "Text1"))
-            )
+            email_input = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "Text1")))
             email_input.clear()
             email_input.send_keys("matthew@702auctions.com")
             
-            # Add a small delay to ensure all changes are registered
             time.sleep(2)
             
             self.gui_callback("Submitting form...")
@@ -693,11 +687,9 @@ class AuctionFormatter:
                 EC.element_to_be_clickable((By.CSS_SELECTOR, "input.btn.btn-info.btn-sm[type='submit'][value='Upload CSV']"))
             )
             
-            # Scroll the button into view
             driver.execute_script("arguments[0].scrollIntoView(true);", submit_button)
-            time.sleep(1)  # Give time for any scrolling to complete
+            time.sleep(1)
             
-            # Try multiple click methods
             try:
                 submit_button.click()
             except:
@@ -723,9 +715,10 @@ class AuctionFormatter:
         except Exception as e:
             self.gui_callback(f"Failed to upload CSV: {str(e)}")
             return False
-
-    def run_auction_formatter(self):
+        
+    def run_auction_formatter(self, update_progress):
         try:
+            update_progress(5, "Starting auction formatting process...")
             airtable_records = get_airtable_records_list(
                 config_manager.get_warehouse_var('airtable_inventory_base_id'),
                 config_manager.get_warehouse_var('airtable_inventory_table_id'),
@@ -734,52 +727,65 @@ class AuctionFormatter:
                 config_manager.get_warehouse_var('airtable_api_key')
             )
 
+            update_progress(15, "Collecting image URLs...")
             download_tasks = collect_image_urls(airtable_records, self.should_stop)
+            
+            update_progress(20, "Downloading images...")
             downloaded_images = download_images_bulk(download_tasks, self.gui_callback, self.should_stop)
+            
+            update_progress(40, "Processing images...")
             processed_images = process_images_in_bulk(downloaded_images, self.gui_callback, self.should_stop)
+            
+            update_progress(60, "Uploading images...")
             uploaded_image_urls = upload_images_and_get_urls(processed_images, self.gui_callback, self.should_stop)
 
+            update_progress(75, "Processing records...")
             processed_records, failed_records = process_records_concurrently(
                 airtable_records, uploaded_image_urls, self.gui_callback, 
                 self.Auction_ID, self.selected_warehouse, self.should_stop
             )
 
             if processed_records:
+                update_progress(85, "Creating CSV file...")
                 csv_path = processed_records_to_df(processed_records, self.Auction_ID, self.gui_callback)
                 self.final_csv_path = self.format_final_csv(csv_path)
 
             if self.final_csv_path:
+                update_progress(90, "Configuring web driver...")
                 driver = self.configure_driver(self.website_login_url)
                 
                 username = config_manager.get_warehouse_var('bid_username')
                 password = config_manager.get_warehouse_var('bid_password')
 
+                update_progress(92, "Logging into website...")
                 login_success = self.login_to_website(driver, username, password)
                 
                 if login_success:
-                    self.gui_callback("Login successful. Attempting to upload CSV...")
+                    update_progress(95, "Uploading CSV to 702 Auctions...")
                     csv_filename = f"{self.Auction_ID}.csv"
                     csv_path = os.path.join(get_resources_dir('processed_csv'), csv_filename)
                     if os.path.exists(csv_path):
                         upload_success = self.upload_csv_to_website(driver, csv_path)
                         if upload_success:
-                            self.gui_callback(f"CSV uploaded successfully to 702 Auctions.")
+                            update_progress(98, "CSV uploaded successfully to 702 Auctions.")
                         else:
-                            self.gui_callback(f"CSV upload to 702 Auctions failed.")
+                            update_progress(98, "CSV upload to 702 Auctions failed.")
                     else:
-                        self.gui_callback(f"CSV file not found at {csv_path}")
+                        update_progress(98, f"CSV file not found at {csv_path}")
                 else:
-                    self.gui_callback(f"Login to 702 Auctions failed.")
+                    update_progress(98, "Login to 702 Auctions failed.")
                 
-                self.gui_callback("Final URL: " + driver.current_url)
+                update_progress(99, f"Final URL: {driver.current_url}")
                 driver.quit()
 
             if failed_records:
+                update_progress(99, "Saving failed records...")
                 self.failed_records_csv_filepath = failed_records_csv(failed_records, self.Auction_ID, self.gui_callback)
 
+            update_progress(100, "Organizing images...")
             organize_images(self.Auction_ID)
         except Exception as e:
-            self.gui_callback(f"Error: {e}")
+            update_progress(100, f"Error: {str(e)}")
         finally:
             self.callback()
 
@@ -796,10 +802,7 @@ class AuctionFormatter:
             top_50_items = sorted_data[~sorted_data['Subtitle'].str.contains('missing|damaged|no', case=False, na=False)].head(50)
             remaining_items = sorted_data[~sorted_data.index.isin(top_50_items.index)].sample(frac=1).reset_index(drop=True)
 
-            # Process top 50 items
             processed_top_50 = self.process_items_avoid_adjacency(top_50_items)
-
-            # Process remaining items
             processed_remaining = self.process_items_avoid_adjacency(remaining_items)
 
             final_data = pd.concat([processed_top_50, processed_remaining]).reset_index(drop=True)
@@ -830,8 +833,7 @@ class AuctionFormatter:
                 else:
                     processed_items.append(row)
 
-            # Randomly insert buffered items
-            if random.random() < 0.2:  # 20% chance to insert a buffered item
+            if random.random() < 0.2:
                 for buffered_title in list(title_buffer.keys()):
                     if buffered_title != title and title_buffer[buffered_title]:
                         processed_items.append(title_buffer[buffered_title].pop(0))
@@ -839,7 +841,6 @@ class AuctionFormatter:
                             del title_buffer[buffered_title]
                         break
 
-        # Add any remaining buffered items
         for buffered_items in title_buffer.values():
             for item in buffered_items:
                 insert_position = self.find_insert_position(processed_items, item['Title'])

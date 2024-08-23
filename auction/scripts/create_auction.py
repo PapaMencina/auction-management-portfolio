@@ -15,7 +15,7 @@ from selenium.webdriver.firefox.service import Service as FirefoxService
 from selenium.webdriver.firefox.options import Options as FirefoxOptions
 from webdriver_manager.firefox import GeckoDriverManager
 from auction.utils import config_manager
-from auction.utils.progress_tracker import ProgressTracker, run_with_progress
+from auction.utils.progress_tracker import ProgressTracker, with_progress_tracking
 import logging
 
 # Load configuration
@@ -375,7 +375,7 @@ class SharedEvents:
         }
         save_event_to_file(event_data)
 
-@run_with_progress
+@with_progress_tracking
 def create_auction_main(auction_title, ending_date, show_browser, selected_warehouse, update_progress):
     config_manager.set_active_warehouse(selected_warehouse)
     

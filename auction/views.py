@@ -20,7 +20,8 @@ from auction.scripts.auction_formatter import auction_formatter_main
 from auction.scripts.upload_to_hibid import upload_to_hibid_main
 from uuid import uuid4
 from django.http import JsonResponse
-from auction.utils.progress_tracker import ProgressTracker
+from auction.utils.progress_tracker import ProgressTracker, with_progress_tracking
+
 
 logger = logging.getLogger(__name__)
 
@@ -251,11 +252,18 @@ def auction_formatter_view(request):
 
         task_id = str(uuid4())
 
-        Thread(target=auction_formatter_main, kwargs={
+        def gui_callback(message):
+            ProgressTracker.update_progress(task_id, 0, message)
+
+        should_stop = threading.Event()
+
+        Thread(target=auction_formatter_main, args=(task_id,), kwargs={
             'auction_id': auction_id,
             'selected_warehouse': selected_warehouse,
-            'show_browser': show_browser,
-            'task_id': task_id
+            'gui_callback': gui_callback,
+            'should_stop': should_stop,
+            'callback': lambda: None,
+            'show_browser': show_browser
         }).start()
 
         return JsonResponse({'task_id': task_id})
