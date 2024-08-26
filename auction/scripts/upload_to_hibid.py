@@ -20,6 +20,7 @@ from selenium.webdriver.firefox.service import Service as FirefoxService
 from selenium.webdriver.firefox.options import Options as FirefoxOptions
 from webdriver_manager.firefox import GeckoDriverManager
 from auction.utils import config_manager
+from auction.utils.progress_tracker import with_progress_tracking
 
 logger = logging.getLogger(__name__)
 
@@ -28,9 +29,10 @@ config_manager.load_config(config_path)
 
 BASE_URL = "https://www.auctionflex360.com/#/organization/5676/auctions/new"
 
-def upload_to_hibid_main(auction_id, ending_date, auction_title, gui_callback, should_stop, callback, show_browser, selected_warehouse):
+@with_progress_tracking
+def upload_to_hibid_main(auction_id, ending_date, auction_title, gui_callback, should_stop, callback, show_browser, selected_warehouse, update_progress):
     config_manager.set_active_warehouse(selected_warehouse)
-    run_upload_to_hibid(auction_id, ending_date, auction_title, gui_callback, should_stop, callback, show_browser, selected_warehouse)
+    run_upload_to_hibid(auction_id, ending_date, auction_title, gui_callback, should_stop, callback, show_browser, selected_warehouse, update_progress)
 
 if __name__ == "__main__":
     upload_to_hibid_main("sample_auction_id", "2023-12-31 18:30:00", "Sample Auction Title", print, threading.Event(), lambda: print("Callback"), 1, "sample_username", "sample_password", "Maule Warehouse")
@@ -354,11 +356,11 @@ def handle_url_check(driver, page, fallback_url, gui_callback, should_stop, user
     else:
         gui_callback("Current URL seems fine. Continuing with the process.")
 
-def details_page(driver, auction_title, auction_id, formatted_date_only, number_of_lots, formatted_ending_date, gui_callback, selected_warehouse):
+def details_page(driver, auction_title, auction_id, formatted_date_only, number_of_lots, formatted_ending_date, gui_callback, selected_warehouse, update_progress):
     try:
         driver.get(BASE_URL)
         time.sleep(5)
-        gui_callback('Loading Details page...')
+        update_progress(50, 'Loading Details page...')
         auction_link_url = f'https://bid.702auctions.com/Event/Details/{auction_id}?utm_source=auction&utm_medium=linkclick&utm_campaign=hibid'
         browse_link_url = f'https://bid.702auctions.com/Browse?utm_source=browse_all&utm_medium=linkclick&utm_campaign=hibid'
         file_path_702_logo = get_resource_path('bid_stock_photo', '702_logo.png')
@@ -423,7 +425,7 @@ def details_page(driver, auction_title, auction_id, formatted_date_only, number_
             time.sleep(2)
             driver.refresh()
     except Exception as e:
-        gui_callback(f"Error in details_page: {e}")
+        update_progress(55, f"Error in details_page: {e}")
 
 def hibiduploadsettings_page(driver, ending_date, todays_date, gui_callback, selected_warehouse):
     try:
@@ -491,18 +493,18 @@ def save_screenshot(driver, name="screenshot.png"):
 def wait_for_element_to_be_clickable(driver, by, locator, timeout=30):
     return WebDriverWait(driver, timeout).until(EC.element_to_be_clickable((by, locator)))
 
-def lots_page(driver, transformed_csv_path, auction_id, lot_numbers_list, gui_callback, should_stop):
-    gui_callback('Loading Lots page...')
+def lots_page(driver, transformed_csv_path, auction_id, lot_numbers_list, gui_callback, should_stop, update_progress):
+    update_progress(70, 'Loading Lots page...')
     hibiduploadsettings_url = driver.current_url
     lots_url = hibiduploadsettings_url.replace('hibiduploadsettings', 'lots')
     driver.get(lots_url)
     time.sleep(2)
-    gui_callback('Importing CSV...')
+    update_progress(72, 'Importing CSV...')
 
     try:
         click_import_lots_button(driver)
     except Exception as e:
-        print(f"Error clicking 'Import Lots' button: {e}")
+        update_progress(73, f"Error clicking 'Import Lots' button: {e}")
         driver.save_screenshot("error_screenshot.png")
         return
 
@@ -510,7 +512,7 @@ def lots_page(driver, transformed_csv_path, auction_id, lot_numbers_list, gui_ca
         print(transformed_csv_path)
         fill_file_input(driver, By.ID, "files", os.path.abspath(transformed_csv_path))
     except Exception as e:
-        print(f"Error filling 'files' field: {e}")
+        update_progress(74, f"Error filling 'files' field: {e}")
         driver.save_screenshot("error_screenshot.png")
         return
 
@@ -519,7 +521,7 @@ def lots_page(driver, transformed_csv_path, auction_id, lot_numbers_list, gui_ca
     try:
         click_button(driver, By.XPATH, "//div[contains(@class, 'modal-buttons')]//button[@id='submit']")
     except Exception as e:
-        print(f"Error clicking 'submit' button: {e}")
+        update_progress(75, f"Error clicking 'submit' button: {e}")
         driver.save_screenshot("error_screenshot.png")
         return
 
@@ -528,7 +530,7 @@ def lots_page(driver, transformed_csv_path, auction_id, lot_numbers_list, gui_ca
     try:
         select_dropdown_options(driver, mappings, gui_callback)
     except Exception as e:
-        print(f"Error selecting dropdown options: {e}")
+        update_progress(76, f"Error selecting dropdown options: {e}")
         driver.save_screenshot("error_screenshot.png")
         return
 
@@ -537,14 +539,14 @@ def lots_page(driver, transformed_csv_path, auction_id, lot_numbers_list, gui_ca
     try:
         click_button(driver, By.ID, "import")
     except Exception as e:
-        print(f"Error clicking 'import' button: {e}")
+        update_progress(77, f"Error clicking 'import' button: {e}")
         driver.save_screenshot("error_screenshot.png")
         return
 
     try:
         click_button(driver, By.XPATH, "//button[contains(text(), 'IMPORT')]")
     except Exception as e:
-        print(f"Error clicking 'IMPORT' button: {e}")
+        update_progress(78, f"Error clicking 'IMPORT' button: {e}")
         driver.save_screenshot("error_screenshot.png")
         return
 
@@ -552,43 +554,43 @@ def lots_page(driver, transformed_csv_path, auction_id, lot_numbers_list, gui_ca
 
     try:
         wait_for_element_invisibility(driver, By.XPATH, stop_import_xpath, timeout=90)
-        print("Stop Import has disappeared")
+        update_progress(80, "Stop Import has disappeared")
     except Exception as e:
-        print(f"Error waiting for 'Stop Import' text to disappear: {e}")
+        update_progress(80, f"Error waiting for 'Stop Import' text to disappear: {e}")
         driver.save_screenshot("error_screenshot.png")
         return
 
     time.sleep(1)
     close_button_css_selector = 'button[data-dismiss="modal"].btn.af-cancel-button'
 
-    # Debugging: Check if the CLOSE button is present
     try:
         close_button = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, close_button_css_selector)))
-        print("CLOSE button is present")
+        update_progress(81, "CLOSE button is present")
     except TimeoutException:
-        print("TimeoutException: CLOSE button is not present")
+        update_progress(81, "TimeoutException: CLOSE button is not present")
         save_screenshot(driver, "close_button_not_present")
         return
     
-    # Scroll into view and click using JavaScript
     try:
         driver.execute_script("arguments[0].scrollIntoView(true);", close_button)
         driver.execute_script("arguments[0].click();", close_button)
-        print("CLOSE button force-clicked using JavaScript")
+        update_progress(82, "CLOSE button force-clicked using JavaScript")
     except Exception as js_click_exception:
-        print(f"Exception during force-click using JavaScript: {js_click_exception}")
+        update_progress(82, f"Exception during force-click using JavaScript: {js_click_exception}")
         save_screenshot(driver, "js_click_exception_close_button")
 
     try:
         click_button(driver, By.XPATH, '//*[@id="lotTable_1"]/thead/tr/th[3]')
+        update_progress(83, "Clicked 'sort by lot order' button")
     except Exception as e:
-        print(f"Error clicking 'sort by lot order' button: {e}")
+        update_progress(83, f"Error clicking 'sort by lot order' button: {e}")
         driver.save_screenshot("error_screenshot.png")
         return
 
-    process_lots(driver, auction_id, lots_url, lot_numbers_list, gui_callback, should_stop)
+    update_progress(84, "Starting to process lots...")
+    process_lots(driver, auction_id, lots_url, lot_numbers_list, gui_callback, should_stop, update_progress)
 
-def process_lots(driver, auction_id, lots_url, lot_numbers, gui_callback, should_stop):
+def process_lots(driver, auction_id, lots_url, lot_numbers, gui_callback, should_stop, update_progress):
     gui_callback('Importing Images and link...')
     last_successful_url = lots_url
     time.sleep(2)
@@ -715,80 +717,83 @@ def format_ending_date(ending_date, gui_callback):
     
     return formatted_ending_date, formatted_date_only
 
-def run_upload_to_hibid(auction_id, ending_date, auction_title, gui_callback, should_stop, callback, show_browser, selected_warehouse):
+def run_upload_to_hibid(auction_id, ending_date, auction_title, gui_callback, should_stop, callback, show_browser, selected_warehouse, update_progress):
     driver = None
     try:
-        gui_callback("Starting the upload process...")
+        update_progress(5, "Starting the upload process...")
 
         username = config_manager.get_warehouse_var('hibid_user_name')
         password = config_manager.get_warehouse_var('hibid_password')
 
         if username is None or password is None:
-            gui_callback("Error: Username or password is None. Please check your configuration.")
+            update_progress(10, "Error: Username or password is None. Please check your configuration.")
             return
 
         driver = configure_driver(BASE_URL, show_browser, gui_callback)
-        gui_callback("WebDriver configured.")
+        update_progress(15, "WebDriver configured.")
 
         login_successful = login(driver, username, password, gui_callback, should_stop)
         
         if not login_successful:
-            gui_callback("Login failed. Stopping the process.")
+            update_progress(20, "Login failed. Stopping the process.")
             return
 
         if should_stop.is_set():
-            gui_callback("Process stopped by user after login.")
+            update_progress(25, "Process stopped by user after login.")
             return
 
         input_csv_path = get_resource_path('processed_csv', f'{auction_id}.csv')
-        gui_callback(f"Input CSV Path: {input_csv_path}")
+        update_progress(30, f"Input CSV Path: {input_csv_path}")
 
         todays_date = datetime.now().strftime("%m/%d/%Y")
 
         formatted_ending_date, formatted_date_only = format_ending_date(ending_date, gui_callback)
-        gui_callback(f"Formatted ending date: {formatted_ending_date}, formatted date only: {formatted_date_only}")
+        update_progress(35, f"Formatted ending date: {formatted_ending_date}, formatted date only: {formatted_date_only}")
 
         if should_stop.is_set():
-            gui_callback("Process stopped by user before CSV transformation.")
+            update_progress(40, "Process stopped by user before CSV transformation.")
             return
 
         number_of_lots, auction_id, transformed_csv_path, lot_number_list = transform_csv_with_fixed_lines(input_csv_path)
-        gui_callback(f"Number of lots: {number_of_lots}, auction_id: {auction_id}, transformed_csv_path: {transformed_csv_path}")
+        update_progress(45, f"Number of lots: {number_of_lots}, auction_id: {auction_id}, transformed_csv_path: {transformed_csv_path}")
 
-        details_page(driver, auction_title, auction_id, formatted_date_only, number_of_lots, formatted_ending_date, gui_callback, selected_warehouse)
-        time.sleep(2)
+        details_page(driver, auction_title, auction_id, formatted_date_only, number_of_lots, formatted_ending_date, gui_callback, selected_warehouse, update_progress)
+        update_progress(55, "Details page completed.")
 
         if should_stop.is_set():
-            gui_callback("Process stopped by user before settings page.")
+            update_progress(60, "Process stopped by user before settings page.")
             return
 
         hibiduploadsettings_page(driver, formatted_ending_date, todays_date, gui_callback, selected_warehouse)
-        time.sleep(2)
+        update_progress(65, "Settings page completed.")
 
         if should_stop.is_set():
-            gui_callback("Process stopped by user before lots page.")
+            update_progress(70, "Process stopped by user before lots page.")
             return
 
-        lots_page(driver, transformed_csv_path, auction_id, lot_number_list, gui_callback, should_stop)
-        time.sleep(2)
+        lots_page(driver, transformed_csv_path, auction_id, lot_number_list, gui_callback, should_stop, update_progress)
+        update_progress(85, "Lots page completed.")
 
         if should_stop.is_set():
-            gui_callback("Process stopped by user before submitting auction.")
+            update_progress(90, "Process stopped by user before submitting auction.")
             return
 
         submit_auction(driver, gui_callback)
-        gui_callback("Upload process completed successfully.")
+        update_progress(95, "Auction submitted successfully.")
 
     except WebDriverException as e:
+        update_progress(98, f"Selenium WebDriver error: {e}")
         logger.error(f"Selenium WebDriver error: {e}")
     except Exception as e:
+        update_progress(98, f"Unexpected error: {e}")
         logger.error(f"Unexpected error: {e}")
         logger.exception("Traceback:")
     finally:
         if driver:
-            gui_callback("Closing the browser...")
+            update_progress(99, "Closing the browser...")
             try:
                 driver.quit()
             except Exception as e:
                 logger.error(f"Error while closing the browser: {str(e)}")
+        update_progress(100, "Upload process completed.")
         callback()

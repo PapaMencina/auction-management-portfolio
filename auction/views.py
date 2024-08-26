@@ -333,11 +333,18 @@ def upload_to_hibid_view(request):
         config_manager.set_active_warehouse(selected_warehouse)
 
         task_id = str(uuid4())
+        should_stop = threading.Event()
+
+        def gui_callback(message):
+            ProgressTracker.update_progress(task_id, 0, message)
 
         Thread(target=upload_to_hibid_main, kwargs={
             'auction_id': auction_id,
             'ending_date': ending_date_str,
             'auction_title': auction_title,
+            'gui_callback': gui_callback,
+            'should_stop': should_stop,
+            'callback': lambda: None,
             'show_browser': show_browser,
             'selected_warehouse': selected_warehouse,
             'task_id': task_id
