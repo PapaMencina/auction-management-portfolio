@@ -25,9 +25,9 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 SECRET_KEY = 'django-insecure-6p&=x=7*n^ugg^4jv@(@j8i1!x8uxbc8!8#gxz8%6)pjw^#!2k'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = False
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['702AMS-Mencina.pythonanywhere.com']
 
 
 # Application definition
@@ -80,8 +80,15 @@ AUTH_USER_MODEL = 'auction.CustomUser'
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE': 'django.db.backends.mysql',
+        'NAME': 'Mencina$default',  # Replace with your MySQL database name
+        'USER': 'Mencina',  # Replace with your MySQL username
+        'PASSWORD': 'pBDKjce$VB6%22',  # Replace with your MySQL password
+        'HOST': 'Mencina.mysql.pythonanywhere-services.com',  # 'localhost' or the actual host address
+        'PORT': '3306',  # Default MySQL port
+        'OPTIONS': {
+            'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
+        },
     }
 }
 
