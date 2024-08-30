@@ -9,6 +9,7 @@ from django.conf import settings
 import logging
 import threading
 import json
+import traceback
 import os
 from threading import Thread, Event
 from datetime import datetime, timezone
@@ -19,7 +20,6 @@ from auction.scripts.remove_duplicates_in_airtable import remove_duplicates_main
 from auction.scripts.auction_formatter import auction_formatter_main
 from auction.scripts.upload_to_hibid import upload_to_hibid_main
 from uuid import uuid4
-from django.http import JsonResponse
 from auction.utils.progress_tracker import ProgressTracker, with_progress_tracking
 
 
@@ -52,12 +52,12 @@ def load_events(request):
     try:
         # Use Django's settings to get the base directory of your project
         base_dir = settings.BASE_DIR
-        
+
         # Construct the path to events.json relative to your project root
         file_path = os.path.join(base_dir, 'auction', 'resources', 'events.json')
-        
+
         logger.info(f"Attempting to read events.json from: {file_path}")
-        
+
         if os.path.exists(file_path):
             logger.info(f"events.json file found at {file_path}")
             with open(file_path, "r") as file:
@@ -123,26 +123,36 @@ def select_warehouse(request):
 @login_required
 def create_auction_view(request):
     if request.method == 'POST':
-        auction_title = request.POST.get('auction_title')
-        ending_date = datetime.strptime(request.POST.get('ending_date'), '%Y-%m-%d')
-        show_browser = 'show_browser' in request.POST and request.user.has_perm('auction.can_use_show_browser')
-        selected_warehouse = request.POST.get('selected_warehouse')
+        try:
+            auction_title = request.POST.get('auction_title')
+            ending_date = datetime.strptime(request.POST.get('ending_date'), '%Y-%m-%d')
+            show_browser = 'show_browser' in request.POST and request.user.has_perm('auction.can_use_show_browser')
+            selected_warehouse = request.POST.get('selected_warehouse')
 
-        config_manager.set_active_warehouse(selected_warehouse)
-        
-        task_id = str(uuid4())
-        
-        # Start the auction creation process in a separate thread
-        Thread(target=create_auction_main, kwargs={
-            'auction_title': auction_title,
-            'ending_date': ending_date,
-            'show_browser': show_browser,
-            'selected_warehouse': selected_warehouse,
-            'task_id': task_id
-        }).start()
-        
-        return JsonResponse({'task_id': task_id})
-    
+            config_manager.set_active_warehouse(selected_warehouse)
+
+            task_id = str(uuid4())
+            logger.info(f"Creating auction task with ID: {task_id}")
+
+            ProgressTracker.update_progress(task_id, 0, "Task started")
+
+            # Start the auction creation process in a separate thread
+            thread = Thread(target=create_auction_main, kwargs={
+                'auction_title': auction_title,
+                'ending_date': ending_date,
+                'show_browser': show_browser,
+                'selected_warehouse': selected_warehouse,
+                'task_id': task_id
+            })
+            thread.start()
+
+            logger.info(f"Auction creation thread started for task {task_id}")
+            return JsonResponse({'task_id': task_id})
+        except Exception as e:
+            logger.error(f"Error starting auction creation task: {str(e)}")
+            logger.error(traceback.format_exc())
+            return JsonResponse({'error': 'Failed to start auction creation task', 'details': str(e)}, status=500)
+
     warehouses = list(warehouse_data.keys())
     can_use_show_browser = request.user.has_perm('auction.can_use_show_browser')
     return render(request, 'auction/create_auction.html', {
@@ -152,10 +162,16 @@ def create_auction_view(request):
 
 @login_required
 def get_task_progress(request, task_id):
-    progress = ProgressTracker.get_progress(task_id)
-    if 'error' in progress:
-        return JsonResponse({'error': progress['error']}, status=500)
-    return JsonResponse(progress)
+    logger.info(f"Checking progress for task {task_id}")
+    try:
+        progress = ProgressTracker.get_progress(task_id)
+        logger.info(f"Progress for task {task_id}: {progress}")
+        if progress.get('status') == 'Error':
+            return JsonResponse({'error': progress['status']}, status=500)
+        return JsonResponse(progress)
+    except Exception as e:
+        logger.error(f"Error retrieving progress for task {task_id}: {str(e)}")
+        return JsonResponse({'error': 'Error retrieving task progress', 'details': str(e)}, status=500)
 
 @login_required
 @require_http_methods(["GET", "POST"])
@@ -188,7 +204,7 @@ def void_unpaid_view(request):
                 return JsonResponse({'error': 'Invalid Auction ID - Please confirm the auction ID and Warehouse, then try again.'}, status=400)
 
             task_id = str(uuid4())
-            
+
             Thread(target=void_unpaid_main, kwargs={
                 'auction_id': auction_id,
                 'upload_choice': upload_choice,
@@ -209,23 +225,23 @@ def void_unpaid_view(request):
 def remove_duplicates_view(request):
     auctions = get_auction_numbers(request)
     warehouses = list(warehouse_data.keys())
-    
+
     if request.method == 'POST':
         auction_number = request.POST.get('auction_number')
         target_msrp = float(request.POST.get('target_msrp'))
         warehouse_name = request.POST.get('warehouse_name')
-        
+
         task_id = str(uuid4())
-        
+
         Thread(target=remove_duplicates_main, kwargs={
             'auction_number': auction_number,
             'target_msrp': target_msrp,
             'warehouse_name': warehouse_name,
             'task_id': task_id
         }).start()
-        
+
         return JsonResponse({'task_id': task_id})
-    
+
     context = {
         'auctions_json': json.dumps([{
             'id': event.get('event_id') or event.get('id'),  # Use 'id' if 'event_id' is not present
@@ -280,9 +296,9 @@ def download_formatted_csv(request, auction_id):
     script_dir = os.path.dirname(os.path.abspath(__file__))
     resources_dir = os.path.join(script_dir, 'resources', 'processed_csv')
     csv_path = os.path.join(resources_dir, f'{auction_id}.csv')
-    
+
     logger.info(f"Attempting to download CSV from: {csv_path}")
-    
+
     if os.path.exists(csv_path):
         logger.info(f"CSV file found at: {csv_path}")
         try:
@@ -303,25 +319,25 @@ def upload_to_hibid_view(request):
     warehouses = list(warehouse_data.keys())
     auctions = get_auction_numbers(request)
     can_use_show_browser = request.user.has_perm('auction.can_use_show_browser')
-    
+
     if request.method == 'POST':
         auction_id = request.POST.get('auction_id')
         show_browser = 'show_browser' in request.POST and can_use_show_browser
         selected_warehouse = request.POST.get('selected_warehouse')
-        
+
         if not all([auction_id, selected_warehouse]):
             return JsonResponse({'status': 'error', 'message': "Please select both a warehouse and an event."})
-        
+
         selected_auction = next((a for a in auctions if a['id'] == auction_id), None)
-        
+
         if not selected_auction:
             return JsonResponse({'status': 'error', 'message': "Invalid auction selected."})
 
         ending_date_str = selected_auction.get('ending_date') or selected_auction.get('timestamp')
-        
+
         if not ending_date_str:
             return JsonResponse({'status': 'error', 'message': "No valid ending date found for the selected auction."})
-        
+
         try:
             ending_date = datetime.fromisoformat(ending_date_str.rstrip('Z')).replace(tzinfo=timezone.utc)
             ending_date_str = ending_date.strftime('%Y-%m-%d %H:%M:%S')
@@ -329,7 +345,7 @@ def upload_to_hibid_view(request):
             return JsonResponse({'status': 'error', 'message': "Invalid date format in auction data."})
 
         auction_title = selected_auction['title']
-        
+
         config_manager.set_active_warehouse(selected_warehouse)
 
         task_id = str(uuid4())
@@ -351,7 +367,7 @@ def upload_to_hibid_view(request):
         }).start()
 
         return JsonResponse({'task_id': task_id})
-    
+
     # GET request handling
     context = {
         'warehouses': warehouses,

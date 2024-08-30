@@ -4,6 +4,7 @@ import json
 import re
 import traceback
 import threading
+import sys
 from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -17,6 +18,14 @@ from webdriver_manager.firefox import GeckoDriverManager
 from auction.utils import config_manager
 from auction.utils.progress_tracker import ProgressTracker, with_progress_tracking
 import logging
+
+# Set up logging to both console and file
+logging.basicConfig(level=logging.DEBUG,
+                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                    handlers=[
+                        logging.FileHandler("/home/Mencina/702AMS-Mencina/logs/create_auction.log"),
+                        logging.StreamHandler(sys.stdout)
+                    ])
 
 # Load configuration
 config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'utils', 'config.json')
@@ -65,34 +74,40 @@ def get_browser_logs(driver):
 
 def save_event_to_file(event_data):
     file_path = os.path.join(get_resources_dir(''), 'events.json')
-    print(f"Attempting to save event to {file_path}")
+    logger.info(f"Attempting to save event to {file_path}")
     with file_lock:
         try:
+            events = []
             if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
                 try:
                     with open(file_path, "r") as file:
                         events = json.load(file)
-                    print(f"Loaded existing events: {len(events)}")
+                    logger.info(f"Loaded existing events: {len(events)}")
                 except json.JSONDecodeError:
-                    print("Existing file contains invalid JSON. Starting with empty list.")
-                    events = []
+                    logger.warning("Existing file contains invalid JSON. Starting with empty list.")
             else:
-                events = []
-                print("No existing events file or file is empty. Creating new.")
+                logger.info("No existing events file or file is empty. Creating new.")
 
             events.append(event_data)
-            print(f"Added new event. Total events: {len(events)}")
+            logger.info(f"Added new event. Total events: {len(events)}")
 
             with open(file_path, "w") as file:
                 json.dump(events, file, indent=4)
-            print(f"Event successfully saved to {file_path}")
+            logger.info(f"Event successfully saved to {file_path}")
+
+        except PermissionError:
+            logger.error(f"Permission denied when trying to write to {file_path}")
+            logger.error(f"File is writable: {os.access(file_path, os.W_OK) if os.path.exists(file_path) else 'N/A'}")
+        except IOError as e:
+            logger.error(f"IO error occurred when saving event to file: {e}")
         except Exception as e:
-            print(f"Failed to save event to file: {e}")
-            print("Traceback:")
-            traceback.print_exc()
-            print(f"Current working directory: {os.getcwd()}")
-            print(f"File exists: {os.path.exists(file_path)}")
-            print(f"File is writable: {os.access(file_path, os.W_OK) if os.path.exists(file_path) else 'N/A'}")
+            logger.error(f"Unexpected error when saving event to file: {e}")
+            logger.error("Traceback:", exc_info=True)
+        finally:
+            logger.debug(f"Current working directory: {os.getcwd()}")
+            logger.debug(f"File exists: {os.path.exists(file_path)}")
+
+    return os.path.exists(file_path) and os.path.getsize(file_path) > 0
 
 def get_resources_dir(folder=''):
     base_path = os.environ.get('AUCTION_RESOURCES_PATH', os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'resources'))
@@ -128,7 +143,6 @@ def wait_for_download(gui_callback, timeout=300):
         time.sleep(1)
 
 def configure_driver(url, show_browser):
-
     firefox_options = FirefoxOptions()
     firefox_options.set_preference("browser.download.folderList", 2)
     firefox_options.set_preference("browser.download.manager.showWhenStarting", False)
@@ -139,7 +153,8 @@ def configure_driver(url, show_browser):
         firefox_options.add_argument("--headless")
         firefox_options.add_argument("--window-size=1920x1080")
 
-    driver = webdriver.Firefox(service=FirefoxService(GeckoDriverManager().install()), options=firefox_options)
+    # Use the system's GeckoDriver
+    driver = webdriver.Firefox(options=firefox_options)
     driver.get(url)
     return driver
 
@@ -149,7 +164,7 @@ def format_date(date_obj):
         suffix = "th"
     else:
         suffix = {"1": "st", "2": "nd", "3": "rd"}.get(str(date_obj.day)[-1], "th")
-    
+
     month_day_str = date_obj.strftime("%B %d").replace(" 0", " ") + suffix
     full_date = date_obj.strftime('%m/%d/%Y')
     return month_day_str, full_date
@@ -345,7 +360,7 @@ def create_auction(driver, auction_title, image_path, formatted_start_date, bid_
         enter_text(driver, (By.ID, "StartTime"), '1:00 AM')
         enter_text(driver, (By.ID, "EndDate"), bid_formatted_ending_date)
         enter_text(driver, (By.ID, "EndTime"), '6:30 PM')
-        
+
         update_progress(85, 'Creating auction...')
         click_element(driver, (By.ID, "create"))
 
@@ -377,58 +392,75 @@ class SharedEvents:
 
 @with_progress_tracking
 def create_auction_main(auction_title, ending_date, show_browser, selected_warehouse, update_progress):
-    config_manager.set_active_warehouse(selected_warehouse)
-    
-    relaythat_url = config_manager.get_warehouse_var('relaythat_url')
-    if not relaythat_url:
-        update_progress(0, "Invalid warehouse selected or missing relaythat_url in config.")
-        return
+    logger.info(f"Starting create_auction_main for auction: {auction_title}, warehouse: {selected_warehouse}")
+    update_progress(1, "Starting auction creation process")
 
-    driver = None
     event_id = None
+    driver = None
 
     try:
-        update_progress(5, "Initializing auction creation process...")
-        
+        config_manager.set_active_warehouse(selected_warehouse)
+        update_progress(2, "Warehouse configuration set")
+
+        relaythat_url = config_manager.get_warehouse_var('relaythat_url')
+        if not relaythat_url:
+            raise ValueError("Invalid warehouse selected or missing relaythat_url in config.")
+
+        update_progress(5, "Initializing auction creation process")
+
         month_formatted_date, bid_formatted_ending_date = format_date(ending_date)
+        logger.info(f"Date formatting completed: {month_formatted_date}, {bid_formatted_ending_date}")
         update_progress(10, "Date formatting completed")
-        
+
         driver = configure_driver(relaythat_url, show_browser)
-        update_progress(20, "Driver configured")
+        logger.info("Driver configured")
+        update_progress(20, "WebDriver configured")
 
         formatted_start_date = datetime.now().strftime('%m/%d/%Y')
-        update_progress(25, "Getting auction image...")
+        logger.info(f"Getting auction image for date: {month_formatted_date}")
+        update_progress(25, "Initiating image download")
+
         event_image = get_image(driver, month_formatted_date, relaythat_url, update_progress, selected_warehouse)
+        if not event_image:
+            raise Exception("Failed to download the event image")
 
-        if event_image:
-            update_progress(50, "Image downloaded, creating auction...")
-            event_id = create_auction(driver, auction_title, event_image, formatted_start_date, bid_formatted_ending_date, update_progress, selected_warehouse)
+        logger.info(f"Image downloaded: {event_image}")
+        update_progress(50, "Image downloaded, creating auction")
 
-            if event_id:
-                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                event_data = {
-                    "warehouse": selected_warehouse,
-                    "title": auction_title,
-                    "event_id": event_id,
-                    "start_date": formatted_start_date,
-                    "ending_date": str(ending_date),
-                    "timestamp": timestamp
-                }
-                save_event_to_file(event_data)
-                update_progress(90, f"Event {event_id} created at {timestamp}")
-            else:
-                update_progress(80, "Failed to obtain event ID.")
-        else:
-            update_progress(40, "Failed to download the event image.")
+        event_id = create_auction(driver, auction_title, event_image, formatted_start_date, bid_formatted_ending_date, update_progress, selected_warehouse)
+        if not event_id:
+            raise Exception("Failed to obtain event ID")
+
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        event_data = {
+            "warehouse": selected_warehouse,
+            "title": auction_title,
+            "event_id": event_id,
+            "start_date": formatted_start_date,
+            "ending_date": str(ending_date),
+            "timestamp": timestamp
+        }
+        save_event_to_file(event_data)
+        logger.info(f"Event {event_id} created at {timestamp}")
+        update_progress(90, f"Event {event_id} created successfully")
+
+    except ValueError as e:
+        logger.error(f"Configuration error: {str(e)}")
+        update_progress(100, f"Error: {str(e)}")
+    except WebDriverException as e:
+        logger.error(f"Selenium WebDriver error: {str(e)}")
+        update_progress(100, f"Selenium WebDriver error: {str(e)}")
     except Exception as e:
-        update_progress(95, f"Error: {str(e)}")
-        traceback.print_exc()
+        logger.error(f"Error in create_auction_main: {str(e)}")
+        logger.error(traceback.format_exc())
+        update_progress(100, f"Error: {str(e)}")
     finally:
         if driver:
             driver.quit()
-        update_progress(100, "Auction creation process completed.")
+        logger.info("Auction creation process completed.")
+        update_progress(100, "Auction creation process completed")
 
-    return event_id
+    return event_id  # This will be None if an error occurred
 
 if __name__ == "__main__":
     create_auction_main("Sample Auction", datetime.now(), show_browser=True, selected_warehouse="Maule Warehouse")
