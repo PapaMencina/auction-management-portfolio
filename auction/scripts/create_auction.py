@@ -11,11 +11,10 @@ from auction.utils import config_manager
 from auction.utils.progress_tracker import ProgressTracker, with_progress_tracking
 import logging
 
-# Set up logging to both console and file
+# Set up logging to console
 logging.basicConfig(level=logging.DEBUG,
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
                     handlers=[
-                        logging.FileHandler("/app/logs/create_auction.log"),
                         logging.StreamHandler(sys.stdout)
                     ])
 
