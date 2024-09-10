@@ -85,11 +85,9 @@ AUTH_USER_MODEL = 'auction.CustomUser'
 # Database
 # https://docs.djangoproject.com/en/5.0/ref/settings/#databases
 
-DATABASE_URL = os.environ.get('DATABASE_URL', 'postgres://u5rpbrej8sphmb:pd9b03500d718195dfa1bb51fe3535fcb5f4eddfdad6837192042c507a7735121@c5p86clmevrg5s.cluster-czrs8kj4isg7.us-east-1.rds.amazonaws.com:5432/d1psv27v3sbiff')
-
 DATABASES = {
     'default': dj_database_url.config(
-        default=DATABASE_URL,
+        default=os.environ.get('DATABASE_URL'),
         conn_max_age=600,
         ssl_require=True
     )
