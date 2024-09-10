@@ -4,6 +4,7 @@ from functools import wraps
 import logging
 import traceback
 import time
+import threading
 
 logger = logging.getLogger(__name__)
 
@@ -43,15 +44,36 @@ class ProgressTracker:
 
 def with_progress_tracking(func):
     @wraps(func)
-    def wrapper(task_id, *args, **kwargs):
+    def wrapper(*args, **kwargs):
+        task_id = kwargs.get('task_id')
+        if not task_id:
+            task_id = threading.get_ident()
+        
         def update_progress(progress, status):
             ProgressTracker.update_progress(task_id, progress, status)
 
         try:
-            return func(*args, update_progress=update_progress, **kwargs)
+            kwargs['update_progress'] = update_progress
+            return func(*args, **kwargs)
         except Exception as e:
             logger.error(f"Error in task {task_id}: {str(e)}")
             logger.error(traceback.format_exc())
             ProgressTracker.update_progress(task_id, 100, f"Error: {str(e)}")
             raise
+
     return wrapper
+
+class SharedEvents:
+    def __init__(self):
+        self.events = []
+
+    def add_event(self, title, event_id, ending_date, timestamp):
+        self.events.append({
+            "title": title,
+            "event_id": event_id,
+            "ending_date": str(ending_date),
+            "timestamp": timestamp
+        })
+        logger.info(f"Event added: {title}, ID: {event_id}, Ending Date: {ending_date}, Timestamp: {timestamp}")
+
+shared_events = SharedEvents()

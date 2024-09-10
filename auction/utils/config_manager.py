@@ -72,3 +72,11 @@ def get_all_warehouses():
 
 # Load the configuration when the module is imported
 load_config()
+
+def get_playwright_config():
+    return {
+        'browser': get_global_var('playwright_browser') or 'chromium',
+        'headless': get_global_var('playwright_headless') or True,
+        'slow_mo': get_global_var('playwright_slow_mo') or 50,
+        'timeout': get_global_var('playwright_timeout') or 30000,
+    }
