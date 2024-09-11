@@ -12,22 +12,13 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
 import pandas as pd
 from PIL import Image, ExifTags
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.firefox.service import Service as FirefoxService
-from selenium.webdriver.firefox.options import Options as FirefoxOptions
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.common.action_chains import ActionChains
-from webdriver_manager.firefox import GeckoDriverManager
+from playwright.sync_api import sync_playwright, expect
 from auction.utils.progress_tracker import with_progress_tracking
 
 @with_progress_tracking
-def auction_formatter_main(auction_id, selected_warehouse, gui_callback, should_stop, callback, show_browser, update_progress):
+def auction_formatter_main(auction_id, selected_warehouse, gui_callback, should_stop, callback, update_progress):
     config_manager.set_active_warehouse(selected_warehouse)
-    formatter = AuctionFormatter(auction_id, gui_callback, should_stop, callback, selected_warehouse, show_browser)
+    formatter = AuctionFormatter(auction_id, gui_callback, should_stop, callback, selected_warehouse)
     formatter.run_auction_formatter(update_progress)
     return formatter
 
@@ -36,13 +27,6 @@ from auction.utils import config_manager
 # Load configuration
 config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'utils', 'config.json')
 config_manager.load_config(config_path)
-
-@with_progress_tracking
-def auction_formatter_main(auction_id, selected_warehouse, gui_callback, should_stop, callback, show_browser, update_progress):
-    config_manager.set_active_warehouse(selected_warehouse)
-    formatter = AuctionFormatter(auction_id, gui_callback, should_stop, callback, selected_warehouse, show_browser)
-    formatter.run_auction_formatter(update_progress)
-    return formatter
 
 def get_extension_from_content_disposition(content_disposition: str) -> str:
     filename_match = re.search(r'filename="([^"]+)"', content_disposition)
@@ -199,6 +183,38 @@ def upload_image(file_path: str, gui_callback, should_stop: threading.Event, max
                 gui_callback(f"Failed to upload image: {e}")
         return None
 
+def upload_file_via_ftp(file_name: str, local_file_path: str, gui_callback, should_stop: threading.Event, max_retries: int = 3) -> str:
+    remote_file_path = config_manager.get_global_var('ftp_remote_path')
+    server = config_manager.get_global_var('ftp_server')
+    username = config_manager.get_global_var('ftp_username')
+    password = config_manager.get_global_var('ftp_password')
+    
+    retries = 0
+    while retries < max_retries and not should_stop.is_set():
+        try:
+            with ftplib.FTP(server, username, password) as ftp:
+                ftp.set_pasv(True)
+                ftp.cwd('/')
+                ftp.sendcmd('TYPE I')
+                remote_path_full = os.path.join(remote_file_path, file_name)
+
+                with open(local_file_path, 'rb') as file:
+                    ftp.storbinary(f'STOR {remote_path_full}', file)
+
+            formatted_url = remote_path_full.replace("/public_html", "", 1).lstrip('/')
+            return f"https://{formatted_url}"
+
+        except ftplib.error_temp as e:
+            print(f"Temporary FTP error: {e}. Retrying in 5 seconds...")
+            retries += 1
+            time.sleep(5)
+        except Exception as e:
+            print(f"FTP upload error: {e}.")
+            break
+
+    print("Failed to upload after maximum retries.")
+    return None
+
 def format_subtitle(auction_count: int, msrp: float, other_notes: str) -> str:
     msrp_str = f"MSRP: ${msrp}"
     if auction_count >= 4:
@@ -309,6 +325,263 @@ def format_msrp(msrp: float) -> str:
         return "1.00"
     else:
         return "2.50"
+    
+def format_field(label: str, value: str) -> str:
+    return f"{label}: {value}" if value is not None and str(value).strip() else ""
+
+def format_html_field(field_name: str, value: str) -> str:
+    return f"<b>{field_name}</b>: {value}<br>" if value else ""
+    
+def get_image_url(airtable_record: Dict, count: int) -> str:
+    return airtable_record.get("fields", {}).get(f"Image {count}", [{}])[0].get("url", "")
+
+class AuctionFormatter:
+    def __init__(self, auction_id, gui_callback, should_stop, callback, selected_warehouse):
+        self.Auction_ID = auction_id
+        self.gui_callback = gui_callback
+        self.should_stop = should_stop
+        self.callback = callback
+        self.selected_warehouse = selected_warehouse
+        
+        config_manager.set_active_warehouse(selected_warehouse)
+        
+        self.final_csv_path = None
+        self.website_login_url = config_manager.get_global_var('website_login_url')
+        self.import_csv_url = config_manager.get_global_var('import_csv_url')
+        self.notification_email = config_manager.get_global_var('notification_email')
+
+    def should_continue(self, message):
+        if self.should_stop.is_set():
+            self.gui_callback(message)
+            return False
+        return True
+
+    def login_to_website(self, page, username, password):
+        if not self.should_continue("Login operation stopped by user."):
+            return False
+
+        self.gui_callback("Logging In...")
+        try:
+            page.goto(self.website_login_url)
+            page.wait_for_load_state("networkidle")
+            
+            self.gui_callback("Waiting for username field to be present...")
+            page.wait_for_selector("#username", state="visible", timeout=30000)
+            
+            self.gui_callback("Entering credentials...")
+            page.fill("#username", username)
+            page.fill("#password", password)
+
+            if not self.should_continue("Login operation stopped before finalizing."):
+                return False
+
+            self.gui_callback("Submitting login form...")
+            page.press("#password", "Enter")
+            
+            self.gui_callback("Waiting for login to complete...")
+            page.wait_for_load_state("networkidle")
+            
+            try:
+                page.wait_for_selector("text=Sign Out", timeout=10000)
+                self.gui_callback("Login successful.")
+                return True
+            except:
+                self.gui_callback("Login failed: Could not find 'Sign Out' link.")
+                return False
+
+        except Exception as e:
+            self.gui_callback(f"Login failed: Unexpected error. Error: {str(e)}")
+            return False
+
+    def upload_csv_to_website(self, page, csv_path):
+        try:
+            self.gui_callback("Navigating to upload page...")
+            page.goto("https://bid.702auctions.com/Admin/ImportCSV")
+            
+            self.gui_callback("Waiting for page to load...")
+            page.wait_for_selector("#CsvImportForm", state="visible", timeout=20000)
+            
+            self.gui_callback("Uploading CSV file...")
+            page.set_input_files("#file", csv_path)
+            
+            self.gui_callback("Unchecking 'Validate Data ONLY' checkbox...")
+            page.evaluate("""
+            () => {
+                var checkbox = document.querySelector('input[name="validate"]');
+                var toggle = document.querySelector('.fs-checkbox-toggle');
+                if (checkbox && toggle) {
+                    checkbox.value = 'false';
+                    toggle.classList.remove('fs-checkbox-checked');
+                    toggle.classList.add('fs-checkbox-unchecked');
+                }
+            }
+            """)
+            
+            self.gui_callback("Updating email address...")
+            page.fill("#Text1", "matthew@702auctions.com")
+            
+            page.wait_for_timeout(2000)
+            
+            self.gui_callback("Submitting form...")
+            submit_button = page.wait_for_selector("input.btn.btn-info.btn-sm[type='submit'][value='Upload CSV']", state="visible", timeout=20000)
+            submit_button.click()
+            
+            self.gui_callback("Waiting for upload to complete...")
+            page.wait_for_selector(".alert-success", state="visible", timeout=120000)
+            
+            success_message = page.inner_text(".alert-success")
+            self.gui_callback(f"Upload result: {success_message}")
+            
+            if "CSV listing import has started" in success_message:
+                self.gui_callback("CSV upload initiated successfully!")
+                return True
+            else:
+                self.gui_callback("CSV upload failed.")
+                return False
+            
+        except Exception as e:
+            self.gui_callback(f"Failed to upload CSV: {str(e)}")
+            return False
+        
+    def run_auction_formatter(self, update_progress):
+        try:
+            update_progress(5, "Starting auction formatting process...")
+            airtable_records = get_airtable_records_list(
+                config_manager.get_warehouse_var('airtable_inventory_base_id'),
+                config_manager.get_warehouse_var('airtable_inventory_table_id'),
+                config_manager.get_warehouse_var('airtable_send_to_auction_view_id'),
+                self.gui_callback,
+                config_manager.get_warehouse_var('airtable_api_key')
+            )
+
+            update_progress(15, "Collecting image URLs...")
+            download_tasks = collect_image_urls(airtable_records, self.should_stop)
+            
+            update_progress(20, "Downloading images...")
+            downloaded_images = download_images_bulk(download_tasks, self.gui_callback, self.should_stop)
+            
+            update_progress(40, "Processing images...")
+            processed_images = process_images_in_bulk(downloaded_images, self.gui_callback, self.should_stop)
+            
+            update_progress(60, "Uploading images...")
+            uploaded_image_urls = upload_images_and_get_urls(processed_images, self.gui_callback, self.should_stop)
+
+            update_progress(75, "Processing records...")
+            processed_records, failed_records = process_records_concurrently(
+                airtable_records, uploaded_image_urls, self.gui_callback, 
+                self.Auction_ID, self.selected_warehouse, self.should_stop
+            )
+
+            if processed_records:
+                update_progress(85, "Creating CSV file...")
+                csv_path = processed_records_to_df(processed_records, self.Auction_ID, self.gui_callback)
+                self.final_csv_path = self.format_final_csv(csv_path)
+
+            if self.final_csv_path:
+                update_progress(90, "Initializing browser...")
+                with sync_playwright() as p:
+                    browser = p.chromium.launch(headless=True)
+                    page = browser.new_page()
+                    
+                    username = config_manager.get_warehouse_var('bid_username')
+                    password = config_manager.get_warehouse_var('bid_password')
+
+                    update_progress(92, "Logging into website...")
+                    login_success = self.login_to_website(page, username, password)
+                    
+                    if login_success:
+                        update_progress(95, "Uploading CSV to 702 Auctions...")
+                        csv_filename = f"{self.Auction_ID}.csv"
+                        csv_path = os.path.join(get_resources_dir('processed_csv'), csv_filename)
+                        if os.path.exists(csv_path):
+                            upload_success = self.upload_csv_to_website(page, csv_path)
+                            if upload_success:
+                                update_progress(98, "CSV uploaded successfully to 702 Auctions.")
+                            else:
+                                update_progress(98, "CSV upload to 702 Auctions failed.")
+                        else:
+                            update_progress(98, f"CSV file not found at {csv_path}")
+                    else:
+                        update_progress(98, "Login to 702 Auctions failed.")
+                    
+                    update_progress(99, f"Final URL: {page.url}")
+                    browser.close()
+
+            if failed_records:
+                update_progress(99, "Saving failed records...")
+                self.failed_records_csv_filepath = failed_records_csv(failed_records, self.Auction_ID, self.gui_callback)
+
+            update_progress(100, "Organizing images...")
+            organize_images(self.Auction_ID)
+        except Exception as e:
+            update_progress(100, f"Error: {str(e)}")
+        finally:
+            self.callback()
+
+    def format_final_csv(self, file_path):
+        try:
+            data = pd.read_csv(file_path)
+            self.gui_callback(f"Initial data loaded with {len(data)} records.")
+
+            data['UPC'] = data['UPC'].astype(str)
+            data['MSRP'] = pd.to_numeric(data['MSRP'], errors='coerce').round(2)
+
+            sorted_data = data.sort_values(by='MSRP', ascending=False)
+
+            top_50_items = sorted_data[~sorted_data['Subtitle'].str.contains('missing|damaged|no', case=False, na=False)].head(50)
+            remaining_items = sorted_data[~sorted_data.index.isin(top_50_items.index)].sample(frac=1).reset_index(drop=True)
+
+            processed_top_50 = self.process_items_avoid_adjacency(top_50_items)
+            processed_remaining = self.process_items_avoid_adjacency(remaining_items)
+
+            final_data = pd.concat([processed_top_50, processed_remaining]).reset_index(drop=True)
+
+            resources_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'resources', 'processed_csv')
+            os.makedirs(resources_dir, exist_ok=True)
+
+            output_file_path = os.path.join(resources_dir, f'{self.Auction_ID}.csv')
+            final_data.to_csv(output_file_path, index=False)
+
+            self.gui_callback(f"Formatted data saved to {output_file_path}")
+            return output_file_path
+        except Exception as e:
+            self.gui_callback(f"Error formatting final CSV: {e}")
+            return None
+
+    def process_items_avoid_adjacency(self, items):
+        processed_items = []
+        title_buffer = {}
+
+        for _, row in items.iterrows():
+            title = row['Title']
+            if title in title_buffer:
+                title_buffer[title].append(row)
+            else:
+                if processed_items and processed_items[-1]['Title'] == title:
+                    title_buffer[title] = [row]
+                else:
+                    processed_items.append(row)
+
+            if random.random() < 0.2:
+                for buffered_title in list(title_buffer.keys()):
+                    if buffered_title != title and title_buffer[buffered_title]:
+                        processed_items.append(title_buffer[buffered_title].pop(0))
+                        if not title_buffer[buffered_title]:
+                            del title_buffer[buffered_title]
+                        break
+
+        for buffered_items in title_buffer.values():
+            for item in buffered_items:
+                insert_position = self.find_insert_position(processed_items, item['Title'])
+                processed_items.insert(insert_position, item)
+
+        return pd.DataFrame(processed_items)
+
+    def find_insert_position(self, processed_items, title):
+        for i in range(len(processed_items) - 1, -1, -1):
+            if processed_items[i]['Title'] != title:
+                return i + 1
+        return 0
 
 def collect_image_urls(airtable_records: List[Dict], should_stop: threading.Event) -> List[tuple]:
     download_tasks = []
@@ -371,46 +644,6 @@ def upload_images_and_get_urls(downloaded_images: Dict[str, List[str]], gui_call
 
     return uploaded_image_urls
 
-def format_field(label: str, value: str) -> str:
-    return f"{label}: {value}" if value is not None and str(value).strip() else ""
-
-def get_image_url(airtable_record: Dict, count: int) -> str:
-    return airtable_record.get("fields", {}).get(f"Image {count}", [{}])[0].get("url", "")
-
-def upload_file_via_ftp(file_name: str, local_file_path: str, gui_callback, should_stop: threading.Event, max_retries: int = 3) -> str:
-    remote_file_path = config_manager.get_global_var('ftp_remote_path')
-    server = config_manager.get_global_var('ftp_server')
-    username = config_manager.get_global_var('ftp_username')
-    password = config_manager.get_global_var('ftp_password')
-    
-    retries = 0
-    while retries < max_retries and not should_stop.is_set():
-        try:
-            with ftplib.FTP(server, username, password) as ftp:
-                ftp.set_pasv(True)
-                ftp.cwd('/')
-                ftp.sendcmd('TYPE I')
-                remote_path_full = os.path.join(remote_file_path, file_name)
-
-                with open(local_file_path, 'rb') as file:
-                    ftp.storbinary(f'STOR {remote_path_full}', file)
-
-            formatted_url = remote_path_full.replace("/public_html", "", 1).lstrip('/')
-            return f"https://{formatted_url}"
-
-        except ftplib.error_temp as e:
-            print(f"Temporary FTP error: {e}. Retrying in 5 seconds...")
-            retries += 1
-            time.sleep(5)
-        except Exception as e:
-            print(f"FTP upload error: {e}.")
-            break
-
-    print("Failed to upload after maximum retries.")
-    return None
-
-def format_html_field(field_name: str, value: str) -> str:
-    return f"<b>{field_name}</b>: {value}<br>" if value else ""
 
 def process_single_record(airtable_record: Dict, uploaded_image_urls: Dict[str, List[str]], Auction_ID: str, selected_warehouse: str) -> Dict:
     try:
@@ -492,6 +725,7 @@ def process_single_record(airtable_record: Dict, uploaded_image_urls: Dict[str, 
         error_message = f"Error processing Lot Number {lot_number}: {e}"
         return {'Lot Number': lot_number, 'Failure Message': error_message, 'Success': False}
 
+
 def process_records_concurrently(airtable_records: List[Dict], uploaded_image_urls: Dict[str, List[str]], gui_callback, auction_id: str, selected_warehouse: str, should_stop: threading.Event) -> Tuple[List[Dict], List[Dict]]:
     gui_callback("Creating CSV...")
     processed_records = []
@@ -564,292 +798,3 @@ def organize_images(Auction_ID: str) -> None:
             file_count += 1
         elif file.endswith(('.jpg', "png", ".jpeg", ".webp")):
             os.remove(os.path.join(directory, file))
-
-def check_continuation(func):
-    def wrapper(*args, **kwargs):
-        self = args[0]
-        if not self.should_continue(self.should_stop, self.gui_callback, f"Operation stopped before {func.__name__}."):
-            return
-        return func(*args, **kwargs)
-    return wrapper
-
-class AuctionFormatter:
-    def __init__(self, auction_id, gui_callback, should_stop, callback, selected_warehouse, show_browser):
-        self.Auction_ID = auction_id
-        self.gui_callback = gui_callback
-        self.should_stop = should_stop
-        self.callback = callback
-        self.selected_warehouse = selected_warehouse
-        self.show_browser = show_browser
-        
-        config_manager.set_active_warehouse(selected_warehouse)
-        
-        self.final_csv_path = None
-        self.website_login_url = config_manager.get_global_var('website_login_url')
-        self.import_csv_url = config_manager.get_global_var('import_csv_url')
-        self.notification_email = config_manager.get_global_var('notification_email')
-
-    def configure_driver(self, url):
-        firefox_options = FirefoxOptions()
-        if not self.show_browser:
-            firefox_options.add_argument("--headless")
-        driver_path = config_manager.get_global_var('webdriver_path')
-        if driver_path == "auto" or not driver_path:
-            driver = webdriver.Firefox(service=FirefoxService(GeckoDriverManager().install()), options=firefox_options)
-        else:
-            driver = webdriver.Firefox(service=FirefoxService(driver_path), options=firefox_options)
-        driver.get(url)
-        return driver
-
-    def should_continue(self, message):
-        if self.should_stop.is_set():
-            self.gui_callback(message)
-            return False
-        return True
-
-    def login_to_website(self, driver, username, password):
-        if not self.should_continue("Login operation stopped by user."):
-            return False
-
-        self.gui_callback("Logging In...")
-        try:
-            WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-            
-            self.gui_callback("Waiting for username field to be present...")
-            WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.ID, "username")))
-            
-            self.gui_callback("Locating username field...")
-            username_field = driver.find_element(By.ID, "username")
-            username_field.clear()
-            username_field.send_keys(username)
-            
-            self.gui_callback("Locating password field...")
-            password_field = driver.find_element(By.ID, "password")
-            password_field.clear()
-            password_field.send_keys(password)
-
-            if not self.should_continue("Login operation stopped before finalizing."):
-                return False
-
-            self.gui_callback("Submitting login form...")
-            password_field.send_keys(Keys.RETURN)
-            
-            self.gui_callback("Waiting for login to complete...")
-            
-            WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CSS_SELECTOR, "body")))
-            
-            try:
-                WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.LINK_TEXT, "Sign Out")))
-                self.gui_callback("Login successful.")
-                return True
-            except:
-                self.gui_callback("Login failed: Could not find 'Sign Out' link.")
-                return False
-
-        except Exception as e:
-            self.gui_callback(f"Login failed: Unexpected error. Error: {str(e)}")
-            return False
-
-    def upload_csv_to_website(self, driver, csv_path):
-        try:
-            self.gui_callback("Navigating to upload page...")
-            driver.get("https://bid.702auctions.com/Admin/ImportCSV")
-            
-            self.gui_callback("Waiting for page to load...")
-            WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.ID, "CsvImportForm")))
-            
-            self.gui_callback("Uploading CSV file...")
-            file_input = driver.find_element(By.ID, "file")
-            driver.execute_script("arguments[0].style.display = 'block';", file_input)
-            file_input.send_keys(csv_path)
-            
-            self.gui_callback("Unchecking 'Validate Data ONLY' checkbox...")
-            checkbox_script = """
-            var checkbox = document.querySelector('input[name="validate"]');
-            var toggle = document.querySelector('.fs-checkbox-toggle');
-            if (checkbox && toggle) {
-                checkbox.value = 'false';
-                toggle.classList.remove('fs-checkbox-checked');
-                toggle.classList.add('fs-checkbox-unchecked');
-            }
-            """
-            driver.execute_script(checkbox_script)
-            
-            self.gui_callback("Updating email address...")
-            email_input = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "Text1")))
-            email_input.clear()
-            email_input.send_keys("matthew@702auctions.com")
-            
-            time.sleep(2)
-            
-            self.gui_callback("Submitting form...")
-            submit_button = WebDriverWait(driver, 20).until(
-                EC.element_to_be_clickable((By.CSS_SELECTOR, "input.btn.btn-info.btn-sm[type='submit'][value='Upload CSV']"))
-            )
-            
-            driver.execute_script("arguments[0].scrollIntoView(true);", submit_button)
-            time.sleep(1)
-            
-            try:
-                submit_button.click()
-            except:
-                try:
-                    driver.execute_script("arguments[0].click();", submit_button)
-                except:
-                    actions = ActionChains(driver)
-                    actions.move_to_element(submit_button).click().perform()
-            
-            self.gui_callback("Waiting for upload to complete...")
-            WebDriverWait(driver, 120).until(EC.presence_of_element_located((By.CLASS_NAME, "alert-success")))
-            
-            success_message = driver.find_element(By.CLASS_NAME, "alert-success").text
-            self.gui_callback(f"Upload result: {success_message}")
-            
-            if "CSV listing import has started" in success_message:
-                self.gui_callback("CSV upload initiated successfully!")
-                return True
-            else:
-                self.gui_callback("CSV upload failed.")
-                return False
-            
-        except Exception as e:
-            self.gui_callback(f"Failed to upload CSV: {str(e)}")
-            return False
-        
-    def run_auction_formatter(self, update_progress):
-        try:
-            update_progress(5, "Starting auction formatting process...")
-            airtable_records = get_airtable_records_list(
-                config_manager.get_warehouse_var('airtable_inventory_base_id'),
-                config_manager.get_warehouse_var('airtable_inventory_table_id'),
-                config_manager.get_warehouse_var('airtable_send_to_auction_view_id'),
-                self.gui_callback,
-                config_manager.get_warehouse_var('airtable_api_key')
-            )
-
-            update_progress(15, "Collecting image URLs...")
-            download_tasks = collect_image_urls(airtable_records, self.should_stop)
-            
-            update_progress(20, "Downloading images...")
-            downloaded_images = download_images_bulk(download_tasks, self.gui_callback, self.should_stop)
-            
-            update_progress(40, "Processing images...")
-            processed_images = process_images_in_bulk(downloaded_images, self.gui_callback, self.should_stop)
-            
-            update_progress(60, "Uploading images...")
-            uploaded_image_urls = upload_images_and_get_urls(processed_images, self.gui_callback, self.should_stop)
-
-            update_progress(75, "Processing records...")
-            processed_records, failed_records = process_records_concurrently(
-                airtable_records, uploaded_image_urls, self.gui_callback, 
-                self.Auction_ID, self.selected_warehouse, self.should_stop
-            )
-
-            if processed_records:
-                update_progress(85, "Creating CSV file...")
-                csv_path = processed_records_to_df(processed_records, self.Auction_ID, self.gui_callback)
-                self.final_csv_path = self.format_final_csv(csv_path)
-
-            if self.final_csv_path:
-                update_progress(90, "Configuring web driver...")
-                driver = self.configure_driver(self.website_login_url)
-                
-                username = config_manager.get_warehouse_var('bid_username')
-                password = config_manager.get_warehouse_var('bid_password')
-
-                update_progress(92, "Logging into website...")
-                login_success = self.login_to_website(driver, username, password)
-                
-                if login_success:
-                    update_progress(95, "Uploading CSV to 702 Auctions...")
-                    csv_filename = f"{self.Auction_ID}.csv"
-                    csv_path = os.path.join(get_resources_dir('processed_csv'), csv_filename)
-                    if os.path.exists(csv_path):
-                        upload_success = self.upload_csv_to_website(driver, csv_path)
-                        if upload_success:
-                            update_progress(98, "CSV uploaded successfully to 702 Auctions.")
-                        else:
-                            update_progress(98, "CSV upload to 702 Auctions failed.")
-                    else:
-                        update_progress(98, f"CSV file not found at {csv_path}")
-                else:
-                    update_progress(98, "Login to 702 Auctions failed.")
-                
-                update_progress(99, f"Final URL: {driver.current_url}")
-                driver.quit()
-
-            if failed_records:
-                update_progress(99, "Saving failed records...")
-                self.failed_records_csv_filepath = failed_records_csv(failed_records, self.Auction_ID, self.gui_callback)
-
-            update_progress(100, "Organizing images...")
-            organize_images(self.Auction_ID)
-        except Exception as e:
-            update_progress(100, f"Error: {str(e)}")
-        finally:
-            self.callback()
-
-    def format_final_csv(self, file_path):
-        try:
-            data = pd.read_csv(file_path)
-            self.gui_callback(f"Initial data loaded with {len(data)} records.")
-
-            data['UPC'] = data['UPC'].astype(str)
-            data['MSRP'] = pd.to_numeric(data['MSRP'], errors='coerce').round(2)
-
-            sorted_data = data.sort_values(by='MSRP', ascending=False)
-
-            top_50_items = sorted_data[~sorted_data['Subtitle'].str.contains('missing|damaged|no', case=False, na=False)].head(50)
-            remaining_items = sorted_data[~sorted_data.index.isin(top_50_items.index)].sample(frac=1).reset_index(drop=True)
-
-            processed_top_50 = self.process_items_avoid_adjacency(top_50_items)
-            processed_remaining = self.process_items_avoid_adjacency(remaining_items)
-
-            final_data = pd.concat([processed_top_50, processed_remaining]).reset_index(drop=True)
-
-            resources_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'resources', 'processed_csv')
-            os.makedirs(resources_dir, exist_ok=True)
-
-            output_file_path = os.path.join(resources_dir, f'{self.Auction_ID}.csv')
-            final_data.to_csv(output_file_path, index=False)
-
-            self.gui_callback(f"Formatted data saved to {output_file_path}")
-            return output_file_path
-        except Exception as e:
-            self.gui_callback(f"Error formatting final CSV: {e}")
-            return None
-
-    def process_items_avoid_adjacency(self, items):
-        processed_items = []
-        title_buffer = {}
-
-        for _, row in items.iterrows():
-            title = row['Title']
-            if title in title_buffer:
-                title_buffer[title].append(row)
-            else:
-                if processed_items and processed_items[-1]['Title'] == title:
-                    title_buffer[title] = [row]
-                else:
-                    processed_items.append(row)
-
-            if random.random() < 0.2:
-                for buffered_title in list(title_buffer.keys()):
-                    if buffered_title != title and title_buffer[buffered_title]:
-                        processed_items.append(title_buffer[buffered_title].pop(0))
-                        if not title_buffer[buffered_title]:
-                            del title_buffer[buffered_title]
-                        break
-
-        for buffered_items in title_buffer.values():
-            for item in buffered_items:
-                insert_position = self.find_insert_position(processed_items, item['Title'])
-                processed_items.insert(insert_position, item)
-
-        return pd.DataFrame(processed_items)
-
-    def find_insert_position(self, processed_items, title):
-        for i in range(len(processed_items) - 1, -1, -1):
-            if processed_items[i]['Title'] != title:
-                return i + 1
-        return 0
