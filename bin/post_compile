@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -eo pipefail
+
+echo "-----> Installing Playwright browsers"
+playwright install chromium
+
+# Check if the directory exists before trying to change permissions
+if [ -d "/app/.cache/ms-playwright" ]; then
+    chmod -R 777 /app/.cache/ms-playwright
+    echo "-----> Playwright browsers installed and permissions set"
+else
+    echo "-----> /app/.cache/ms-playwright does not exist, skipping chmod"
+fi

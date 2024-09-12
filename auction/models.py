@@ -26,7 +26,7 @@ class Bid(models.Model):
 class TaskProgress(models.Model):
     task_id = models.CharField(max_length=255, unique=True)
     progress = models.IntegerField(default=0)
-    status = models.CharField(max_length=255)
+    status = models.TextField()  # Changed from CharField to TextField
     error = models.TextField(null=True, blank=True)
     timestamp = models.DateTimeField(auto_now=True)
 
