@@ -1,24 +1,8 @@
 #!/usr/bin/env bash
 set -eo pipefail
 
-echo "-----> Starting Playwright browser installation"
+echo "-----> Skipping Playwright browser installation during build"
+echo "-----> Browsers will be installed at runtime"
 
-# Ensure the cache directory exists
-mkdir -p /app/.cache/ms-playwright
-echo "-----> Cache directory created"
-
-# Set the browser path and attempt to install Chromium
-export PLAYWRIGHT_BROWSERS_PATH=/app/.cache/ms-playwright
-echo "-----> Installing Playwright browsers (Chromium only)"
-if playwright install chromium --with-deps; then
-    echo "-----> Playwright Chromium installation successful"
-else
-    echo "-----> Playwright Chromium installation failed"
-    exit 1
-fi
-
-# Set permissions for the cache directory
-echo "-----> Setting permissions for Playwright cache"
-chmod -R 777 /app/.cache/ms-playwright
-
-echo "-----> Playwright browser installation completed"
+# Create a flag file to indicate that browsers need to be installed
+touch /app/.playwright_needs_install
