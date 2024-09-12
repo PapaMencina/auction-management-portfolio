@@ -14,6 +14,9 @@ import os
 from pathlib import Path
 import dj_database_url
 
+# Add this near the top of the file, after the imports
+DISABLE_COLLECTSTATIC = os.environ.get('DISABLE_COLLECTSTATIC', '0') == '1'
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 print(f"Django BASE_DIR: {BASE_DIR}")
