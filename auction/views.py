@@ -165,18 +165,11 @@ def create_auction_view(request):
         'can_use_show_browser': can_use_show_browser
     })
 
-@login_required
 def get_task_progress(request, task_id):
-    logger.info(f"Checking progress for task {task_id}")
-    try:
-        progress = ProgressTracker.get_progress(task_id)
-        logger.info(f"Progress for task {task_id}: {progress}")
-        if progress.get('status') == 'Error':
-            return JsonResponse({'error': progress['status']}, status=500)
-        return JsonResponse(progress)
-    except Exception as e:
-        logger.error(f"Error retrieving progress for task {task_id}: {str(e)}")
-        return JsonResponse({'error': 'Error retrieving task progress', 'details': str(e)}, status=500)
+    progress = ProgressTracker.get_progress(task_id)
+    if progress is None:
+        return JsonResponse({'error': 'Task not found', 'status': 'Not Found'}, status=404)
+    return JsonResponse(progress)
 
 @login_required
 @require_http_methods(["GET", "POST"])

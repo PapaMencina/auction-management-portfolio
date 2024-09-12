@@ -23,12 +23,11 @@ class Bid(models.Model):
     paid = models.BooleanField(default=False)
     timestamp = models.DateTimeField(auto_now_add=True)
 
-# Add this new model
 class TaskProgress(models.Model):
     task_id = models.CharField(max_length=255, unique=True)
     progress = models.IntegerField(default=0)
     status = models.CharField(max_length=255)
-    error = models.TextField(null=True, blank=True)  # To store any error messages
+    error = models.TextField(null=True, blank=True)
     timestamp = models.DateTimeField(auto_now=True)
 
     def __str__(self):

@@ -5,42 +5,36 @@ import logging
 import traceback
 import time
 import threading
+from auction.models import TaskProgress
+from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
 class ProgressTracker:
     @staticmethod
-    def update_progress(task_id, progress, status):
-        logger.info(f"Updating progress for task {task_id}: {progress}% - {status}")
-        cache_key = f"task_progress_{task_id}"
-        cache_value = json.dumps({'progress': progress, 'status': status, 'timestamp': time.time()})
-        cache.set(cache_key, cache_value, timeout=3600)  # 1 hour timeout
+    def update_progress(task_id, progress, status, error=None):
+        TaskProgress.objects.update_or_create(
+            task_id=task_id,
+            defaults={
+                'progress': progress,
+                'status': status,
+                'error': error,
+                'timestamp': timezone.now()
+            }
+        )
 
     @staticmethod
     def get_progress(task_id):
-        logger.info(f"Getting progress for task {task_id}")
-        cache_key = f"task_progress_{task_id}"
-        retry_count = 0
-        max_retries = 5
-        retry_delay = 0.1
-
-        while retry_count < max_retries:
-            cache_value = cache.get(cache_key)
-            if cache_value:
-                try:
-                    progress_data = json.loads(cache_value)
-                    logger.info(f"Progress data found for task {task_id}: {progress_data}")
-                    return progress_data
-                except json.JSONDecodeError:
-                    logger.error(f"Invalid JSON for task {task_id}: {cache_value}")
-            else:
-                logger.warning(f"No progress data found for task {task_id}, retry {retry_count + 1}")
-                time.sleep(retry_delay)
-                retry_count += 1
-                retry_delay *= 2  # Exponential backoff
-
-        logger.error(f"Failed to retrieve progress data for task {task_id} after {max_retries} attempts")
-        return {'progress': 0, 'status': 'Task not found or completed', 'timestamp': time.time()}
+        try:
+            task = TaskProgress.objects.get(task_id=task_id)
+            return {
+                'progress': task.progress,
+                'status': task.status,
+                'error': task.error,
+                'timestamp': task.timestamp.timestamp()
+            }
+        except TaskProgress.DoesNotExist:
+            return None
 
 def with_progress_tracking(func):
     @wraps(func)

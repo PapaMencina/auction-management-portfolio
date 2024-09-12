@@ -31,12 +31,25 @@ PLAYWRIGHT_BROWSERS_PATH = os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "/app/.cac
 
 PLAYWRIGHT_BROWSERS = os.environ.get('PLAYWRIGHT_BROWSERS', 'chromium').split(',')
 
-CACHES = {
-    'default': {
-        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
-        'LOCATION': 'unique-snowflake',
+# Cache configuration
+if 'REDIS_URL' in os.environ:
+    CACHES = {
+        "default": {
+            "BACKEND": "django_redis.cache.RedisCache",
+            "LOCATION": os.environ.get('REDIS_URL'),
+            "OPTIONS": {
+                "CLIENT_CLASS": "django_redis.client.DefaultClient",
+            }
+        }
     }
-}
+else:
+    # Use local memory cache for development
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+            'LOCATION': 'unique-snowflake',
+        }
+    }
 
 # Application definition
 
@@ -87,11 +100,23 @@ AUTH_USER_MODEL = 'auction.CustomUser'
 # https://docs.djangoproject.com/en/5.0/ref/settings/#databases
 
 # Database configuration
-DATABASE_URL = os.environ.get('DATABASE_URL', 'postgres://u5rpbrej8sphmb:pd9b03500d718195dfa1bb51fe3535fcb5f4eddfad6837192042c507a7735121@c5p86clmevrg56.cluster-czrs8kj4sg7.us-east-1.rds.amazonaws.com:5432/d1psv27v3biff')
-
-DATABASES = {
-    'default': dj_database_url.config(default=DATABASE_URL, conn_max_age=600, ssl_require=True)
-}
+if 'DATABASE_URL' in os.environ:
+    # Production database (Heroku)
+    DATABASES = {
+        'default': dj_database_url.config(
+            default=os.environ.get('DATABASE_URL'),
+            conn_max_age=600,
+            ssl_require=True
+        )
+    }
+else:
+    # Local development database
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
+    }
 
 # Password validation
 # https://docs.djangoproject.com/en/5.0/ref/settings/#auth-password-validators
