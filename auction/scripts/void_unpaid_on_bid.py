@@ -232,7 +232,7 @@ def start_playwright_process(event_id, upload_choice, update_progress, should_st
     print("Report URL: " + report_url)
     
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = p.chromium.launch(headless=True, args=['--no-sandbox', '--disable-setuid-sandbox'])
         context = browser.new_context()
         page = context.new_page()
         

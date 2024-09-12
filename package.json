@@ -2,12 +2,12 @@
   "name": "auction-management-system",
   "version": "1.0.0",
   "engines": {
-    "node": "14.x"
+    "node": "16.x"
   },
   "scripts": {
-    "postinstall": "playwright install"
+    "postinstall": "playwright install chromium"
   },
   "dependencies": {
-    "playwright": "^1.46.0"
+    "playwright": "1.46.0"
   }
 }
