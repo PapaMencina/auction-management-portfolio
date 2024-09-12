@@ -1,8 +1,18 @@
 #!/usr/bin/env bash
 set -eo pipefail
 
-echo "-----> Skipping Playwright browser installation during build"
-echo "-----> Browsers will be installed at runtime"
+echo "-----> Running post-compile script"
 
-# Create a flag file to indicate that browsers need to be installed
-touch /app/.playwright_needs_install
+# Ensure the cache directory exists
+mkdir -p $HOME/.cache/ms-playwright
+
+# Set the browser path
+export PLAYWRIGHT_BROWSERS_PATH=$HOME/.cache/ms-playwright
+
+echo "-----> Installing Playwright browsers"
+playwright install chromium firefox webkit
+
+echo "-----> Setting permissions for Playwright cache"
+chmod -R 777 $HOME/.cache/ms-playwright
+
+echo "-----> Post-compile script completed"

@@ -1,2 +1,2 @@
 release: python manage.py migrate
-web: python playwright_install.py && gunicorn auction_webapp.wsgi
+web: playwright install && gunicorn auction_webapp.wsgi
