@@ -287,7 +287,7 @@ class SharedEvents:
         save_event_to_file(event_data)
 
 @with_progress_tracking
-def create_auction_main(auction_title, ending_date, show_browser, selected_warehouse, update_progress):
+def create_auction_main(task_id, auction_title, ending_date, show_browser, selected_warehouse, update_progress):
     logger.info(f"Starting create_auction_main for auction: {auction_title}, warehouse: {selected_warehouse}")
     update_progress(1, "Starting auction creation process")
 

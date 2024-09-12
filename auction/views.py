@@ -129,6 +129,9 @@ def create_auction_view(request):
             show_browser = 'show_browser' in request.POST and request.user.has_perm('auction.can_use_show_browser')
             selected_warehouse = request.POST.get('selected_warehouse')
 
+            if not all([auction_title, ending_date, selected_warehouse]):
+                return JsonResponse({'error': 'Missing required fields'}, status=400)
+
             config_manager.set_active_warehouse(selected_warehouse)
 
             task_id = str(uuid4())
@@ -136,18 +139,20 @@ def create_auction_view(request):
 
             ProgressTracker.update_progress(task_id, 0, "Task started")
 
-            # Start the auction creation process in a separate thread
-            thread = Thread(target=create_auction_main, kwargs={
-                'auction_title': auction_title,
-                'ending_date': ending_date,
-                'show_browser': show_browser,
-                'selected_warehouse': selected_warehouse,
-                'task_id': task_id
-            })
+            thread = Thread(target=create_auction_main, args=(
+                task_id,
+                auction_title,
+                ending_date,
+                show_browser,
+                selected_warehouse
+            ))
             thread.start()
 
             logger.info(f"Auction creation thread started for task {task_id}")
             return JsonResponse({'task_id': task_id})
+        except ValueError as e:
+            logger.error(f"Invalid date format: {str(e)}")
+            return JsonResponse({'error': 'Invalid date format'}, status=400)
         except Exception as e:
             logger.error(f"Error starting auction creation task: {str(e)}")
             logger.error(traceback.format_exc())
