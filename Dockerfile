@@ -1,5 +1,5 @@
-# Use the official Playwright Docker image for Python
-FROM mcr.microsoft.com/playwright/python:v1.39.0-focal
+# Use the official Playwright Docker image with Python 3.10
+FROM mcr.microsoft.com/playwright/python:v1.39.0-jammy
 
 # Set work directory
 WORKDIR /app
@@ -8,6 +8,9 @@ WORKDIR /app
 COPY requirements.txt /app/
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Install Playwright browsers
+RUN playwright install --with-deps
+
 # Copy the rest of the application code
 COPY . /app/
 
@@ -15,4 +18,4 @@ COPY . /app/
 EXPOSE $PORT
 
 # Run the application
-CMD ["gunicorn", "auction_webapp.wsgi:application", "--bind", "0.0.0.0:${PORT}"]
+CMD ["sh", "-c", "gunicorn auction_webapp.wsgi:application --bind 0.0.0.0:$PORT"]
