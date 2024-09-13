@@ -32,7 +32,7 @@ DEBUG = os.environ.get('DJANGO_DEBUG', 'False') != 'False'
 ALLOWED_HOSTS = ['auction-management-system-877a79758b85.herokuapp.com', 'localhost', '127.0.0.1']
 
 # Playwright settings
-PLAYWRIGHT_BROWSERS_PATH = os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "/app/.cache/ms-playwright")
+# PLAYWRIGHT_BROWSERS_PATH = os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "/app/.cache/ms-playwright")
 
 PLAYWRIGHT_BROWSERS = os.environ.get('PLAYWRIGHT_BROWSERS', 'chromium').split(',')
 
