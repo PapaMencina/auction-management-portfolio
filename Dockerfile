@@ -51,4 +51,4 @@ RUN npm install playwright
 RUN npx playwright install chromium
 
 # Run the application
-CMD gunicorn auction_webapp.wsgi:application --bind 0.0.0.0:$PORT
+CMD gunicorn auction_webapp.wsgi:application --bind 0.0.0.0:$PORT --forwarded-allow-ips='*'
