@@ -10,6 +10,7 @@ from playwright.sync_api import sync_playwright, expect
 from auction.utils import config_manager
 from auction.utils.progress_tracker import ProgressTracker, with_progress_tracking
 import logging
+from asgiref.sync import sync_to_async
 
 # Set up logging to console
 logging.basicConfig(level=logging.DEBUG,
@@ -286,6 +287,20 @@ class SharedEvents:
         }
         save_event_to_file(event_data)
 
+# Wrap the update_progress function with sync_to_async
+@sync_to_async
+def async_update_progress(task_id, progress, status):
+    ProgressTracker.update_progress(task_id, progress, status)
+
+# Modify the with_progress_tracking decorator
+def with_progress_tracking(func):
+    def wrapper(*args, **kwargs):
+        task_id = kwargs.get('task_id')
+        update_progress = lambda progress, status: async_update_progress(task_id, progress, status)
+        kwargs['update_progress'] = update_progress
+        return func(*args, **kwargs)
+    return wrapper
+
 @with_progress_tracking
 def create_auction_main(task_id, auction_title, ending_date, show_browser, selected_warehouse, update_progress):
     logger.info(f"Starting create_auction_main for auction: {auction_title}, warehouse: {selected_warehouse}")
@@ -353,7 +368,8 @@ def create_auction_main(task_id, auction_title, ending_date, show_browser, selec
     finally:
         update_progress(100, "Auction creation process completed")
 
-    return event_id  # This will be None if an error occurred
+    return event_id
 
 if __name__ == "__main__":
-    create_auction_main("Sample Auction", datetime.now(), show_browser=True, selected_warehouse="Maule Warehouse")
+    import asyncio
+    asyncio.run(create_auction_main("Sample Auction", datetime.now(), True, "Maule Warehouse", None))
