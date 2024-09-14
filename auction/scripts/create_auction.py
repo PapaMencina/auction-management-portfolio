@@ -5,6 +5,7 @@ import re
 import traceback
 import threading
 import sys
+import asyncio
 from datetime import datetime
 from playwright.sync_api import sync_playwright, expect
 from auction.utils import config_manager
@@ -28,6 +29,7 @@ logger = logging.getLogger(__name__)
 # Define a lock for thread-safe file operations
 file_lock = threading.Lock()
 
+# Make sure to keep these helper functions in your script
 def wait_for_element(page, selector, timeout=30000):
     """Wait for an element to be present and return it."""
     return page.wait_for_selector(selector, timeout=timeout)
@@ -302,25 +304,25 @@ def with_progress_tracking(func):
     return wrapper
 
 @with_progress_tracking
-def create_auction_main(task_id, auction_title, ending_date, show_browser, selected_warehouse, update_progress):
+async def create_auction_main(task_id, auction_title, ending_date, show_browser, selected_warehouse, update_progress):
     logger.info(f"Starting create_auction_main for auction: {auction_title}, warehouse: {selected_warehouse}")
-    update_progress(1, "Starting auction creation process")
+    await update_progress(task_id, 1, "Starting auction creation process")
 
     event_id = None
 
     try:
         config_manager.set_active_warehouse(selected_warehouse)
-        update_progress(2, "Warehouse configuration set")
+        await update_progress(task_id, 2, "Warehouse configuration set")
 
         relaythat_url = config_manager.get_warehouse_var('relaythat_url')
         if not relaythat_url:
             raise ValueError("Invalid warehouse selected or missing relaythat_url in config.")
 
-        update_progress(5, "Initializing auction creation process")
+        await update_progress(task_id, 5, "Initializing auction creation process")
 
         month_formatted_date, bid_formatted_ending_date = format_date(ending_date)
         logger.info(f"Date formatting completed: {month_formatted_date}, {bid_formatted_ending_date}")
-        update_progress(10, "Date formatting completed")
+        await update_progress(task_id, 10, "Date formatting completed")
 
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=not show_browser)
@@ -328,20 +330,25 @@ def create_auction_main(task_id, auction_title, ending_date, show_browser, selec
             page = context.new_page()
 
             logger.info("Browser launched")
-            update_progress(20, "Browser launched")
+            await update_progress(task_id, 20, "Browser launched")
 
             formatted_start_date = datetime.now().strftime('%m/%d/%Y')
             logger.info(f"Getting auction image for date: {month_formatted_date}")
-            update_progress(25, "Initiating image download")
+            await update_progress(task_id, 25, "Initiating image download")
 
-            event_image = get_image(page, month_formatted_date, relaythat_url, update_progress, selected_warehouse)
+            event_image = get_image(page, month_formatted_date, relaythat_url, 
+                                    lambda p, s: asyncio.create_task(update_progress(task_id, p, s)), 
+                                    selected_warehouse)
             if not event_image:
                 raise Exception("Failed to download the event image")
 
             logger.info(f"Image downloaded: {event_image}")
-            update_progress(50, "Image downloaded, creating auction")
+            await update_progress(task_id, 50, "Image downloaded, creating auction")
 
-            event_id = create_auction(page, auction_title, event_image, formatted_start_date, bid_formatted_ending_date, update_progress, selected_warehouse)
+            event_id = create_auction(page, auction_title, event_image, formatted_start_date, 
+                                      bid_formatted_ending_date, 
+                                      lambda p, s: asyncio.create_task(update_progress(task_id, p, s)), 
+                                      selected_warehouse)
             if not event_id:
                 raise Exception("Failed to obtain event ID")
 
@@ -356,17 +363,17 @@ def create_auction_main(task_id, auction_title, ending_date, show_browser, selec
             }
             save_event_to_file(event_data)
             logger.info(f"Event {event_id} created at {timestamp}")
-            update_progress(95, f"Event {event_id} created successfully")
+            await update_progress(task_id, 95, f"Event {event_id} created successfully")
 
     except ValueError as e:
         logger.error(f"Configuration error: {str(e)}")
-        update_progress(100, f"Error: {str(e)}")
+        await update_progress(task_id, 100, f"Error: {str(e)}")
     except Exception as e:
         logger.error(f"Error in create_auction_main: {str(e)}")
         logger.error(traceback.format_exc())
-        update_progress(100, f"Error: {str(e)}")
+        await update_progress(task_id, 100, f"Error: {str(e)}")
     finally:
-        update_progress(100, "Auction creation process completed")
+        await update_progress(task_id, 100, "Auction creation process completed")
 
     return event_id
 
