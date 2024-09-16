@@ -188,11 +188,11 @@ async def login_auction_site(page, username, password, url):
         await page.screenshot(path='auction_site_login_error_exception.png')
         return False
 
-def set_content_in_ckeditor(page, iframe_title, formatted_text):
+async def set_content_in_ckeditor(page, iframe_title, formatted_text):
     """Sets content in a CKEditor iframe."""
     iframe = page.frame_locator(f"iframe[title='Rich Text Editor, {iframe_title}']")
     ckeditor_body = iframe.locator("body[contenteditable='true']")
-    ckeditor_body.evaluate(f"element => element.innerHTML = {json.dumps(formatted_text)}")
+    await ckeditor_body.evaluate(f"element => element.innerHTML = {json.dumps(formatted_text)}")
 
 def element_value_is_not_empty(page, element_id):
     """Checks if the value of an element is not empty."""
@@ -388,6 +388,7 @@ async def create_auction(page, auction_title, image_path, formatted_start_date, 
             return None
     except Exception as e:
         logger.error(f"An error occurred: {e}")
+        await page.screenshot(path='create_auction_error.png')
         return None
 
 class SharedEvents:
