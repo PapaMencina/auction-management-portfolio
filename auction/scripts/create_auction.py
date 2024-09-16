@@ -96,15 +96,32 @@ def format_date(date_obj):
     full_date = date_obj.strftime('%m/%d/%Y')
     return month_day_str, full_date
 
-async def login(page, user_locator, pass_locator, username, password, url):
+async def login(page, username, password, url):
     """Logs in to the specified URL using provided credentials."""
     try:
-        await page.fill(user_locator, username)
-        await page.fill(pass_locator, password)
-        await page.press(pass_locator, "Enter")
+        await page.goto(url)
+        await page.wait_for_load_state('networkidle')
+        
+        await page.wait_for_selector("#user_email", state="visible", timeout=60000)
+        await page.fill("#user_email", username)
+        
+        await page.wait_for_selector("#user_password", state="visible", timeout=60000)
+        await page.fill("#user_password", password)
+        
+        await page.click('button:has-text("Sign in")')
+        await page.wait_for_load_state('networkidle')
+        
+        # Check if login was successful
+        if "login" in page.url.lower():
+            logger.error("Login failed. Still on login page.")
+            await page.screenshot(path='login_error.png')
+            return False
+        return True
     except Exception as e:
         logger.error(f"Login failed: {e}")
-        await page.goto(url)
+        logger.error(f"Current URL: {page.url}")
+        await page.screenshot(path='login_error.png')
+        return False
 
 def set_content_in_ckeditor(page, iframe_title, formatted_text):
     """Sets content in a CKEditor iframe."""
