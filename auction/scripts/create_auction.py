@@ -7,9 +7,8 @@ import threading
 import sys
 import asyncio
 from datetime import datetime
-from playwright.sync_api import sync_playwright, expect
+from playwright.async_api import async_playwright
 from auction.utils import config_manager
-from auction.utils.progress_tracker import ProgressTracker, with_progress_tracking
 import logging
 from asgiref.sync import sync_to_async
 
@@ -97,15 +96,15 @@ def format_date(date_obj):
     full_date = date_obj.strftime('%m/%d/%Y')
     return month_day_str, full_date
 
-def login(page, user_locator, pass_locator, username, password, url, update_progress):
+async def login(page, user_locator, pass_locator, username, password, url):
     """Logs in to the specified URL using provided credentials."""
     try:
-        page.fill(user_locator, username)
-        page.fill(pass_locator, password)
-        page.press(pass_locator, "Enter")
+        await page.fill(user_locator, username)
+        await page.fill(pass_locator, password)
+        await page.press(pass_locator, "Enter")
     except Exception as e:
-        update_progress(0, f"Login failed: {e}")
-        page.goto(url)
+        logger.error(f"Login failed: {e}")
+        await page.goto(url)
 
 def set_content_in_ckeditor(page, iframe_title, formatted_text):
     """Sets content in a CKEditor iframe."""
@@ -117,68 +116,62 @@ def element_value_is_not_empty(page, element_id):
     """Checks if the value of an element is not empty."""
     return page.evaluate(f"document.getElementById('{element_id}').value !== ''")
 
-def get_image(page, ending_date_input, relaythat_url, update_progress, selected_warehouse):
+async def get_image(page, ending_date_input, relaythat_url, selected_warehouse):
     try:
         logger.info('Logging in to RelayThat...')
-        update_progress(30, 'Logging in to RelayThat...')
         relaythat_email = config_manager.get_global_var('relaythat_email')
         relaythat_password = config_manager.get_global_var('relaythat_password')
-        login(page, "#user_email", "#user_password", relaythat_email, relaythat_password, relaythat_url, update_progress)
+        await login(page, "#user_email", "#user_password", relaythat_email, relaythat_password, relaythat_url)
 
         logger.info('Generating auction image...')
-        update_progress(40, 'Generating auction image...')
         image_text = "OFFSITE" if selected_warehouse == "Sunrise Warehouse" else f"Ending {ending_date_input}"
 
         text_input = page.locator("#asset-inputs-text textarea").first
-        text_input.fill(image_text)
+        await text_input.fill(image_text)
 
         generate_button = page.locator("button:has-text('Generate')")
-        generate_button.click()
-        wait_for_loading_to_complete(page)
+        await generate_button.click()
+        await wait_for_loading_to_complete(page)
 
         download_button = page.locator("button:has-text('Download')")
         
         logger.info("Waiting for image download...")
-        update_progress(45, 'Waiting for image download...')
         
-        downloaded_file = wait_for_download(page)
+        downloaded_file = await wait_for_download(page)
         
         if downloaded_file:
             logger.info(f"Image downloaded: {downloaded_file}")
-            update_progress(48, f"Image downloaded: {downloaded_file}")
             return downloaded_file
         else:
             logger.error("No file was downloaded.")
-            update_progress(48, "No file was downloaded.")
             return None
 
     except Exception as e:
         logger.error(f"An error occurred: {e}")
         logger.error(traceback.format_exc())
-        update_progress(48, f"An error occurred: {e}")
         return None
 
-def create_auction(page, auction_title, image_path, formatted_start_date, bid_formatted_ending_date, update_progress, selected_warehouse):
+async def create_auction(page, auction_title, image_path, formatted_start_date, bid_formatted_ending_date, selected_warehouse):
     try:
-        update_progress(55, 'Navigating to auction creation page...')
+        logger.info('Navigating to auction creation page...')
         bid_create_event = config_manager.get_global_var('bid_create_event')
-        page.goto(bid_create_event)
+        await page.goto(bid_create_event)
     except Exception as e:
-        update_progress(55, f"Error navigating to auction creation page: {e}")
+        logger.error(f"Error navigating to auction creation page: {e}")
         return
 
     try:
-        update_progress(60, 'Logging in to auction site...')
+        logger.info('Logging in to auction site...')
         bid_username = config_manager.get_warehouse_var('bid_username')
         bid_password = config_manager.get_warehouse_var('bid_password')
-        login(page, "#username", "#password", bid_username, bid_password, bid_create_event, update_progress)
+        await login(page, "#username", "#password", bid_username, bid_password, bid_create_event)
     except Exception as e:
-        update_progress(60, f"Error logging in: {e}")
+        logger.error(f"Error logging in: {e}")
         return
 
     try:
-        update_progress(65, 'Filling auction details...')
-        page.fill("#Title", auction_title)
+        logger.info('Filling auction details...')
+        await page.fill("#Title", auction_title)
 
         # Customize information based on the selected warehouse
         if selected_warehouse == "Maule Warehouse":
@@ -241,41 +234,41 @@ def create_auction(page, auction_title, image_path, formatted_start_date, bid_fo
                 <p>Pickup only!!&nbsp;<b><a href="https://www.google.com/maps/place/Action+Discount+Sales/@36.1622141,-115.1056554,15z/data=!4m5!3m4!1s0x80c8c37738ffc453:0x74f8f3ddc1379320!8m2!3d36.1622141!4d-115.1056554" target="_blank">3201 SUNRISE AVE&nbsp;Las Vegas, NV 89101</a></b>&nbsp;Tuesday-Friday 10am-4pm&nbsp;within 10 days. Once payment is received, you will receive an email with a link to schedule a pickup time and pickup instructions. We offer contactless pickup options and take all possible measures to ensure your safety.</p>
             """
 
-        update_progress(70, 'Setting auction details...')
-        page.fill("#Subtitle", Summary_field_text)
-        set_content_in_ckeditor(page, "EventDescription", formatted_text_event_description)
-        set_content_in_ckeditor(page, "TermsAndConditions", formatted_text_terms_and_conditions)
-        set_content_in_ckeditor(page, "ShippingInfo", formatted_text_shipping_info)
+        logger.info('Setting auction details...')
+        await page.fill("#Subtitle", Summary_field_text)
+        await set_content_in_ckeditor(page, "EventDescription", formatted_text_event_description)
+        await set_content_in_ckeditor(page, "TermsAndConditions", formatted_text_terms_and_conditions)
+        await set_content_in_ckeditor(page, "ShippingInfo", formatted_text_shipping_info)
 
-        update_progress(75, 'Uploading auction image...')
+        logger.info('Uploading auction image...')
         file_input = page.locator("#html5files_EventImage")
-        file_input.set_input_files(image_path)
+        await file_input.set_input_files(image_path)
 
-        page.wait_for_selector("#progress_bar_EventImage .percent:text('100%')")
-        page.wait_for_function("document.getElementById('ThumbnailRendererState_EventImage').value !== ''")
+        await page.wait_for_selector("#progress_bar_EventImage .percent:text('100%')")
+        await page.wait_for_function("document.getElementById('ThumbnailRendererState_EventImage').value !== ''")
 
-        update_progress(80, 'Setting auction dates...')
-        page.fill("#StartDate", formatted_start_date)
-        page.fill("#StartTime", '1:00 AM')
-        page.fill("#EndDate", bid_formatted_ending_date)
-        page.fill("#EndTime", '6:30 PM')
+        logger.info('Setting auction dates...')
+        await page.fill("#StartDate", formatted_start_date)
+        await page.fill("#StartTime", '1:00 AM')
+        await page.fill("#EndDate", bid_formatted_ending_date)
+        await page.fill("#EndTime", '6:30 PM')
 
-        update_progress(85, 'Creating auction...')
-        page.click("#create")
+        logger.info('Creating auction...')
+        await page.click("#create")
 
-        page.wait_for_selector(".alert-success")
+        await page.wait_for_selector(".alert-success")
         current_url = page.url
 
         match = re.search(r'/Event/EventConfirmation/(\d+)', current_url)
         if match:
             event_id = match.group(1)
-            update_progress(90, f"Event {event_id} created")
+            logger.info(f"Event {event_id} created")
             return event_id
         else:
-            update_progress(90, "Event ID not found in the URL.")
+            logger.error("Event ID not found in the URL.")
             return None
     except Exception as e:
-        update_progress(90, f"An error occurred: {e}")
+        logger.error(f"An error occurred: {e}")
         return None
 
 class SharedEvents:
@@ -289,66 +282,42 @@ class SharedEvents:
         }
         save_event_to_file(event_data)
 
-# Wrap the update_progress function with sync_to_async
-@sync_to_async
-def async_update_progress(task_id, progress, status):
-    ProgressTracker.update_progress(task_id, progress, status)
-
-# Modify the with_progress_tracking decorator
-def with_progress_tracking(func):
-    def wrapper(*args, **kwargs):
-        task_id = kwargs.get('task_id')
-        update_progress = lambda progress, status: async_update_progress(task_id, progress, status)
-        kwargs['update_progress'] = update_progress
-        return func(*args, **kwargs)
-    return wrapper
-
-@with_progress_tracking
-async def create_auction_main(task_id, auction_title, ending_date, show_browser, selected_warehouse, update_progress):
+async def create_auction_main(auction_title, ending_date, show_browser, selected_warehouse):
     logger.info(f"Starting create_auction_main for auction: {auction_title}, warehouse: {selected_warehouse}")
-    await update_progress(task_id, 1, "Starting auction creation process")
 
     event_id = None
 
     try:
         config_manager.set_active_warehouse(selected_warehouse)
-        await update_progress(task_id, 2, "Warehouse configuration set")
+        logger.info("Warehouse configuration set")
 
         relaythat_url = config_manager.get_warehouse_var('relaythat_url')
         if not relaythat_url:
             raise ValueError("Invalid warehouse selected or missing relaythat_url in config.")
 
-        await update_progress(task_id, 5, "Initializing auction creation process")
+        logger.info("Initializing auction creation process")
 
         month_formatted_date, bid_formatted_ending_date = format_date(ending_date)
         logger.info(f"Date formatting completed: {month_formatted_date}, {bid_formatted_ending_date}")
-        await update_progress(task_id, 10, "Date formatting completed")
 
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=not show_browser)
-            context = browser.new_context()
-            page = context.new_page()
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=not show_browser)
+            context = await browser.new_context()
+            page = await context.new_page()
 
             logger.info("Browser launched")
-            await update_progress(task_id, 20, "Browser launched")
 
             formatted_start_date = datetime.now().strftime('%m/%d/%Y')
             logger.info(f"Getting auction image for date: {month_formatted_date}")
-            await update_progress(task_id, 25, "Initiating image download")
 
-            event_image = get_image(page, month_formatted_date, relaythat_url, 
-                                    lambda p, s: asyncio.create_task(update_progress(task_id, p, s)), 
-                                    selected_warehouse)
+            event_image = await get_image(page, month_formatted_date, relaythat_url, selected_warehouse)
             if not event_image:
                 raise Exception("Failed to download the event image")
 
             logger.info(f"Image downloaded: {event_image}")
-            await update_progress(task_id, 50, "Image downloaded, creating auction")
 
-            event_id = create_auction(page, auction_title, event_image, formatted_start_date, 
-                                      bid_formatted_ending_date, 
-                                      lambda p, s: asyncio.create_task(update_progress(task_id, p, s)), 
-                                      selected_warehouse)
+            event_id = await create_auction(page, auction_title, event_image, formatted_start_date, 
+                                            bid_formatted_ending_date, selected_warehouse)
             if not event_id:
                 raise Exception("Failed to obtain event ID")
 
@@ -363,20 +332,15 @@ async def create_auction_main(task_id, auction_title, ending_date, show_browser,
             }
             save_event_to_file(event_data)
             logger.info(f"Event {event_id} created at {timestamp}")
-            await update_progress(task_id, 95, f"Event {event_id} created successfully")
 
     except ValueError as e:
         logger.error(f"Configuration error: {str(e)}")
-        await update_progress(task_id, 100, f"Error: {str(e)}")
     except Exception as e:
         logger.error(f"Error in create_auction_main: {str(e)}")
         logger.error(traceback.format_exc())
-        await update_progress(task_id, 100, f"Error: {str(e)}")
-    finally:
-        await update_progress(task_id, 100, "Auction creation process completed")
-
+    
     return event_id
 
 if __name__ == "__main__":
     import asyncio
-    asyncio.run(create_auction_main("Sample Auction", datetime.now(), True, "Maule Warehouse", None))
+    asyncio.run(create_auction_main("Sample Auction", datetime.now(), True, "Maule Warehouse"))

@@ -19,8 +19,6 @@ from auction.scripts.void_unpaid_on_bid import void_unpaid_main
 from auction.scripts.remove_duplicates_in_airtable import remove_duplicates_main
 from auction.scripts.auction_formatter import auction_formatter_main
 from auction.scripts.upload_to_hibid import upload_to_hibid_main
-from uuid import uuid4
-from auction.utils.progress_tracker import ProgressTracker, with_progress_tracking
 
 
 logger = logging.getLogger(__name__)
@@ -134,13 +132,7 @@ def create_auction_view(request):
 
             config_manager.set_active_warehouse(selected_warehouse)
 
-            task_id = str(uuid4())
-            logger.info(f"Creating auction task with ID: {task_id}")
-
-            ProgressTracker.update_progress(task_id, 0, "Task started")
-
             thread = Thread(target=create_auction_main, args=(
-                task_id,
                 auction_title,
                 ending_date,
                 show_browser,
@@ -148,8 +140,8 @@ def create_auction_view(request):
             ))
             thread.start()
 
-            logger.info(f"Auction creation thread started for task {task_id}")
-            return JsonResponse({'task_id': task_id})
+            logger.info(f"Auction creation thread started for {auction_title}")
+            return JsonResponse({'message': 'Auction creation process started'})
         except ValueError as e:
             logger.error(f"Invalid date format: {str(e)}")
             return JsonResponse({'error': 'Invalid date format'}, status=400)
@@ -164,12 +156,6 @@ def create_auction_view(request):
         'warehouses': warehouses,
         'can_use_show_browser': can_use_show_browser
     })
-
-def get_task_progress(request, task_id):
-    progress = ProgressTracker.get_progress(task_id)
-    if progress is None:
-        return JsonResponse({'error': 'Task not found', 'status': 'Not Found'}, status=404)
-    return JsonResponse(progress)
 
 @login_required
 @require_http_methods(["GET", "POST"])
@@ -195,23 +181,19 @@ def void_unpaid_view(request):
             upload_choice = int(data.get('upload_choice'))
             show_browser = data.get('show_browser') and can_use_show_browser
 
-            # Validate auction ID against the selected warehouse
             valid_auction = any(event for event in events if event['event_id'] == auction_id and event['warehouse'] == warehouse)
 
             if not valid_auction:
                 return JsonResponse({'error': 'Invalid Auction ID - Please confirm the auction ID and Warehouse, then try again.'}, status=400)
 
-            task_id = str(uuid4())
-
             Thread(target=void_unpaid_main, kwargs={
                 'auction_id': auction_id,
                 'upload_choice': upload_choice,
                 'show_browser': show_browser,
-                'warehouse': warehouse,
-                'task_id': task_id
+                'warehouse': warehouse
             }).start()
 
-            return JsonResponse({'task_id': task_id})
+            return JsonResponse({'message': 'Void unpaid process started'})
 
         except json.JSONDecodeError:
             return JsonResponse({'error': 'Invalid JSON data'}, status=400)
@@ -229,16 +211,13 @@ def remove_duplicates_view(request):
         target_msrp = float(request.POST.get('target_msrp'))
         warehouse_name = request.POST.get('warehouse_name')
 
-        task_id = str(uuid4())
-
         Thread(target=remove_duplicates_main, kwargs={
             'auction_number': auction_number,
             'target_msrp': target_msrp,
-            'warehouse_name': warehouse_name,
-            'task_id': task_id
+            'warehouse_name': warehouse_name
         }).start()
 
-        return JsonResponse({'task_id': task_id})
+        return JsonResponse({'message': 'Remove duplicates process started'})
 
     context = {
         'auctions_json': json.dumps([{
@@ -264,23 +243,18 @@ def auction_formatter_view(request):
 
         config_manager.set_active_warehouse(selected_warehouse)
 
-        task_id = str(uuid4())
-
-        def gui_callback(message):
-            ProgressTracker.update_progress(task_id, 0, message)
-
         should_stop = threading.Event()
 
-        Thread(target=auction_formatter_main, args=(task_id,), kwargs={
+        Thread(target=auction_formatter_main, kwargs={
             'auction_id': auction_id,
             'selected_warehouse': selected_warehouse,
-            'gui_callback': gui_callback,
+            'gui_callback': logger.info,  # Use logger.info as a simple callback
             'should_stop': should_stop,
             'callback': lambda: None,
             'show_browser': show_browser
         }).start()
 
-        return JsonResponse({'task_id': task_id})
+        return JsonResponse({'message': 'Auction formatter process started'})
 
     context = {
         'warehouses': warehouses,
@@ -346,25 +320,20 @@ def upload_to_hibid_view(request):
 
         config_manager.set_active_warehouse(selected_warehouse)
 
-        task_id = str(uuid4())
         should_stop = threading.Event()
-
-        def gui_callback(message):
-            ProgressTracker.update_progress(task_id, 0, message)
 
         Thread(target=upload_to_hibid_main, kwargs={
             'auction_id': auction_id,
             'ending_date': ending_date_str,
             'auction_title': auction_title,
-            'gui_callback': gui_callback,
+            'gui_callback': logger.info,  # Use logger.info as a simple callback
             'should_stop': should_stop,
             'callback': lambda: None,
             'show_browser': show_browser,
-            'selected_warehouse': selected_warehouse,
-            'task_id': task_id
+            'selected_warehouse': selected_warehouse
         }).start()
 
-        return JsonResponse({'task_id': task_id})
+        return JsonResponse({'message': 'Upload to HiBid process started'})
 
     # GET request handling
     context = {

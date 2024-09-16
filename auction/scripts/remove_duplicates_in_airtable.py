@@ -8,7 +8,6 @@ import math
 from auction.utils import config_manager
 from django.conf import settings
 from auction.utils.config_manager import get_warehouse_var, get_global_var, set_active_warehouse
-from auction.utils.progress_tracker import ProgressTracker, with_progress_tracking
 import sys
 import json
 import logging
@@ -53,16 +52,15 @@ def get_valid_auctions(selected_warehouse):
         logger.exception("Full traceback:")
         return []
 
-@with_progress_tracking
-def remove_duplicates_main(auction_number, target_msrp, warehouse_name, update_progress):
-    update_progress(5, f"Starting remove duplicates process for auction {auction_number}")
+def remove_duplicates_main(auction_number, target_msrp, warehouse_name):
+    logger.info(f"Starting remove duplicates process for auction {auction_number}")
     
     valid_auctions = get_valid_auctions(warehouse_name)
     if auction_number not in valid_auctions:
-        update_progress(10, f"Auction {auction_number} is not a valid auction for {warehouse_name}. Aborting process.")
+        logger.warning(f"Auction {auction_number} is not a valid auction for {warehouse_name}. Aborting process.")
         return
 
-    run_remove_dups(auction_number, update_progress, target_msrp, warehouse_name)
+    run_remove_dups(auction_number, target_msrp, warehouse_name)
 
 if __name__ == '__main__':
     import argparse
@@ -99,14 +97,14 @@ def get_fields_to_update(record, auction_number):
     print(f"Auction {auction_number} already exists in record")
     return {}
 
-def update_records_in_airtable(auction_number, update_progress, target_msrp, table, view_name):
+def update_records_in_airtable(auction_number, target_msrp, table, view_name):
     """Main function to update records in Airtable based on the auction number."""
     try:
-        update_progress(35, f"Starting to update records for auction {auction_number}")
+        logger.info(f"Starting to update records for auction {auction_number}")
         
         # Fetch records with specified fields only to optimize performance
         records = table.all(view=view_name, fields=['Product Name', 'Auctions', 'MSRP'])
-        update_progress(40, f"Fetched {len(records)} records from Airtable")
+        logger.info(f"Fetched {len(records)} records from Airtable")
 
         groups = {}
         for record in records:
@@ -115,7 +113,7 @@ def update_records_in_airtable(auction_number, update_progress, target_msrp, tab
             if product_name:
                 groups.setdefault(product_name, []).append(record)
 
-        update_progress(45, f"Grouped records into {len(groups)} unique product names")
+        logger.info(f"Grouped records into {len(groups)} unique product names")
 
         update_count, total_msrp_reached = 0, 0
         total_groups = len(groups)
@@ -138,18 +136,18 @@ def update_records_in_airtable(auction_number, update_progress, target_msrp, tab
                     update_count += 1
                     total_msrp_reached += record['fields'].get('MSRP', 0)
             
-            # Update progress every 10% of groups processed
+            # Log progress every 10% of groups processed
             if i % (total_groups // 10) == 0:
-                progress = 50 + int((i / total_groups) * 40)  # Progress from 50% to 90%
-                update_progress(progress, f"Processed {i}/{total_groups} groups")
+                progress = int((i / total_groups) * 100)
+                logger.info(f"Processed {i}/{total_groups} groups ({progress}%)")
 
-        update_progress(90, f"Auction {auction_number} has been added to {update_count} items with total MSRP of ${total_msrp_reached:.2f}")
+        logger.info(f"Auction {auction_number} has been added to {update_count} items with total MSRP of ${total_msrp_reached:.2f}")
     except Exception as e:
-        update_progress(95, f"Error occurred: {e}")
+        logger.error(f"Error occurred: {e}")
         logger.exception("Full traceback:")
 
-def run_remove_dups(auction_number, update_progress, target_msrp, warehouse_name):
-    update_progress(15, f"Running remove_dups for auction {auction_number} in {warehouse_name}")
+def run_remove_dups(auction_number, target_msrp, warehouse_name):
+    logger.info(f"Running remove_dups for auction {auction_number} in {warehouse_name}")
     
     config_manager.set_active_warehouse(warehouse_name)
 
@@ -160,24 +158,24 @@ def run_remove_dups(auction_number, update_progress, target_msrp, warehouse_name
 
     # Check if all required configuration variables are present
     if not all([AIRTABLE_TOKEN, AIRTABLE_INVENTORY_BASE_ID, AIRTABLE_INVENTORY_TABLE_ID, AIRTABLE_REMOVE_DUPS_VIEW]):
-        update_progress(20, "Missing Airtable configuration. Please check your config.json file.")
+        logger.error("Missing Airtable configuration. Please check your config.json file.")
         return
 
-    update_progress(25, "Airtable configuration loaded successfully")
+    logger.info("Airtable configuration loaded successfully")
 
     # Initialize Table
     try:
         table = Table(AIRTABLE_TOKEN, AIRTABLE_INVENTORY_BASE_ID, AIRTABLE_INVENTORY_TABLE_ID)
-        update_progress(30, "Airtable Table initialized successfully")
+        logger.info("Airtable Table initialized successfully")
     except Exception as e:
-        update_progress(30, f"Failed to initialize Airtable: {str(e)}")
+        logger.error(f"Failed to initialize Airtable: {str(e)}")
         return
 
     # Run the update process
     try:
-        update_records_in_airtable(auction_number, update_progress, target_msrp, table, AIRTABLE_REMOVE_DUPS_VIEW)
+        update_records_in_airtable(auction_number, target_msrp, table, AIRTABLE_REMOVE_DUPS_VIEW)
     except Exception as e:
-        update_progress(95, f"An error occurred during the update process: {str(e)}")
+        logger.error(f"An error occurred during the update process: {str(e)}")
         logger.exception("Full traceback:")
     finally:
-        update_progress(100, "Remove duplicates process completed.")
+        logger.info("Remove duplicates process completed.")

@@ -13,16 +13,13 @@ import requests
 import pandas as pd
 from PIL import Image, ExifTags
 from playwright.sync_api import sync_playwright, expect
-from auction.utils.progress_tracker import with_progress_tracking
+from auction.utils import config_manager
 
-@with_progress_tracking
-def auction_formatter_main(auction_id, selected_warehouse, gui_callback, should_stop, callback, update_progress):
+def auction_formatter_main(auction_id, selected_warehouse, gui_callback, should_stop, callback):
     config_manager.set_active_warehouse(selected_warehouse)
     formatter = AuctionFormatter(auction_id, gui_callback, should_stop, callback, selected_warehouse)
-    formatter.run_auction_formatter(update_progress)
+    formatter.run_auction_formatter()
     return formatter
-
-from auction.utils import config_manager
 
 # Load configuration
 config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'utils', 'config.json')
@@ -443,9 +440,9 @@ class AuctionFormatter:
             self.gui_callback(f"Failed to upload CSV: {str(e)}")
             return False
         
-    def run_auction_formatter(self, update_progress):
+    def run_auction_formatter(self):
         try:
-            update_progress(5, "Starting auction formatting process...")
+            self.gui_callback("Starting auction formatting process...")
             airtable_records = get_airtable_records_list(
                 config_manager.get_warehouse_var('airtable_inventory_base_id'),
                 config_manager.get_warehouse_var('airtable_inventory_table_id'),
@@ -454,31 +451,31 @@ class AuctionFormatter:
                 config_manager.get_warehouse_var('airtable_api_key')
             )
 
-            update_progress(15, "Collecting image URLs...")
+            self.gui_callback("Collecting image URLs...")
             download_tasks = collect_image_urls(airtable_records, self.should_stop)
             
-            update_progress(20, "Downloading images...")
+            self.gui_callback("Downloading images...")
             downloaded_images = download_images_bulk(download_tasks, self.gui_callback, self.should_stop)
             
-            update_progress(40, "Processing images...")
+            self.gui_callback("Processing images...")
             processed_images = process_images_in_bulk(downloaded_images, self.gui_callback, self.should_stop)
             
-            update_progress(60, "Uploading images...")
+            self.gui_callback("Uploading images...")
             uploaded_image_urls = upload_images_and_get_urls(processed_images, self.gui_callback, self.should_stop)
 
-            update_progress(75, "Processing records...")
+            self.gui_callback("Processing records...")
             processed_records, failed_records = process_records_concurrently(
                 airtable_records, uploaded_image_urls, self.gui_callback, 
                 self.Auction_ID, self.selected_warehouse, self.should_stop
             )
 
             if processed_records:
-                update_progress(85, "Creating CSV file...")
+                self.gui_callback("Creating CSV file...")
                 csv_path = processed_records_to_df(processed_records, self.Auction_ID, self.gui_callback)
                 self.final_csv_path = self.format_final_csv(csv_path)
 
             if self.final_csv_path:
-                update_progress(90, "Initializing browser...")
+                self.gui_callback("Initializing browser...")
                 with sync_playwright() as p:
                     browser = p.chromium.launch(headless=True)
                     page = browser.new_page()
@@ -486,35 +483,35 @@ class AuctionFormatter:
                     username = config_manager.get_warehouse_var('bid_username')
                     password = config_manager.get_warehouse_var('bid_password')
 
-                    update_progress(92, "Logging into website...")
+                    self.gui_callback("Logging into website...")
                     login_success = self.login_to_website(page, username, password)
                     
                     if login_success:
-                        update_progress(95, "Uploading CSV to 702 Auctions...")
+                        self.gui_callback("Uploading CSV to 702 Auctions...")
                         csv_filename = f"{self.Auction_ID}.csv"
                         csv_path = os.path.join(get_resources_dir('processed_csv'), csv_filename)
                         if os.path.exists(csv_path):
                             upload_success = self.upload_csv_to_website(page, csv_path)
                             if upload_success:
-                                update_progress(98, "CSV uploaded successfully to 702 Auctions.")
+                                self.gui_callback("CSV uploaded successfully to 702 Auctions.")
                             else:
-                                update_progress(98, "CSV upload to 702 Auctions failed.")
+                                self.gui_callback("CSV upload to 702 Auctions failed.")
                         else:
-                            update_progress(98, f"CSV file not found at {csv_path}")
+                            self.gui_callback(f"CSV file not found at {csv_path}")
                     else:
-                        update_progress(98, "Login to 702 Auctions failed.")
+                        self.gui_callback("Login to 702 Auctions failed.")
                     
-                    update_progress(99, f"Final URL: {page.url}")
+                    self.gui_callback(f"Final URL: {page.url}")
                     browser.close()
 
             if failed_records:
-                update_progress(99, "Saving failed records...")
+                self.gui_callback("Saving failed records...")
                 self.failed_records_csv_filepath = failed_records_csv(failed_records, self.Auction_ID, self.gui_callback)
 
-            update_progress(100, "Organizing images...")
+            self.gui_callback("Organizing images...")
             organize_images(self.Auction_ID)
         except Exception as e:
-            update_progress(100, f"Error: {str(e)}")
+            self.gui_callback(f"Error: {str(e)}")
         finally:
             self.callback()
 

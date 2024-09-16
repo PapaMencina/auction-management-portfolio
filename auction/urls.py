@@ -7,7 +7,6 @@ app_name = 'auction'
 urlpatterns = [
     path('', views.home, name='home'),
     path('create-auction/', views.create_auction_view, name='create_auction'),
-    path('task_progress/<str:task_id>/', views.get_task_progress, name='task_progress'),
     path('void-unpaid/', views.void_unpaid_view, name='void_unpaid'),
     path('remove-duplicates/', views.remove_duplicates_view, name='remove_duplicates'),
     path('format-auction/', views.auction_formatter_view, name='auction_formatter'),

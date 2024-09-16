@@ -10,7 +10,6 @@ from auction.utils import config_manager
 import logging
 from datetime import datetime, timedelta
 from playwright.sync_api import sync_playwright, expect
-from auction.utils.progress_tracker import with_progress_tracking
 
 logger = logging.getLogger(__name__)
 
@@ -19,13 +18,12 @@ config_manager.load_config(config_path)
 
 BASE_URL = "https://www.auctionflex360.com/#/organization/5676/auctions/new"
 
-@with_progress_tracking
-def upload_to_hibid_main(auction_id, ending_date, auction_title, gui_callback, should_stop, callback, selected_warehouse, update_progress):
+def upload_to_hibid_main(auction_id, ending_date, auction_title, gui_callback, should_stop, callback, selected_warehouse):
     config_manager.set_active_warehouse(selected_warehouse)
-    run_upload_to_hibid(auction_id, ending_date, auction_title, gui_callback, should_stop, callback, selected_warehouse, update_progress)
+    run_upload_to_hibid(auction_id, ending_date, auction_title, gui_callback, should_stop, callback, selected_warehouse)
 
 if __name__ == "__main__":
-    upload_to_hibid_main("sample_auction_id", "2023-12-31 18:30:00", "Sample Auction Title", print, threading.Event(), lambda: print("Callback"), "Maule Warehouse", lambda x, y: print(f"Progress: {x}%, Message: {y}"))
+    upload_to_hibid_main("sample_auction_id", "2023-12-31 18:30:00", "Sample Auction Title", print, threading.Event(), lambda: print("Callback"), "Maule Warehouse")
 
 def get_resource_path(resource_type, filename=None):
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -288,11 +286,11 @@ def handle_url_check(page, fallback_url, gui_callback, should_stop, username, pa
     else:
         gui_callback("Current URL seems fine. Continuing with the process.")
 
-def details_page(page, auction_title, auction_id, formatted_date_only, number_of_lots, formatted_ending_date, gui_callback, selected_warehouse, update_progress):
+def details_page(page, auction_title, auction_id, formatted_date_only, number_of_lots, formatted_ending_date, gui_callback, selected_warehouse):
     try:
         page.goto(BASE_URL)
         page.wait_for_load_state("networkidle")
-        update_progress(50, 'Loading Details page...')
+        gui_callback('Loading Details page...')
         auction_link_url = f'https://bid.702auctions.com/Event/Details/{auction_id}?utm_source=auction&utm_medium=linkclick&utm_campaign=hibid'
         browse_link_url = f'https://bid.702auctions.com/Browse?utm_source=browse_all&utm_medium=linkclick&utm_campaign=hibid'
         file_path_702_logo = get_resource_path('bid_stock_photo', '702_logo.png')
@@ -356,7 +354,7 @@ def details_page(page, auction_title, auction_id, formatted_date_only, number_of
             page.wait_for_timeout(2000)
             page.reload()
     except Exception as e:
-        update_progress(55, f"Error in details_page: {e}")
+        gui_callback(f"Error in details_page: {e}")
 
 def hibiduploadsettings_page(page, ending_date, todays_date, gui_callback, selected_warehouse):
     try:
@@ -422,18 +420,18 @@ def save_screenshot(page, name="screenshot.png"):
 def wait_for_element_to_be_clickable(page, selector, timeout=30000):
     return page.wait_for_selector(selector, state="visible", timeout=timeout)
 
-def lots_page(page, transformed_csv_path, auction_id, lot_numbers_list, gui_callback, should_stop, update_progress):
-    update_progress(70, 'Loading Lots page...')
+def lots_page(page, transformed_csv_path, auction_id, lot_numbers_list, gui_callback, should_stop):
+    gui_callback('Loading Lots page...')
     hibiduploadsettings_url = page.url
     lots_url = hibiduploadsettings_url.replace('hibiduploadsettings', 'lots')
     page.goto(lots_url)
     page.wait_for_timeout(2000)
-    update_progress(72, 'Importing CSV...')
+    gui_callback('Importing CSV...')
 
     try:
         click_import_lots_button(page)
     except Exception as e:
-        update_progress(73, f"Error clicking 'Import Lots' button: {e}")
+        gui_callback(f"Error clicking 'Import Lots' button: {e}")
         page.screenshot(path="error_screenshot.png")
         return
 
@@ -441,7 +439,7 @@ def lots_page(page, transformed_csv_path, auction_id, lot_numbers_list, gui_call
         print(transformed_csv_path)
         fill_file_input(page, "#files", os.path.abspath(transformed_csv_path))
     except Exception as e:
-        update_progress(74, f"Error filling 'files' field: {e}")
+        gui_callback(f"Error filling 'files' field: {e}")
         page.screenshot(path="error_screenshot.png")
         return
 
@@ -450,7 +448,7 @@ def lots_page(page, transformed_csv_path, auction_id, lot_numbers_list, gui_call
     try:
         click_button(page, "div.modal-buttons button#submit")
     except Exception as e:
-        update_progress(75, f"Error clicking 'submit' button: {e}")
+        gui_callback(f"Error clicking 'submit' button: {e}")
         page.screenshot(path="error_screenshot.png")
         return
 
@@ -459,7 +457,7 @@ def lots_page(page, transformed_csv_path, auction_id, lot_numbers_list, gui_call
     try:
         select_dropdown_options(page, mappings, gui_callback)
     except Exception as e:
-        update_progress(76, f"Error selecting dropdown options: {e}")
+        gui_callback(f"Error selecting dropdown options: {e}")
         page.screenshot(path="error_screenshot.png")
         return
 
@@ -468,14 +466,14 @@ def lots_page(page, transformed_csv_path, auction_id, lot_numbers_list, gui_call
     try:
         click_button(page, "#import")
     except Exception as e:
-        update_progress(77, f"Error clicking 'import' button: {e}")
+        gui_callback(f"Error clicking 'import' button: {e}")
         page.screenshot(path="error_screenshot.png")
         return
 
     try:
         click_button(page, "button:has-text('IMPORT')")
     except Exception as e:
-        update_progress(78, f"Error clicking 'IMPORT' button: {e}")
+        gui_callback(f"Error clicking 'IMPORT' button: {e}")
         page.screenshot(path="error_screenshot.png")
         return
 
@@ -483,9 +481,9 @@ def lots_page(page, transformed_csv_path, auction_id, lot_numbers_list, gui_call
 
     try:
         page.wait_for_selector(stop_import_xpath, state="hidden", timeout=90000)
-        update_progress(80, "Stop Import has disappeared")
+        gui_callback("Stop Import has disappeared")
     except Exception as e:
-        update_progress(80, f"Error waiting for 'Stop Import' text to disappear: {e}")
+        gui_callback(f"Error waiting for 'Stop Import' text to disappear: {e}")
         page.screenshot(path="error_screenshot.png")
         return
 
@@ -494,32 +492,32 @@ def lots_page(page, transformed_csv_path, auction_id, lot_numbers_list, gui_call
 
     try:
         close_button = page.wait_for_selector(close_button_selector, state="visible", timeout=10000)
-        update_progress(81, "CLOSE button is present")
+        gui_callback("CLOSE button is present")
     except:
-        update_progress(81, "TimeoutException: CLOSE button is not present")
+        gui_callback("TimeoutException: CLOSE button is not present")
         save_screenshot(page, "close_button_not_present")
         return
     
     try:
         close_button.scroll_into_view_if_needed()
         close_button.click()
-        update_progress(82, "CLOSE button clicked")
+        gui_callback("CLOSE button clicked")
     except Exception as js_click_exception:
-        update_progress(82, f"Exception during click: {js_click_exception}")
+        gui_callback(f"Exception during click: {js_click_exception}")
         save_screenshot(page, "js_click_exception_close_button")
 
     try:
         click_button(page, '#lotTable_1 thead tr th:nth-child(3)')
-        update_progress(83, "Clicked 'sort by lot order' button")
+        gui_callback("Clicked 'sort by lot order' button")
     except Exception as e:
-        update_progress(83, f"Error clicking 'sort by lot order' button: {e}")
+        gui_callback(f"Error clicking 'sort by lot order' button: {e}")
         page.screenshot(path="error_screenshot.png")
         return
 
-    update_progress(84, "Starting to process lots...")
-    process_lots(page, auction_id, lots_url, lot_numbers_list, gui_callback, should_stop, update_progress)
+    gui_callback("Starting to process lots...")
+    process_lots(page, auction_id, lots_url, lot_numbers_list, gui_callback, should_stop)
 
-def process_lots(page, auction_id, lots_url, lot_numbers, gui_callback, should_stop, update_progress):
+def process_lots(page, auction_id, lots_url, lot_numbers, gui_callback, should_stop,):
     gui_callback('Importing Images and link...')
     last_successful_url = lots_url
     page.wait_for_timeout(2000)
@@ -633,15 +631,15 @@ def format_ending_date(ending_date, gui_callback):
     
     return formatted_ending_date, formatted_date_only
 
-def run_upload_to_hibid(auction_id, ending_date, auction_title, gui_callback, should_stop, callback, selected_warehouse, update_progress):
+def run_upload_to_hibid(auction_id, ending_date, auction_title, gui_callback, should_stop, callback, selected_warehouse):
     try:
-        update_progress(5, "Starting the upload process...")
+        logger.info("Starting the upload process...")
 
         username = config_manager.get_warehouse_var('hibid_user_name')
         password = config_manager.get_warehouse_var('hibid_password')
 
         if username is None or password is None:
-            update_progress(10, "Error: Username or password is None. Please check your configuration.")
+            logger.error("Error: Username or password is None. Please check your configuration.")
             return
 
         with sync_playwright() as p:
@@ -649,64 +647,63 @@ def run_upload_to_hibid(auction_id, ending_date, auction_title, gui_callback, sh
             page = browser.new_page()
             
             page.goto(BASE_URL)
-            update_progress(15, "Browser launched and navigated to base URL.")
+            logger.info("Browser launched and navigated to base URL.")
 
             login_successful = login(page, username, password, gui_callback, should_stop)
             
             if not login_successful:
-                update_progress(20, "Login failed. Stopping the process.")
+                logger.error("Login failed. Stopping the process.")
                 return
 
             if should_stop.is_set():
-                update_progress(25, "Process stopped by user after login.")
+                logger.info("Process stopped by user after login.")
                 return
 
             input_csv_path = get_resource_path('processed_csv', f'{auction_id}.csv')
-            update_progress(30, f"Input CSV Path: {input_csv_path}")
+            logger.info(f"Input CSV Path: {input_csv_path}")
 
             todays_date = datetime.now().strftime("%m/%d/%Y")
 
             formatted_ending_date, formatted_date_only = format_ending_date(ending_date, gui_callback)
-            update_progress(35, f"Formatted ending date: {formatted_ending_date}, formatted date only: {formatted_date_only}")
+            logger.info(f"Formatted ending date: {formatted_ending_date}, formatted date only: {formatted_date_only}")
 
             if should_stop.is_set():
-                update_progress(40, "Process stopped by user before CSV transformation.")
+                logger.info("Process stopped by user before CSV transformation.")
                 return
 
             number_of_lots, auction_id, transformed_csv_path, lot_number_list = transform_csv_with_fixed_lines(input_csv_path)
-            update_progress(45, f"Number of lots: {number_of_lots}, auction_id: {auction_id}, transformed_csv_path: {transformed_csv_path}")
+            logger.info(f"Number of lots: {number_of_lots}, auction_id: {auction_id}, transformed_csv_path: {transformed_csv_path}")
 
-            details_page(page, auction_title, auction_id, formatted_date_only, number_of_lots, formatted_ending_date, gui_callback, selected_warehouse, update_progress)
-            update_progress(55, "Details page completed.")
+            details_page(page, auction_title, auction_id, formatted_date_only, number_of_lots, formatted_ending_date, gui_callback, selected_warehouse)
+            logger.info("Details page completed.")
 
             if should_stop.is_set():
-                update_progress(60, "Process stopped by user before settings page.")
+                logger.info("Process stopped by user before settings page.")
                 return
 
             hibiduploadsettings_page(page, formatted_ending_date, todays_date, gui_callback, selected_warehouse)
-            update_progress(65, "Settings page completed.")
+            logger.info("Settings page completed.")
 
             if should_stop.is_set():
-                update_progress(70, "Process stopped by user before lots page.")
+                logger.info("Process stopped by user before lots page.")
                 return
 
-            lots_page(page, transformed_csv_path, auction_id, lot_number_list, gui_callback, should_stop, update_progress)
-            update_progress(85, "Lots page completed.")
+            lots_page(page, transformed_csv_path, auction_id, lot_number_list, gui_callback, should_stop)
+            logger.info("Lots page completed.")
 
             if should_stop.is_set():
-                update_progress(90, "Process stopped by user before submitting auction.")
+                logger.info("Process stopped by user before submitting auction.")
                 return
 
             submit_auction(page, gui_callback)
-            update_progress(95, "Auction submitted successfully.")
+            logger.info("Auction submitted successfully.")
 
     except Exception as e:
-        update_progress(98, f"Unexpected error: {e}")
         logger.error(f"Unexpected error: {e}")
         logger.exception("Traceback:")
     finally:
         if 'browser' in locals():
-            update_progress(99, "Closing the browser...")
+            logger.info("Closing the browser...")
             browser.close()
-        update_progress(100, "Upload process completed.")
+        logger.info("Upload process completed.")
         callback()

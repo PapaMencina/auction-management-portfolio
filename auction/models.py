@@ -22,13 +22,3 @@ class Bid(models.Model):
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     paid = models.BooleanField(default=False)
     timestamp = models.DateTimeField(auto_now_add=True)
-
-class TaskProgress(models.Model):
-    task_id = models.CharField(max_length=255, unique=True)
-    progress = models.IntegerField(default=0)
-    status = models.TextField()  # Changed from CharField to TextField
-    error = models.TextField(null=True, blank=True)
-    timestamp = models.DateTimeField(auto_now=True)
-
-    def __str__(self):
-        return f"Task {self.task_id}: {self.status} ({self.progress}%)"
