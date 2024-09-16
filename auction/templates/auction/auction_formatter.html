@@ -46,26 +46,7 @@
         button:hover {
             background-color: #45a049;
         }
-        .progress-container {
-            display: none;
-            margin-top: 20px;
-            max-width: 100%;
-            background-color: #f0f0f0;
-            padding: 3px;
-            border-radius: 3px;
-            box-shadow: inset 0 1px 3px rgba(0, 0, 0, .2);
-        }
-        .progress-bar {
-            height: 22px;
-            background-color: #659cef;
-            border-radius: 3px;
-            transition: width 500ms ease-in-out;
-            text-align: center;
-            line-height: 22px;
-            color: white;
-            font-weight: bold;
-        }
-        .status-message, .result-message {
+        .status-message {
             margin-top: 10px;
             text-align: center;
             color: #333;
@@ -103,11 +84,7 @@
             {% endif %}
             <button type="submit">Format Auction</button>
         </form>
-        <div class="progress-container" id="progress-bar">
-            <div class="progress-bar" id="progress-bar-fill" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">0%</div>
-        </div>
         <div class="status-message" id="status-message"></div>
-        <div class="result-message" id="result-message"></div>
     </div>
 
     <script>
@@ -137,18 +114,15 @@
         function formatAuction(event) {
             event.preventDefault();
             const formData = new FormData(event.target);
-            const resultMessage = document.getElementById('result-message');
-            const progressBar = document.getElementById('progress-bar');
-            const progressBarFill = document.getElementById('progress-bar-fill');
-
-            // Show progress bar
-            progressBar.style.display = 'block';
+            const statusMessage = document.getElementById('status-message');
 
             // Add the show_browser value to formData if the element exists
             const showBrowserElement = document.getElementById('show_browser');
             if (showBrowserElement) {
                 formData.append('show_browser', showBrowserElement.checked ? '1' : '0');
             }
+
+            statusMessage.textContent = 'Processing...';
 
             fetch('{% url "auction:auction_formatter" %}', {
                 method: 'POST',
@@ -159,40 +133,11 @@
             })
             .then(response => response.json())
             .then(data => {
-                if (data.task_id) {
-                    checkProgress(data.task_id);
-                } else {
-                    resultMessage.textContent = data.message;
-                }
+                statusMessage.textContent = data.message || 'Auction formatting process started';
             })
             .catch(error => {
-                resultMessage.textContent = 'An error occurred: ' + error;
-                progressBar.style.display = 'none';
+                statusMessage.textContent = 'An error occurred: ' + error;
             });
-        }
-
-        function checkProgress(taskId) {
-            fetch(`/auction/task_progress/${taskId}/`)
-                .then(response => response.json())
-                .then(data => {
-                    updateProgressBar(data.progress, data.status);
-                    if (data.progress < 100) {
-                        setTimeout(() => checkProgress(taskId), 1000);
-                    } else {
-                        document.getElementById('result-message').textContent = 'Process completed!';
-                    }
-                })
-                .catch(error => {
-                    console.error('Error:', error);
-                });
-        }
-
-        function updateProgressBar(progress, status) {
-            const progressBarFill = document.getElementById('progress-bar-fill');
-            const statusMessage = document.getElementById('status-message');
-            progressBarFill.style.width = `${progress}%`;
-            progressBarFill.textContent = `${progress}%`;
-            statusMessage.textContent = status;
         }
 
         document.addEventListener('DOMContentLoaded', updateAuctionDropdown);
