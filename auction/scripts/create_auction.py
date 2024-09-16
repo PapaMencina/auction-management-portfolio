@@ -108,16 +108,19 @@ async def login(page, username, password, url):
         await page.goto(url)
         await page.wait_for_load_state('networkidle', timeout=60000)
         
-        # Wait for and fill email field
-        await page.wait_for_selector("#user_email", state="visible", timeout=60000)
-        await page.fill("#user_email", username)
+        # Wait for and fill username field
+        logger.info("Waiting for username field to be visible...")
+        await page.wait_for_selector("#username", state="visible", timeout=90000)
+        await page.fill("#username", username)
         
         # Wait for and fill password field
-        await page.wait_for_selector("#user_password", state="visible", timeout=60000)
-        await page.fill("#user_password", password)
+        logger.info("Waiting for password field to be visible...")
+        await page.wait_for_selector("#password", state="visible", timeout=90000)
+        await page.fill("#password", password)
         
         # Wait for and click the sign-in button
-        sign_in_button = await page.wait_for_selector('input[type="submit"][name="commit"][value="Sign in"].button-primary', state="visible", timeout=60000)
+        logger.info("Waiting for sign-in button to be visible...")
+        sign_in_button = await page.wait_for_selector('input[type="submit"][value="Sign In"]', state="visible", timeout=90000)
         if sign_in_button:
             await sign_in_button.click()
         else:
@@ -417,4 +420,3 @@ async def create_auction_main(auction_title, ending_date, show_browser, selected
 if __name__ == "__main__":
     import asyncio
     asyncio.run(create_auction_main("Sample Auction", datetime.now(), True, "Maule Warehouse"))
-    
