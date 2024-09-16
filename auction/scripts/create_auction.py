@@ -102,30 +102,73 @@ def format_date(date_obj):
     full_date = date_obj.strftime('%m/%d/%Y')
     return month_day_str, full_date
 
-async def login(page, username, password, url):
-    """Logs in to the specified URL using provided credentials."""
+async def login_relaythat(page, username, password, url):
+    """Logs in to RelayThat using provided credentials."""
+    try:
+        await page.goto(url)
+        await page.wait_for_load_state('networkidle', timeout=60000)
+        
+        # Wait for and fill email field
+        logger.info("Waiting for RelayThat email field to be visible...")
+        await page.wait_for_selector("#user_email", state="visible", timeout=90000)
+        await page.fill("#user_email", username)
+        
+        # Wait for and fill password field
+        logger.info("Waiting for RelayThat password field to be visible...")
+        await page.wait_for_selector("#user_password", state="visible", timeout=90000)
+        await page.fill("#user_password", password)
+        
+        # Wait for and click the sign-in button
+        logger.info("Waiting for RelayThat sign-in button to be visible...")
+        sign_in_button = await page.wait_for_selector('input[type="submit"][name="commit"][value="Sign in"].button-primary', state="visible", timeout=90000)
+        if sign_in_button:
+            await sign_in_button.click()
+        else:
+            logger.error("RelayThat sign in button not found")
+            await page.screenshot(path='relaythat_login_error_button_not_found.png')
+            return False
+
+        # Wait for navigation after clicking sign in
+        await page.wait_for_load_state('networkidle', timeout=60000)
+        
+        # Check if login was successful
+        if "login" in page.url.lower():
+            logger.error("RelayThat login failed. Still on login page.")
+            await page.screenshot(path='relaythat_login_error_still_on_login_page.png')
+            return False
+        
+        logger.info("RelayThat login successful")
+        return True
+    except Exception as e:
+        logger.error(f"RelayThat login failed: {e}")
+        logger.error(f"Current URL: {page.url}")
+        await page.screenshot(path='relaythat_login_error_exception.png')
+        return False
+
+async def login_auction_site(page, username, password, url):
+    """Logs in to the auction site using provided credentials."""
     try:
         await page.goto(url)
         await page.wait_for_load_state('networkidle', timeout=60000)
         
         # Wait for and fill username field
-        logger.info("Waiting for username field to be visible...")
+        logger.info("Waiting for auction site username field to be visible...")
         await page.wait_for_selector("#username", state="visible", timeout=90000)
         await page.fill("#username", username)
         
         # Wait for and fill password field
-        logger.info("Waiting for password field to be visible...")
+        logger.info("Waiting for auction site password field to be visible...")
         await page.wait_for_selector("#password", state="visible", timeout=90000)
         await page.fill("#password", password)
         
         # Wait for and click the sign-in button
-        logger.info("Waiting for sign-in button to be visible...")
+        logger.info("Waiting for auction site sign-in button to be visible...")
         sign_in_button = await page.wait_for_selector('input[type="submit"][value="Sign In"]', state="visible", timeout=90000)
         if sign_in_button:
             await sign_in_button.click()
         else:
-            logger.error("Sign in button not found")
-            await page.screenshot(path='login_error_button_not_found.png')
+            logger.error("Auction site sign in button not found")
+            await page.screenshot(path='auction_site_login_error_button_not_found.png')
             return False
 
         # Wait for navigation after clicking sign in
@@ -133,16 +176,16 @@ async def login(page, username, password, url):
         
         # Check if login was successful
         if "logon" in page.url.lower() or "login" in page.url.lower():
-            logger.error("Login failed. Still on login page.")
-            await page.screenshot(path='login_error_still_on_login_page.png')
+            logger.error("Auction site login failed. Still on login page.")
+            await page.screenshot(path='auction_site_login_error_still_on_login_page.png')
             return False
         
-        logger.info("Login successful")
+        logger.info("Auction site login successful")
         return True
     except Exception as e:
-        logger.error(f"Login failed: {e}")
+        logger.error(f"Auction site login failed: {e}")
         logger.error(f"Current URL: {page.url}")
-        await page.screenshot(path='login_error_exception.png')
+        await page.screenshot(path='auction_site_login_error_exception.png')
         return False
 
 def set_content_in_ckeditor(page, iframe_title, formatted_text):
@@ -161,7 +204,7 @@ async def get_image(page, ending_date_input, relaythat_url, selected_warehouse):
         relaythat_email = config_manager.get_global_var('relaythat_email')
         relaythat_password = config_manager.get_global_var('relaythat_password')
         logger.info(f"Attempting to log in with email: {relaythat_email}")
-        login_success = await login(page, relaythat_email, relaythat_password, relaythat_url)
+        login_success = await login_relaythat(page, relaythat_email, relaythat_password, relaythat_url)
         
         if not login_success:
             logger.error("Failed to log in to RelayThat. Aborting process.")
@@ -236,7 +279,7 @@ async def create_auction(page, auction_title, image_path, formatted_start_date, 
         logger.info('Logging in to auction site...')
         bid_username = config_manager.get_warehouse_var('bid_username')
         bid_password = config_manager.get_warehouse_var('bid_password')
-        login_success = await login(page, bid_username, bid_password, website_login_url)
+        login_success = await login_auction_site(page, bid_username, bid_password, website_login_url)
         if not login_success:
             logger.error("Failed to log in to auction site. Aborting process.")
             await page.screenshot(path='auction_site_login_failed.png')
