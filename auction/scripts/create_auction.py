@@ -6,7 +6,7 @@ import traceback
 import threading
 import sys
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 from playwright.async_api import async_playwright
 from auction.utils import config_manager
 import logging
@@ -60,6 +60,7 @@ def wait_for_download(page, timeout=300000):
 @sync_to_async
 def save_event_to_database(event_data):
     try:
+        logger.info(f"Attempting to save event with data: {event_data}")  # Add this line
         Event.objects.create(
             event_id=event_data['event_id'],
             warehouse=event_data['warehouse'],
@@ -432,9 +433,9 @@ async def create_auction_main(auction_title, ending_date, show_browser, selected
                 "title": auction_title,
                 "event_id": event_id,
                 "start_date": formatted_start_date,
-                "ending_date": str(ending_date),
+                "ending_date": ending_date.strftime('%Y-%m-%d'),  # Ensure this is in 'YYYY-MM-DD' format
                 "timestamp": timestamp
-            }
+}
             await save_event_to_database(event_data)
             logger.info(f"Event {event_id} created at {timestamp}")
 
@@ -448,4 +449,5 @@ async def create_auction_main(auction_title, ending_date, show_browser, selected
 
 if __name__ == "__main__":
     import asyncio
-    asyncio.run(create_auction_main("Sample Auction", datetime.now(), True, "Maule Warehouse"))
+    end_date = datetime.now() + timedelta(days=14)  # Set end date to 14 days from now
+    asyncio.run(create_auction_main("Sample Auction", end_date, True, "Maule Warehouse"))
