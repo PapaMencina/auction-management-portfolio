@@ -150,19 +150,18 @@ def void_unpaid_view(request):
         try:
             data = json.loads(request.body)
             warehouse = data.get('warehouse')
-            auction_id = data.get('auction_id')
+            event_id = data.get('auction_id')  # Changed from auction_id to event_id
             upload_choice = int(data.get('upload_choice'))
             show_browser = data.get('show_browser') and can_use_show_browser
 
-            valid_auction = any(auction for auction in auctions if auction['id'] == auction_id and auction['warehouse'] == warehouse)
+            valid_auction = any(auction for auction in auctions if auction['id'] == event_id and auction['warehouse'] == warehouse)
 
             if not valid_auction:
                 return JsonResponse({'error': 'Invalid Auction ID - Please confirm the auction ID and Warehouse, then try again.'}, status=400)
 
             Thread(target=void_unpaid_main, kwargs={
-                'auction_id': auction_id,
+                'event_id': event_id,  # Changed from auction_id to event_id
                 'upload_choice': upload_choice,
-                'show_browser': show_browser,
                 'warehouse': warehouse
             }).start()
 
