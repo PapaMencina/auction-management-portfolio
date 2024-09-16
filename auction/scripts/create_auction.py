@@ -196,13 +196,20 @@ async def get_image(page, ending_date_input, relaythat_url, selected_warehouse):
         logger.info("Loading completed")
 
         # Use the specific class for the download button
-        download_button = await page.wait_for_selector("button.ui.teal.tiny.button", state="visible", timeout=60000)
+        download_button = await page.wait_for_selector("button.ui.teal.tiny.button:has-text('Download')", state="visible", timeout=60000)
         if download_button:
-            logger.info("Download button found. Waiting for image download...")
+            logger.info("Download button found. Waiting for 2 seconds...")
+            await page.wait_for_timeout(2000)
             
+            logger.info("Attempting to click download button...")
             # Set up the download expectation before clicking the button
             async with page.expect_download(timeout=60000) as download_info:
-                await download_button.click()
+                try:
+                    await download_button.click(timeout=60000)
+                except Exception as e:
+                    logger.warning(f"Failed to click download button normally: {e}")
+                    logger.info("Attempting to click using JavaScript...")
+                    await page.evaluate("document.querySelector('button.ui.teal.tiny.button').click()")
             
             download = await download_info.value
             downloaded_file = await download.path()
