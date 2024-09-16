@@ -11,6 +11,8 @@ from playwright.async_api import async_playwright
 from auction.utils import config_manager
 import logging
 from asgiref.sync import sync_to_async
+from auction.models import Event
+from django.utils.dateparse import parse_date
 
 # Set up logging to console
 logging.basicConfig(level=logging.DEBUG,
@@ -55,37 +57,19 @@ def wait_for_download(page, timeout=300000):
     path = download.path()
     return path
 
-def save_event_to_file(event_data):
-    file_path = os.path.join(get_resources_dir(''), 'events.json')
-    logger.info(f"Attempting to save event to {file_path}")
-    with file_lock:
-        try:
-            events = []
-            if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
-                try:
-                    with open(file_path, "r") as file:
-                        events = json.load(file)
-                    logger.info(f"Loaded existing events: {len(events)}")
-                except json.JSONDecodeError:
-                    logger.warning("Existing file contains invalid JSON. Starting with empty list.")
-            else:
-                logger.info("No existing events file or file is empty. Creating new.")
-
-            events.append(event_data)
-            logger.info(f"Added new event. Total events: {len(events)}")
-
-            with open(file_path, "w") as file:
-                json.dump(events, file, indent=4)
-            logger.info(f"Event successfully saved to {file_path}")
-
-        except Exception as e:
-            logger.error(f"Unexpected error when saving event to file: {e}")
-            logger.error("Traceback:", exc_info=True)
-        finally:
-            logger.debug(f"Current working directory: {os.getcwd()}")
-            logger.debug(f"File exists: {os.path.exists(file_path)}")
-
-    return os.path.exists(file_path) and os.path.getsize(file_path) > 0
+def save_event_to_database(event_data):
+    try:
+        Event.objects.create(
+            event_id=event_data['event_id'],
+            warehouse=event_data['warehouse'],
+            title=event_data['title'],
+            start_date=parse_date(event_data['start_date']),
+            ending_date=parse_date(event_data['ending_date'])
+        )
+        logger.info(f"Event {event_data['event_id']} saved to database")
+    except Exception as e:
+        logger.error(f"Error saving event to database: {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
 
 def get_resources_dir(folder=''):
     base_path = os.environ.get('AUCTION_RESOURCES_PATH', '/app/resources')
@@ -400,7 +384,7 @@ class SharedEvents:
             "ending_date": str(ending_date),
             "timestamp": timestamp
         }
-        save_event_to_file(event_data)
+        save_event_to_database(event_data)
 
 async def create_auction_main(auction_title, ending_date, show_browser, selected_warehouse):
     logger.info(f"Starting create_auction_main for auction: {auction_title}, warehouse: {selected_warehouse}")
@@ -450,7 +434,7 @@ async def create_auction_main(auction_title, ending_date, show_browser, selected
                 "ending_date": str(ending_date),
                 "timestamp": timestamp
             }
-            save_event_to_file(event_data)
+            save_event_to_database(event_data)
             logger.info(f"Event {event_id} created at {timestamp}")
 
     except ValueError as e:

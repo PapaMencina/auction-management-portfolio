@@ -22,3 +22,14 @@ class Bid(models.Model):
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     paid = models.BooleanField(default=False)
     timestamp = models.DateTimeField(auto_now_add=True)
+
+class Event(models.Model):
+    event_id = models.CharField(max_length=100, unique=True)
+    warehouse = models.CharField(max_length=100)
+    title = models.CharField(max_length=200)
+    start_date = models.DateField()
+    ending_date = models.DateField()
+    timestamp = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.title} ({self.event_id})"
