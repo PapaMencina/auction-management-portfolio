@@ -4,6 +4,8 @@ from django.urls import path, include
 from django.contrib.auth import views as auth_views
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import redirect
+from django.conf import settings
+from django.conf.urls.static import static
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -13,3 +15,6 @@ urlpatterns = [
     path('auction/', include(('auction.urls', 'auction'), namespace='auction')),  # Ensure namespace is correctly used
     path('accounts/', include('django.contrib.auth.urls')),  # Include default auth URLs
 ]
+
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

@@ -4,10 +4,12 @@ import pandas as pd
 import os
 import re
 import json
+import tempfile
 import threading
 from django.conf import settings
 from auction.utils import config_manager
 import logging
+from auction.models import Event, HiBidUpload, ImageMetadata
 from datetime import datetime, timedelta
 from playwright.sync_api import sync_playwright, expect
 
@@ -25,34 +27,9 @@ def upload_to_hibid_main(auction_id, ending_date, auction_title, gui_callback, s
 if __name__ == "__main__":
     upload_to_hibid_main("sample_auction_id", "2023-12-31 18:30:00", "Sample Auction Title", print, threading.Event(), lambda: print("Callback"), "Maule Warehouse")
 
-def get_resource_path(resource_type, filename=None):
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.dirname(os.path.dirname(script_dir))
-    base_path = os.path.join(project_root, 'auction', 'resources')
-    
-    resource_paths = {
-        'processed_csv': os.path.join(base_path, 'processed_csv'),
-        'hibid_csv': os.path.join(base_path, 'hibid_csv'),
-        'hibid_images': os.path.join(base_path, 'hibid_images'),
-        'bid_stock_photo': os.path.join(base_path, 'bid_stock_photo'),
-        'downloads': os.path.join(base_path, 'downloads'),
-    }
-    
-    if resource_type not in resource_paths:
-        raise ValueError(f"Unknown resource type: {resource_type}")
-    
-    path = resource_paths[resource_type]
-    
-    if filename:
-        path = os.path.join(path, filename)
-    
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    
-    return path
-
-def get_resources_dir(folder):
-    base_dir = os.path.abspath("C:\\Users\\matt9\\Desktop\\Auction_script_current\\resources")
-    return os.path.join(base_dir, folder)
+def get_temp_file(prefix, suffix):
+    temp_dir = tempfile.gettempdir()
+    return os.path.join(temp_dir, f"{prefix}_{suffix}")
 
 fixed_lines_df = pd.DataFrame({
     "Lot Number": [1, 2],
@@ -253,17 +230,32 @@ def description(number_of_lots, ending_date, selected_warehouse):
         )
 
 def check_image(auction_id, current_lot, gui_callback):
-    possible_extensions = [".jpeg", ".jpg", ".JPEG", ".JPG", ".png"]
-    folder = 'hibid stock' if current_lot in [1, 2] else f'hibid_{auction_id}'
-    base_file_path = os.path.join(get_resource_path('hibid_images', folder), f'{current_lot}_1')
+    try:
+        if current_lot in [1, 2]:
+            # For fixed lines, use a default image from settings
+            image_path = settings.DEFAULT_HIBID_IMAGE_PATH
+        else:
+            # Fetch image metadata from ImageMetadata model
+            image_metadata = ImageMetadata.objects.filter(
+                event__event_id=auction_id,
+                filename__startswith=f'{current_lot}_1'
+            ).first()
+            
+            if image_metadata and image_metadata.image:
+                image_path = image_metadata.image.path
+            else:
+                gui_callback(f'Image for lot {current_lot} not found in database.')
+                return None
 
-    for ext in possible_extensions:
-        file_path = base_file_path + ext
-        if os.path.exists(file_path):
-            return file_path
+        if os.path.exists(image_path):
+            return image_path
+        else:
+            gui_callback(f'Image file not found at {image_path}')
+            return None
 
-    gui_callback(f'Image for lot {current_lot} not found(function).')
-    return None
+    except Exception as e:
+        gui_callback(f'Error checking image for lot {current_lot}: {e}')
+        return None
 
 def handle_url_check(page, fallback_url, gui_callback, should_stop, username, password):
     current_url = page.url
@@ -293,7 +285,7 @@ def details_page(page, auction_title, auction_id, formatted_date_only, number_of
         gui_callback('Loading Details page...')
         auction_link_url = f'https://bid.702auctions.com/Event/Details/{auction_id}?utm_source=auction&utm_medium=linkclick&utm_campaign=hibid'
         browse_link_url = f'https://bid.702auctions.com/Browse?utm_source=browse_all&utm_medium=linkclick&utm_campaign=hibid'
-        file_path_702_logo = get_resource_path('bid_stock_photo', '702_logo.png')
+        file_path_702_logo = settings.LOGO_702_PATH
 
         fill_text_field(page, "#name", auction_title)
         page.wait_for_timeout(1000)
@@ -413,7 +405,8 @@ def click_import_lots_button(page):
 
 def save_screenshot(page, name="screenshot.png"):
     timestamp = time.strftime("%Y%m%d-%H%M%S")
-    filepath = get_resource_path('downloads', f"{name}_{timestamp}.png")
+    filepath = os.path.join(settings.MEDIA_ROOT, 'hibid_screenshots', f"{name}_{timestamp}.png")
+    os.makedirs(os.path.dirname(filepath), exist_ok=True)
     page.screenshot(path=filepath)
     logger.info(f"Screenshot saved to {filepath}")
 
@@ -517,7 +510,7 @@ def lots_page(page, transformed_csv_path, auction_id, lot_numbers_list, gui_call
     gui_callback("Starting to process lots...")
     process_lots(page, auction_id, lots_url, lot_numbers_list, gui_callback, should_stop)
 
-def process_lots(page, auction_id, lots_url, lot_numbers, gui_callback, should_stop,):
+def process_lots(page, auction_id, lots_url, lot_numbers, gui_callback, should_stop):
     gui_callback('Importing Images and link...')
     last_successful_url = lots_url
     page.wait_for_timeout(2000)
@@ -602,12 +595,6 @@ def submit_auction(page, gui_callback):
         gui_callback(f"Exception: {e}")
         save_screenshot(page, "exception_queue_for_upload")
 
-def save_screenshot(page, name="screenshot.png"):
-    timestamp = time.strftime("%Y%m%d-%H%M%S")
-    filepath = os.path.join(os.path.expanduser('~'), 'Downloads', f"{name}_{timestamp}.png")
-    page.screenshot(path=filepath)
-    print(f"Screenshot saved to {filepath}")
-
 def format_ending_date(ending_date, gui_callback):
     gui_callback("Formatting ending date...")
     
@@ -631,15 +618,27 @@ def format_ending_date(ending_date, gui_callback):
     
     return formatted_ending_date, formatted_date_only
 
+from auction.models import Event, HiBidUpload
+
 def run_upload_to_hibid(auction_id, ending_date, auction_title, gui_callback, should_stop, callback, selected_warehouse):
     try:
         logger.info("Starting the upload process...")
+
+        event = Event.objects.get(event_id=auction_id)
+        hibid_upload = HiBidUpload.objects.create(
+            event=event,
+            status='in_progress',
+            auction_id=auction_id,
+            ending_date=ending_date
+        )
 
         username = config_manager.get_warehouse_var('hibid_user_name')
         password = config_manager.get_warehouse_var('hibid_password')
 
         if username is None or password is None:
             logger.error("Error: Username or password is None. Please check your configuration.")
+            hibid_upload.status = 'failed'
+            hibid_upload.save()
             return
 
         with sync_playwright() as p:
@@ -653,13 +652,17 @@ def run_upload_to_hibid(auction_id, ending_date, auction_title, gui_callback, sh
             
             if not login_successful:
                 logger.error("Login failed. Stopping the process.")
+                hibid_upload.status = 'failed'
+                hibid_upload.save()
                 return
 
             if should_stop.is_set():
                 logger.info("Process stopped by user after login.")
+                hibid_upload.status = 'stopped'
+                hibid_upload.save()
                 return
 
-            input_csv_path = get_resource_path('processed_csv', f'{auction_id}.csv')
+            input_csv_path = get_temp_file('processed_csv', f'{auction_id}.csv')
             logger.info(f"Input CSV Path: {input_csv_path}")
 
             todays_date = datetime.now().strftime("%m/%d/%Y")
@@ -669,16 +672,23 @@ def run_upload_to_hibid(auction_id, ending_date, auction_title, gui_callback, sh
 
             if should_stop.is_set():
                 logger.info("Process stopped by user before CSV transformation.")
+                hibid_upload.status = 'stopped'
+                hibid_upload.save()
                 return
 
             number_of_lots, auction_id, transformed_csv_path, lot_number_list = transform_csv_with_fixed_lines(input_csv_path)
             logger.info(f"Number of lots: {number_of_lots}, auction_id: {auction_id}, transformed_csv_path: {transformed_csv_path}")
+
+            hibid_upload.lot_count = number_of_lots
+            hibid_upload.save()
 
             details_page(page, auction_title, auction_id, formatted_date_only, number_of_lots, formatted_ending_date, gui_callback, selected_warehouse)
             logger.info("Details page completed.")
 
             if should_stop.is_set():
                 logger.info("Process stopped by user before settings page.")
+                hibid_upload.status = 'stopped'
+                hibid_upload.save()
                 return
 
             hibiduploadsettings_page(page, formatted_ending_date, todays_date, gui_callback, selected_warehouse)
@@ -686,6 +696,8 @@ def run_upload_to_hibid(auction_id, ending_date, auction_title, gui_callback, sh
 
             if should_stop.is_set():
                 logger.info("Process stopped by user before lots page.")
+                hibid_upload.status = 'stopped'
+                hibid_upload.save()
                 return
 
             lots_page(page, transformed_csv_path, auction_id, lot_number_list, gui_callback, should_stop)
@@ -693,14 +705,21 @@ def run_upload_to_hibid(auction_id, ending_date, auction_title, gui_callback, sh
 
             if should_stop.is_set():
                 logger.info("Process stopped by user before submitting auction.")
+                hibid_upload.status = 'stopped'
+                hibid_upload.save()
                 return
 
             submit_auction(page, gui_callback)
             logger.info("Auction submitted successfully.")
 
+            hibid_upload.status = 'completed'
+            hibid_upload.save()
+
     except Exception as e:
         logger.error(f"Unexpected error: {e}")
         logger.exception("Traceback:")
+        hibid_upload.status = 'failed'
+        hibid_upload.save()
     finally:
         if 'browser' in locals():
             logger.info("Closing the browser...")

@@ -3,6 +3,7 @@ import threading
 import time
 import re
 import ftplib
+import tempfile
 import json
 import shutil
 import random
@@ -11,13 +12,23 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 import pandas as pd
+from auction.models import Event, ImageMetadata, AuctionFormattedData
 from PIL import Image, ExifTags
 from playwright.sync_api import sync_playwright, expect
 from auction.utils import config_manager
 
+from django.core.wsgi import get_wsgi_application
+import os
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "auction_webapp.settings")
+application = get_wsgi_application()
+
+from django.core.files.storage import default_storage
+from django.core.files.base import ContentFile
+
 def auction_formatter_main(auction_id, selected_warehouse, gui_callback, should_stop, callback):
     config_manager.set_active_warehouse(selected_warehouse)
-    formatter = AuctionFormatter(auction_id, gui_callback, should_stop, callback, selected_warehouse)
+    event = get_event(auction_id)
+    formatter = AuctionFormatter(event, gui_callback, should_stop, callback, selected_warehouse)
     formatter.run_auction_formatter()
     return formatter
 
@@ -68,13 +79,9 @@ def download_image(url: str, file_name: str, gui_callback) -> str:
             gui_callback(f"Image for {file_name} is too small, might be corrupted")
             return None
 
-        download_path = get_resources_dir('product_images')
-        complete_file_name = os.path.join(download_path, f"{file_name}.{file_extension}")
-
-        with open(complete_file_name, 'wb') as f:
-            f.write(response.content)
-
-        return complete_file_name
+        with tempfile.NamedTemporaryFile(delete=False, suffix=f".{file_extension}") as temp_file:
+            temp_file.write(response.content)
+            return temp_file.name
 
     except requests.RequestException as e:
         gui_callback(f"Error with {file_name} while trying to download {url}: {e}")
@@ -333,8 +340,9 @@ def get_image_url(airtable_record: Dict, count: int) -> str:
     return airtable_record.get("fields", {}).get(f"Image {count}", [{}])[0].get("url", "")
 
 class AuctionFormatter:
-    def __init__(self, auction_id, gui_callback, should_stop, callback, selected_warehouse):
-        self.Auction_ID = auction_id
+    def __init__(self, event, gui_callback, should_stop, callback, selected_warehouse):
+        self.event = event
+        self.Auction_ID = event.event_id
         self.gui_callback = gui_callback
         self.should_stop = should_stop
         self.callback = callback
@@ -390,7 +398,7 @@ class AuctionFormatter:
             self.gui_callback(f"Login failed: Unexpected error. Error: {str(e)}")
             return False
 
-    def upload_csv_to_website(self, page, csv_path):
+    def upload_csv_to_website(self, page, csv_content):
         try:
             self.gui_callback("Navigating to upload page...")
             page.goto("https://bid.702auctions.com/Admin/ImportCSV")
@@ -399,7 +407,11 @@ class AuctionFormatter:
             page.wait_for_selector("#CsvImportForm", state="visible", timeout=20000)
             
             self.gui_callback("Uploading CSV file...")
-            page.set_input_files("#file", csv_path)
+            with tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.csv') as temp_file:
+                temp_file.write(csv_content)
+                temp_file_path = temp_file.name
+
+            page.set_input_files("#file", temp_file_path)
             
             self.gui_callback("Unchecking 'Validate Data ONLY' checkbox...")
             page.evaluate("""
@@ -440,6 +452,10 @@ class AuctionFormatter:
             self.gui_callback(f"Failed to upload CSV: {str(e)}")
             return False
         
+        finally:
+            # Clean up the temporary file
+            os.unlink(temp_file_path)
+
     def run_auction_formatter(self):
         try:
             self.gui_callback("Starting auction formatting process...")
@@ -470,11 +486,11 @@ class AuctionFormatter:
             )
 
             if processed_records:
-                self.gui_callback("Creating CSV file...")
-                csv_path = processed_records_to_df(processed_records, self.Auction_ID, self.gui_callback)
-                self.final_csv_path = self.format_final_csv(csv_path)
+                self.gui_callback("Creating CSV content...")
+                csv_content = processed_records_to_df(processed_records, self.Auction_ID, self.gui_callback)
+                self.final_csv_content = self.format_final_csv(csv_content)
 
-            if self.final_csv_path:
+            if self.final_csv_content:
                 self.gui_callback("Initializing browser...")
                 with sync_playwright() as p:
                     browser = p.chromium.launch(headless=True)
@@ -488,16 +504,11 @@ class AuctionFormatter:
                     
                     if login_success:
                         self.gui_callback("Uploading CSV to 702 Auctions...")
-                        csv_filename = f"{self.Auction_ID}.csv"
-                        csv_path = os.path.join(get_resources_dir('processed_csv'), csv_filename)
-                        if os.path.exists(csv_path):
-                            upload_success = self.upload_csv_to_website(page, csv_path)
-                            if upload_success:
-                                self.gui_callback("CSV uploaded successfully to 702 Auctions.")
-                            else:
-                                self.gui_callback("CSV upload to 702 Auctions failed.")
+                        upload_success = self.upload_csv_to_website(page, self.final_csv_content)
+                        if upload_success:
+                            self.gui_callback("CSV uploaded successfully to 702 Auctions.")
                         else:
-                            self.gui_callback(f"CSV file not found at {csv_path}")
+                            self.gui_callback("CSV upload to 702 Auctions failed.")
                     else:
                         self.gui_callback("Login to 702 Auctions failed.")
                     
@@ -505,11 +516,12 @@ class AuctionFormatter:
                     browser.close()
 
             if failed_records:
-                self.gui_callback("Saving failed records...")
-                self.failed_records_csv_filepath = failed_records_csv(failed_records, self.Auction_ID, self.gui_callback)
+                self.gui_callback("Processing failed records...")
+                self.failed_records_csv_content = failed_records_csv(failed_records, self.Auction_ID, self.gui_callback)
+                # Store failed records in the database or handle as needed
 
             self.gui_callback("Organizing images...")
-            organize_images(self.Auction_ID)
+            organize_images(self.event)
         except Exception as e:
             self.gui_callback(f"Error: {str(e)}")
         finally:
@@ -533,14 +545,16 @@ class AuctionFormatter:
 
             final_data = pd.concat([processed_top_50, processed_remaining]).reset_index(drop=True)
 
-            resources_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'resources', 'processed_csv')
-            os.makedirs(resources_dir, exist_ok=True)
+            csv_content = final_data.to_csv(index=False)
+            
+            # Store in database using AuctionFormattedData model
+            AuctionFormattedData.objects.create(
+                event=self.event,
+                csv_data=csv_content
+            )
 
-            output_file_path = os.path.join(resources_dir, f'{self.Auction_ID}.csv')
-            final_data.to_csv(output_file_path, index=False)
-
-            self.gui_callback(f"Formatted data saved to {output_file_path}")
-            return output_file_path
+            self.gui_callback(f"Formatted data saved to database for event {self.Auction_ID}")
+            return csv_content
         except Exception as e:
             self.gui_callback(f"Error formatting final CSV: {e}")
             return None
@@ -749,10 +763,9 @@ def process_records_concurrently(airtable_records: List[Dict], uploaded_image_ur
 
 def failed_records_csv(failed_records: List[Dict], Auction_ID: str, gui_callback) -> str:
     failed_dataframe = pd.DataFrame(failed_records, columns=['Lot Number', 'Failure Message'])
-    download_path = os.path.join(get_resources_dir('failed_csv'), f'{Auction_ID}-FAILED.csv')
-    failed_dataframe.to_csv(download_path, index=False)
-    gui_callback(f'Failed records have been saved to {download_path}.')
-    return download_path
+    csv_content = failed_dataframe.to_csv(index=False)
+    gui_callback(f'Processed {len(failed_records)} failed records.')
+    return csv_content
 
 def processed_records_to_df(processed_records: List[Dict], Auction_ID: str, gui_callback) -> str:
     df = pd.DataFrame(processed_records)
@@ -764,34 +777,20 @@ def processed_records_to_df(processed_records: List[Dict], Auction_ID: str, gui_
                     "Item Condition", "ID", "Amazon ID", "HiBid", "AuctionCount", "number"]
     df = df.reindex(columns=column_order, fill_value='')
     
-    resources_dir = get_resources_dir('processed_csv')
-    os.makedirs(resources_dir, exist_ok=True)
-    
-    download_path = os.path.join(resources_dir, f'unformatted_{Auction_ID}.csv')
-    df.to_csv(download_path, index=False)
-    gui_callback(f'Successful records have been saved to {download_path}.')
+    csv_content = df.to_csv(index=False)
+    gui_callback(f'Processed {len(processed_records)} records successfully.')
 
-    return download_path
+    return csv_content
 
-def get_resources_dir(folder: str) -> str:
-    base_path = os.environ.get('AUCTION_RESOURCES_PATH', os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'resources'))
-    return os.path.join(base_path, folder)
+def get_event(event_id: str) -> Event:
+    try:
+        return Event.objects.get(event_id=event_id)
+    except Event.DoesNotExist:
+        raise ValueError(f"Event with ID {event_id} does not exist")
 
-def organize_images(Auction_ID: str) -> None:
-    file_count = 0
-    directory = get_resources_dir('product_images')
-    subfolder = os.path.join(get_resources_dir('hibid_images'), f'hibid_{Auction_ID}')
-
-    # Create the subfolder if it doesn't exist
-    os.makedirs(subfolder, exist_ok=True)
-
-    if os.path.isdir(subfolder):
-        shutil.rmtree(subfolder)
-    os.mkdir(subfolder)
-
-    for file in os.listdir(directory):
-        if file.endswith(("_1.jpeg", "_1.png", '_1.jpg')):
-            shutil.move(os.path.join(directory, file), subfolder)
-            file_count += 1
-        elif file.endswith(('.jpg', "png", ".jpeg", ".webp")):
-            os.remove(os.path.join(directory, file))
+def organize_images(event: Event) -> None:
+    image_files = ImageMetadata.objects.filter(event=event)
+    for image in image_files:
+        if image.filename.endswith(("_1.jpeg", "_1.png", '_1.jpg')):
+            image.is_primary = True
+            image.save()

@@ -218,3 +218,11 @@ if not DEBUG:
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = True
     SECURE_REFERRER_POLICY = 'same-origin'
+
+# Add these lines after your STATIC_URL and STATICFILES_DIRS settings
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
+
+# Add these lines for HiBid-related settings
+DEFAULT_HIBID_IMAGE_PATH = BASE_DIR / 'auction' / 'resources' / 'hibid_stock' / 'default_image.jpg'
+LOGO_702_PATH = BASE_DIR / 'auction' / 'resources' / 'bid_stock_photo' / '702_logo.png'

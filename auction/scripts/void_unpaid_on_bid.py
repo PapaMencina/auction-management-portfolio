@@ -6,30 +6,31 @@ import csv
 import requests
 import json
 import traceback
+from io import StringIO
 from playwright.sync_api import sync_playwright, expect
 from datetime import datetime
 from urllib.parse import urljoin
+from django.core.wsgi import get_wsgi_application
+from django.db import transaction
+
+# Set up Django environment
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "auction_webapp.settings")
+application = get_wsgi_application()
+
+from auction.models import Event, VoidedTransaction
 from auction.utils import config_manager
 
 config_path = os.path.join(os.path.dirname(__file__), '..', 'utils', 'config.json')
 
-def get_resources_dir(folder):
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.dirname(os.path.dirname(script_dir))
-    resources_dir = os.path.join(project_root, 'auction', 'resources', folder)
-    os.makedirs(resources_dir, exist_ok=True)
-    return resources_dir
-
-DOWNLOAD_DIR = get_resources_dir('voided_csv')
 AIRTABLE_URL = lambda base_id, table_id: f'https://api.airtable.com/v0/{base_id}/{table_id}'
 
-def void_unpaid_main(auction_id, upload_choice, warehouse):
+def void_unpaid_main(event_id, upload_choice, warehouse):
     config_manager.load_config(config_path)
     config_manager.set_active_warehouse(warehouse)
     
     should_stop = threading.Event()
 
-    start_playwright_process(auction_id, upload_choice, should_stop)
+    start_playwright_process(event_id, upload_choice, should_stop)
 
 def login(page, username, password):
     try:
@@ -77,23 +78,24 @@ def export_csv(page, event_id, should_stop):
         return None
 
     print("Exporting CSV...")
-    filename = f"SalesTransactions_Event_{event_id}.csv"
-    file_path = os.path.join(DOWNLOAD_DIR, filename)
-
-    if os.path.exists(file_path):
-        print(f"File {filename} already exists. Skipping download.")
-        return file_path
-
+    
     try:
         with page.expect_download() as download_info:
             page.click("#ExportCSV")
         download = download_info.value
-        download.save_as(file_path)
+        csv_content = download.save_as(StringIO()).getvalue()
 
         if should_stop.is_set():
             print("CSV export operation stopped during download.")
             return None
-        return file_path
+
+        # Save CSV content to database
+        with transaction.atomic():
+            event, created = Event.objects.get_or_create(event_id=event_id)
+            VoidedTransaction.objects.create(event=event, csv_data=csv_content)
+        
+        print(f"CSV data for event {event_id} saved to database.")
+        return csv_content
     except Exception as e:
         print(f"Error exporting CSV: {str(e)}")
         return None
@@ -118,24 +120,24 @@ def upload_to_airtable(records_batches, headers, csv_filepath, should_stop):
     if all_batches_successful:
         print("Successfully Uploaded to Airtable")
 
-def process_csv_for_airtable(csv_filepath):
-    with open(csv_filepath, newline='', encoding='utf-8') as csvfile:
-        reader = csv.DictReader(csvfile)
-        records = [{"fields": record} for record in reader] 
+def process_csv_for_airtable(csv_content):
+    csv_file = StringIO(csv_content)
+    reader = csv.DictReader(csv_file)
+    records = [{"fields": record} for record in reader]
     return (records[i:i+10] for i in range(0, len(records), 10))
 
-def send_to_airtable(upload_choice, csv_filepath, should_stop):
+def send_to_airtable(upload_choice, csv_content, should_stop):
     if should_stop.is_set():
         print("Upload to Airtable stopped by user.")
         return
     if upload_choice == 1:
         print("Uploading data to Airtable...")
-        records_batches = process_csv_for_airtable(csv_filepath)
+        records_batches = process_csv_for_airtable(csv_content)
         headers = {
             'Authorization': f'Bearer {config_manager.get_warehouse_var("airtable_api_key")}',
             'Content-Type': 'application/json'
         }
-        upload_to_airtable(records_batches, headers, csv_filepath, should_stop)
+        upload_to_airtable(records_batches, headers, csv_content, should_stop)
     else:
         print("Upload to Airtable skipped.")
 
@@ -214,7 +216,7 @@ def verify_base_url(page, base_url):
         return False
 
 def start_playwright_process(event_id, upload_choice, should_stop):
-    csv_filepath = None
+    csv_content = None
     login_url = config_manager.get_global_var('website_login_url')
     bid_home_page = config_manager.get_global_var('bid_home_page')
     report_url = f"{bid_home_page}/Account/EventSalesTransactionReport?EventID={event_id}&page=0&sort=DateTime&descending=True&dateStart=&dateEnd=&lotNumber=&description=&priceLow=&priceHigh=&quantity=&totalPriceLow=&totalPriceHigh=&invoiceID=&payer=&firstName=&lastName=&isPaid=2"
@@ -281,32 +283,32 @@ def start_playwright_process(event_id, upload_choice, should_stop):
             void_unpaid_transactions(page, report_url, should_stop)
 
             print("Exporting CSV...")
-            csv_filepath = export_csv(page, event_id, should_stop)
+            csv_content = export_csv(page, event_id, should_stop)
 
-            if csv_filepath:
+            if csv_content:
                 print("CSV exported successfully. Uploading to Airtable...")
-                send_to_airtable(upload_choice, csv_filepath, should_stop)
+                send_to_airtable(upload_choice, csv_content, should_stop)
             else:
-                print("CSV filepath not set due to an error. Skipping Upload to Airtable.")
+                print("CSV content not set due to an error. Skipping Upload to Airtable.")
 
         except Exception as e:
             print(f"An error occurred: {str(e)}")
             should_stop.set()
         finally:
             browser.close()
-            if csv_filepath:
-                print(f"Process completed. CSV Filepath: {csv_filepath}")
+            if csv_content:
+                print(f"Process completed. CSV data saved to database for event {event_id}.")
             else:
-                print("Process completed, but CSV filepath was not set.")
+                print("Process completed, but CSV data was not saved.")
 
 if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser(description="Void unpaid transactions")
-    parser.add_argument("auction_id", help="Auction ID")
+    parser.add_argument("event_id", help="Event ID")
     parser.add_argument("upload_choice", type=int, choices=[0, 1], help="Upload choice (0: No upload, 1: Upload to Airtable)")
     parser.add_argument("warehouse", help="Warehouse name")
     
     args = parser.parse_args()
 
-    void_unpaid_main(args.auction_id, args.upload_choice, args.warehouse)
+    void_unpaid_main(args.event_id, args.upload_choice, args.warehouse)
