@@ -1,5 +1,6 @@
 from django.db import models
 from django.contrib.auth.models import AbstractUser
+from django.conf import settings
 
 class CustomUser(AbstractUser):
     is_standard_user = models.BooleanField(default=False)
@@ -48,7 +49,7 @@ class ImageMetadata(models.Model):
     filename = models.CharField(max_length=255)
     is_primary = models.BooleanField(default=False)
     uploaded_at = models.DateTimeField(auto_now_add=True)
-    image = models.ImageField(upload_to='auction_images/')
+    image = models.ImageField(upload_to='auction_images/', null=True, blank=True)  # Allow null temporarily
 
     def __str__(self):
         return f"{self.filename} for event {self.event.event_id}"
