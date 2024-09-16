@@ -11,6 +11,7 @@ import threading
 import json
 import traceback
 import os
+import asyncio
 from threading import Thread, Event
 from datetime import datetime, timezone
 from auction.utils import config_manager
@@ -132,12 +133,15 @@ def create_auction_view(request):
 
             config_manager.set_active_warehouse(selected_warehouse)
 
-            thread = Thread(target=create_auction_main, args=(
-                auction_title,
-                ending_date,
-                show_browser,
-                selected_warehouse
-            ))
+            def run_async_task():
+                asyncio.run(create_auction_main(
+                    auction_title,
+                    ending_date,
+                    show_browser,
+                    selected_warehouse
+                ))
+
+            thread = Thread(target=run_async_task)
             thread.start()
 
             logger.info(f"Auction creation thread started for {auction_title}")
