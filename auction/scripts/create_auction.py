@@ -166,50 +166,34 @@ async def get_image(page, ending_date_input, relaythat_url, selected_warehouse):
 
         logger.info('Login successful. Waiting for page to load...')
         await page.wait_for_load_state('networkidle', timeout=60000)
-        logger.info('Page loaded. Generating auction image...')
+        logger.info('Page loaded. Preparing to download image...')
         
-        image_text = "OFFSITE" if selected_warehouse == "Sunrise Warehouse" else f"Ending {ending_date_input}"
-        logger.info(f"Image text: {image_text}")
-
-        # Wait for the text input to be visible and fill it
-        text_input = await page.wait_for_selector("#asset-inputs-text textarea", state="visible", timeout=60000)
-        if text_input:
-            await text_input.fill(image_text)
-            logger.info("Filled text input")
+        # Click the first Download button
+        first_download_button = await page.wait_for_selector("button.ui.teal.tiny.button:has-text('Download')", state="visible", timeout=60000)
+        if first_download_button:
+            logger.info("First Download button found. Clicking...")
+            await first_download_button.click()
         else:
-            logger.error("Text input not found")
-            await page.screenshot(path='text_input_not_found.png')
+            logger.error("First Download button not found")
+            await page.screenshot(path='first_download_button_not_found.png')
             return None
 
-        # Wait for the Generate button to be visible and clickable
-        generate_button = await page.wait_for_selector("button:has-text('Generate')", state="visible", timeout=60000)
-        if generate_button:
-            logger.info("Generate button found. Attempting to click...")
-            await generate_button.click(timeout=60000)
-            logger.info("Clicked generate button")
-        else:
-            logger.error("Generate button not found")
-            await page.screenshot(path='generate_button_not_found.png')
-            return None
+        # Wait for the download popup to appear
+        await page.wait_for_timeout(2000)  # Wait for 2 seconds for the popup to fully appear
 
-        await wait_for_loading_to_complete(page)
-        logger.info("Loading completed")
-
-        # Use the specific class for the download button
-        download_button = await page.wait_for_selector("button.ui.teal.tiny.button:has-text('Download')", state="visible", timeout=60000)
-        if download_button:
-            logger.info("Download button found. Waiting for 2 seconds...")
-            await page.wait_for_timeout(2000)
+        # Click the second Download button in the popup
+        second_download_button = await page.wait_for_selector("button.ui.fluid.primary.button:has-text('Download')", state="visible", timeout=60000)
+        if second_download_button:
+            logger.info("Second Download button found. Attempting to download...")
             
-            logger.info("Attempting to click download button...")
             # Set up the download expectation before clicking the button
             async with page.expect_download(timeout=60000) as download_info:
                 try:
-                    await download_button.click(timeout=60000)
+                    await second_download_button.click()
                 except Exception as e:
-                    logger.warning(f"Failed to click download button normally: {e}")
+                    logger.warning(f"Failed to click second download button normally: {e}")
                     logger.info("Attempting to click using JavaScript...")
-                    await page.evaluate("document.querySelector('button.ui.teal.tiny.button').click()")
+                    await page.evaluate("document.querySelector('button.ui.fluid.primary.button').click()")
             
             download = await download_info.value
             downloaded_file = await download.path()
@@ -221,9 +205,15 @@ async def get_image(page, ending_date_input, relaythat_url, selected_warehouse):
                 logger.error("No file was downloaded.")
                 return None
         else:
-            logger.error("Download button not found")
-            await page.screenshot(path='download_button_not_found.png')
+            logger.error("Second Download button not found")
+            await page.screenshot(path='second_download_button_not_found.png')
             return None
+
+    except Exception as e:
+        logger.error(f"An error occurred in get_image: {e}")
+        logger.error(traceback.format_exc())
+        await page.screenshot(path='get_image_error.png')
+        return None
 
     except Exception as e:
         logger.error(f"An error occurred in get_image: {e}")
