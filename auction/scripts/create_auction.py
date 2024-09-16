@@ -129,7 +129,7 @@ async def login(page, username, password, url):
         await page.wait_for_load_state('networkidle', timeout=60000)
         
         # Check if login was successful
-        if "login" in page.url.lower() or "sign_in" in page.url.lower():
+        if "logon" in page.url.lower() or "login" in page.url.lower():
             logger.error("Login failed. Still on login page.")
             await page.screenshot(path='login_error_still_on_login_page.png')
             return False
@@ -225,24 +225,24 @@ async def create_auction(page, auction_title, image_path, formatted_start_date, 
     try:
         logger.info('Navigating to auction creation page...')
         bid_create_event = config_manager.get_global_var('bid_create_event')
-        await page.goto(bid_create_event)
-    except Exception as e:
-        logger.error(f"Error navigating to auction creation page: {e}")
-        return
-
-    try:
+        website_login_url = config_manager.get_global_var('website_login_url')
+        
+        # Navigate to the login page first
+        await page.goto(website_login_url)
+        
         logger.info('Logging in to auction site...')
         bid_username = config_manager.get_warehouse_var('bid_username')
         bid_password = config_manager.get_warehouse_var('bid_password')
-        login_success = await login(page, bid_username, bid_password, bid_create_event)
+        login_success = await login(page, bid_username, bid_password, website_login_url)
         if not login_success:
             logger.error("Failed to log in to auction site. Aborting process.")
+            await page.screenshot(path='auction_site_login_failed.png')
             return None
-    except Exception as e:
-        logger.error(f"Error logging in: {e}")
-        return
+        
+        # Navigate to the auction creation page after login
+        await page.goto(bid_create_event)
+        await page.wait_for_load_state('networkidle', timeout=60000)
 
-    try:
         logger.info('Filling auction details...')
         await page.fill("#Title", auction_title)
 
@@ -417,3 +417,4 @@ async def create_auction_main(auction_title, ending_date, show_browser, selected
 if __name__ == "__main__":
     import asyncio
     asyncio.run(create_auction_main("Sample Auction", datetime.now(), True, "Maule Warehouse"))
+    
