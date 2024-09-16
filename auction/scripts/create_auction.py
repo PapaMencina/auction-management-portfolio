@@ -60,13 +60,16 @@ def wait_for_download(page, timeout=300000):
 @sync_to_async
 def save_event_to_database(event_data):
     try:
-        logger.info(f"Attempting to save event with data: {event_data}")  # Add this line
+        logger.info(f"Attempting to save event with data: {event_data}")
+        start_date = datetime.strptime(event_data['start_date'], '%m/%d/%Y').date()
+        ending_date = parse_date(event_data['ending_date'])
         Event.objects.create(
             event_id=event_data['event_id'],
             warehouse=event_data['warehouse'],
             title=event_data['title'],
-            start_date=parse_date(event_data['start_date']),
-            ending_date=parse_date(event_data['ending_date'])
+            start_date=start_date,
+            ending_date=ending_date,
+            timestamp=event_data['timestamp']
         )
         logger.info(f"Event {event_data['event_id']} saved to database")
     except Exception as e:
