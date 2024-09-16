@@ -100,27 +100,40 @@ async def login(page, username, password, url):
     """Logs in to the specified URL using provided credentials."""
     try:
         await page.goto(url)
-        await page.wait_for_load_state('networkidle')
+        await page.wait_for_load_state('networkidle', timeout=60000)
         
+        # Wait for and fill email field
         await page.wait_for_selector("#user_email", state="visible", timeout=60000)
         await page.fill("#user_email", username)
         
+        # Wait for and fill password field
         await page.wait_for_selector("#user_password", state="visible", timeout=60000)
         await page.fill("#user_password", password)
         
-        await page.click('button:has-text("Sign in")')
-        await page.wait_for_load_state('networkidle')
+        # Wait for and click the sign-in button
+        sign_in_button = await page.wait_for_selector('input[type="submit"][name="commit"][value="Sign in"].button-primary', state="visible", timeout=60000)
+        if sign_in_button:
+            await sign_in_button.click()
+        else:
+            logger.error("Sign in button not found")
+            await page.screenshot(path='login_error_button_not_found.png')
+            return False
+
+        # Wait for navigation after clicking sign in
+        await page.wait_for_load_state('networkidle', timeout=60000)
         
         # Check if login was successful
-        if "login" in page.url.lower():
+        if "login" in page.url.lower() or "sign_in" in page.url.lower():
             logger.error("Login failed. Still on login page.")
-            await page.screenshot(path='login_error.png')
+            await page.screenshot(path='login_error_still_on_login_page.png')
             return False
+        
+        logger.info("Login successful")
         return True
     except Exception as e:
         logger.error(f"Login failed: {e}")
         logger.error(f"Current URL: {page.url}")
-        await page.screenshot(path='login_error.png')
+        await page.screenshot(path='login_error_exception.png')
         return False
 
 def set_content_in_ckeditor(page, iframe_title, formatted_text):
@@ -138,24 +151,28 @@ async def get_image(page, ending_date_input, relaythat_url, selected_warehouse):
         logger.info('Logging in to RelayThat...')
         relaythat_email = config_manager.get_global_var('relaythat_email')
         relaythat_password = config_manager.get_global_var('relaythat_password')
+        logger.info(f"Attempting to log in with email: {relaythat_email}")
         login_success = await login(page, relaythat_email, relaythat_password, relaythat_url)
         
         if not login_success:
             logger.error("Failed to log in to RelayThat. Aborting process.")
             return None
 
-        logger.info('Generating auction image...')
+        logger.info('Login successful. Generating auction image...')
         image_text = "OFFSITE" if selected_warehouse == "Sunrise Warehouse" else f"Ending {ending_date_input}"
+        logger.info(f"Image text: {image_text}")
 
         text_input = page.locator("#asset-inputs-text textarea").first
         await text_input.fill(image_text)
+        logger.info("Filled text input")
 
         generate_button = page.locator("button:has-text('Generate')")
         await generate_button.click()
+        logger.info("Clicked generate button")
         await wait_for_loading_to_complete(page)
+        logger.info("Loading completed")
 
         download_button = page.locator("button:has-text('Download')")
-        
         logger.info("Waiting for image download...")
         
         downloaded_file = await wait_for_download(page)
@@ -168,8 +185,9 @@ async def get_image(page, ending_date_input, relaythat_url, selected_warehouse):
             return None
 
     except Exception as e:
-        logger.error(f"An error occurred: {e}")
+        logger.error(f"An error occurred in get_image: {e}")
         logger.error(traceback.format_exc())
+        await page.screenshot(path='get_image_error.png')
         return None
 
 async def create_auction(page, auction_title, image_path, formatted_start_date, bid_formatted_ending_date, selected_warehouse):
