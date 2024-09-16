@@ -20,7 +20,7 @@ from auction.scripts.void_unpaid_on_bid import void_unpaid_main
 from auction.scripts.remove_duplicates_in_airtable import remove_duplicates_main
 from auction.scripts.auction_formatter import auction_formatter_main
 from auction.scripts.upload_to_hibid import upload_to_hibid_main
-
+from auction.models import Event
 
 logger = logging.getLogger(__name__)
 
@@ -47,42 +47,18 @@ def home(request):
     return render(request, 'auction/home.html', context)
 
 @login_required
-def load_events(request):
-    try:
-        # Use Django's settings to get the base directory of your project
-        base_dir = settings.BASE_DIR
-
-        # Construct the path to events.json relative to your project root
-        file_path = os.path.join(base_dir, 'auction', 'resources', 'events.json')
-
-        logger.info(f"Attempting to read events.json from: {file_path}")
-
-        if os.path.exists(file_path):
-            logger.info(f"events.json file found at {file_path}")
-            with open(file_path, "r") as file:
-                events = json.load(file)
-            logger.info(f"Loaded {len(events)} events")
-            return events
-        else:
-            logger.warning(f"Events file not found at {file_path}")
-            return []
-    except Exception as e:
-        logger.error(f"Error loading events: {str(e)}")
-        logger.exception("Full traceback:")
-        return []
-
-@login_required
 def get_auction_numbers(request):
     try:
-        events = load_events(request)
-        logger.debug(f"Loaded events: {events}")
+        events = Event.objects.all()
+        logger.debug(f"Loaded {events.count()} events from database")
+        
         auction_numbers = [
             {
-                'id': event.get('event_id') or event.get('id'),  # Use 'id' if 'event_id' is not present
-                'title': event['title'],
-                'timestamp': event['timestamp'],
-                'ending_date': event.get('ending_date'),
-                'warehouse': event['warehouse']
+                'id': event.event_id,
+                'title': event.title,
+                'timestamp': event.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+                'ending_date': event.ending_date.strftime("%Y-%m-%d %H:%M:%S"),
+                'warehouse': event.warehouse
             }
             for event in events
         ]
@@ -92,13 +68,6 @@ def get_auction_numbers(request):
         logger.error(f"Error in get_auction_numbers: {str(e)}")
         logger.exception("Full traceback:")
         return []
-
-# Load initial config
-script_dir = os.path.dirname(os.path.abspath(__file__))
-config_path = os.path.join(script_dir, 'utils', 'config.json')
-
-config_manager.load_config(config_path)
-warehouse_data = config_manager.config.get('warehouses', {})
 
 @login_required
 def get_warehouse_events(request):
@@ -166,7 +135,7 @@ def create_auction_view(request):
 def void_unpaid_view(request):
     warehouses = list(warehouse_data.keys())
     default_warehouse = warehouses[0] if warehouses else None
-    events = load_events(request)
+    auctions = get_auction_numbers(request)
     can_use_show_browser = request.user.has_perm('auction.can_use_show_browser')
 
     if request.method == 'GET':
@@ -185,7 +154,7 @@ def void_unpaid_view(request):
             upload_choice = int(data.get('upload_choice'))
             show_browser = data.get('show_browser') and can_use_show_browser
 
-            valid_auction = any(event for event in events if event['event_id'] == auction_id and event['warehouse'] == warehouse)
+            valid_auction = any(auction for auction in auctions if auction['id'] == auction_id and auction['warehouse'] == warehouse)
 
             if not valid_auction:
                 return JsonResponse({'error': 'Invalid Auction ID - Please confirm the auction ID and Warehouse, then try again.'}, status=400)
@@ -224,12 +193,7 @@ def remove_duplicates_view(request):
         return JsonResponse({'message': 'Remove duplicates process started'})
 
     context = {
-        'auctions_json': json.dumps([{
-            'id': event.get('event_id') or event.get('id'),  # Use 'id' if 'event_id' is not present
-            'warehouse': event['warehouse'],
-            'title': event['title'],
-            'timestamp': event['timestamp']
-        } for event in auctions], cls=DjangoJSONEncoder),
+        'auctions_json': json.dumps(auctions, cls=DjangoJSONEncoder),
         'warehouses': warehouses,
     }
     return render(request, 'auction/remove_duplicates.html', context)
@@ -309,15 +273,15 @@ def upload_to_hibid_view(request):
         if not selected_auction:
             return JsonResponse({'status': 'error', 'message': "Invalid auction selected."})
 
-        ending_date_str = selected_auction.get('ending_date') or selected_auction.get('timestamp')
+        ending_date_str = selected_auction.get('ending_date')
 
         if not ending_date_str:
             return JsonResponse({'status': 'error', 'message': "No valid ending date found for the selected auction."})
 
         try:
-            ending_date = datetime.fromisoformat(ending_date_str.rstrip('Z')).replace(tzinfo=timezone.utc)
+            ending_date = datetime.strptime(ending_date_str, '%Y-%m-%d %H:%M:%S')
             ending_date_str = ending_date.strftime('%Y-%m-%d %H:%M:%S')
-        except (ValueError, AttributeError) as e:
+        except ValueError as e:
             return JsonResponse({'status': 'error', 'message': "Invalid date format in auction data."})
 
         auction_title = selected_auction['title']
