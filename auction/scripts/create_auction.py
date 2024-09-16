@@ -57,6 +57,7 @@ def wait_for_download(page, timeout=300000):
     path = download.path()
     return path
 
+@sync_to_async
 def save_event_to_database(event_data):
     try:
         Event.objects.create(
@@ -376,7 +377,7 @@ async def create_auction(page, auction_title, image_path, formatted_start_date, 
         return None
 
 class SharedEvents:
-    def add_event(self, title, event_id, ending_date, timestamp):
+    async def add_event(self, title, event_id, ending_date, timestamp):
         print(f"Event added: {title}, ID: {event_id}, Ending Date: {ending_date}, Timestamp: {timestamp}")
         event_data = {
             "title": title,
@@ -384,7 +385,7 @@ class SharedEvents:
             "ending_date": str(ending_date),
             "timestamp": timestamp
         }
-        save_event_to_database(event_data)
+        await save_event_to_database(event_data)
 
 async def create_auction_main(auction_title, ending_date, show_browser, selected_warehouse):
     logger.info(f"Starting create_auction_main for auction: {auction_title}, warehouse: {selected_warehouse}")
@@ -434,7 +435,7 @@ async def create_auction_main(auction_title, ending_date, show_browser, selected
                 "ending_date": str(ending_date),
                 "timestamp": timestamp
             }
-            save_event_to_database(event_data)
+            await save_event_to_database(event_data)
             logger.info(f"Event {event_id} created at {timestamp}")
 
     except ValueError as e:
