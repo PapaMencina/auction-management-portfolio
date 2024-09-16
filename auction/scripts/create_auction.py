@@ -138,7 +138,11 @@ async def get_image(page, ending_date_input, relaythat_url, selected_warehouse):
         logger.info('Logging in to RelayThat...')
         relaythat_email = config_manager.get_global_var('relaythat_email')
         relaythat_password = config_manager.get_global_var('relaythat_password')
-        await login(page, "#user_email", "#user_password", relaythat_email, relaythat_password, relaythat_url)
+        login_success = await login(page, relaythat_email, relaythat_password, relaythat_url)
+        
+        if not login_success:
+            logger.error("Failed to log in to RelayThat. Aborting process.")
+            return None
 
         logger.info('Generating auction image...')
         image_text = "OFFSITE" if selected_warehouse == "Sunrise Warehouse" else f"Ending {ending_date_input}"
@@ -181,7 +185,10 @@ async def create_auction(page, auction_title, image_path, formatted_start_date, 
         logger.info('Logging in to auction site...')
         bid_username = config_manager.get_warehouse_var('bid_username')
         bid_password = config_manager.get_warehouse_var('bid_password')
-        await login(page, "#username", "#password", bid_username, bid_password, bid_create_event)
+        login_success = await login(page, bid_username, bid_password, bid_create_event)
+        if not login_success:
+            logger.error("Failed to log in to auction site. Aborting process.")
+            return None
     except Exception as e:
         logger.error(f"Error logging in: {e}")
         return
