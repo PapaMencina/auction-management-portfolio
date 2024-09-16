@@ -5,6 +5,7 @@ import time
 import csv
 import requests
 import json
+import logging
 import traceback
 from io import StringIO
 from playwright.sync_api import sync_playwright, expect
@@ -12,6 +13,8 @@ from datetime import datetime
 from urllib.parse import urljoin
 from django.core.wsgi import get_wsgi_application
 from django.db import transaction
+
+logger = logging.getLogger(__name__)
 
 # Set up Django environment
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "auction_webapp.settings")
@@ -25,12 +28,15 @@ config_path = os.path.join(os.path.dirname(__file__), '..', 'utils', 'config.jso
 AIRTABLE_URL = lambda base_id, table_id: f'https://api.airtable.com/v0/{base_id}/{table_id}'
 
 def void_unpaid_main(event_id, upload_choice, warehouse):
+    logger.info(f"Starting void_unpaid_main for event_id: {event_id}, upload_choice: {upload_choice}, warehouse: {warehouse}")
     config_manager.load_config(config_path)
     config_manager.set_active_warehouse(warehouse)
     
     should_stop = threading.Event()
 
+    logger.info("Calling start_playwright_process")
     start_playwright_process(event_id, upload_choice, should_stop)
+    logger.info("Finished void_unpaid_main")
 
 def login(page, username, password):
     try:
@@ -216,90 +222,94 @@ def verify_base_url(page, base_url):
         return False
 
 def start_playwright_process(event_id, upload_choice, should_stop):
+    logger.info(f"Starting playwright process for event_id: {event_id}")
     csv_content = None
     login_url = config_manager.get_global_var('website_login_url')
     bid_home_page = config_manager.get_global_var('bid_home_page')
     report_url = f"{bid_home_page}/Account/EventSalesTransactionReport?EventID={event_id}&page=0&sort=DateTime&descending=True&dateStart=&dateEnd=&lotNumber=&description=&priceLow=&priceHigh=&quantity=&totalPriceLow=&totalPriceHigh=&invoiceID=&payer=&firstName=&lastName=&isPaid=2"
-    print("Report URL: " + report_url)
+    logger.info(f"Report URL: {report_url}")
     
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True, args=['--no-sandbox', '--disable-setuid-sandbox'])
-        context = browser.new_context()
-        page = context.new_page()
-        
-        try:
-            print("Initializing browser...")
+    try:
+        with sync_playwright() as p:
+            logger.info("Launching browser")
+            browser = p.chromium.launch(headless=True, args=['--no-sandbox', '--disable-setuid-sandbox'])
+            context = browser.new_context()
+            page = context.new_page()
+            
+            logger.info("Initializing browser...")
             page.goto(login_url)
 
             username = config_manager.get_warehouse_var("bid_username")
             password = config_manager.get_warehouse_var("bid_password")
 
             if username is None or password is None:
-                print("Failed to retrieve login credentials from config.")
+                logger.error("Failed to retrieve login credentials from config.")
                 return
 
-            print("Attempting login...")
+            logger.info("Attempting login...")
             login_success = login(page, username, password)
 
             if not login_success:
-                print("Login failed. Aborting process.")
+                logger.error("Login failed. Aborting process.")
                 return
 
-            print("Login successful. Current URL: " + page.url)
+            logger.info(f"Login successful. Current URL: {page.url}")
             
             page.wait_for_load_state("networkidle")
 
-            print("Navigating to report page...")
+            logger.info("Navigating to report page...")
             page.goto(report_url)
             
             try:
                 page.wait_for_selector("#ReportResults", state="visible", timeout=30000)
-                print(f"Report page loaded. Current URL: {page.url}")
+                logger.info(f"Report page loaded. Current URL: {page.url}")
             except:
-                print(f"Timeout waiting for report page. Current URL: {page.url}")
+                logger.error(f"Timeout waiting for report page. Current URL: {page.url}")
                 
                 if "Account/LogOn" in page.url:
-                    print("Redirected to login page. Session might have expired. Attempting to log in again...")
+                    logger.info("Redirected to login page. Session might have expired. Attempting to log in again...")
                     login_success = login(page, username, password)
                     if not login_success:
-                        print("Login failed. Aborting process.")
+                        logger.error("Login failed. Aborting process.")
                         return
                     
-                    print("Navigating to report page after re-login...")
+                    logger.info("Navigating to report page after re-login...")
                     page.goto(report_url)
                     
                     try:
                         page.wait_for_selector("#ReportResults", state="visible", timeout=30000)
-                        print(f"Report page loaded after re-login. Current URL: {page.url}")
+                        logger.info(f"Report page loaded after re-login. Current URL: {page.url}")
                     except:
-                        print(f"Failed to load report page after re-login. Current URL: {page.url}")
+                        logger.error(f"Failed to load report page after re-login. Current URL: {page.url}")
                         return
 
             if not check_login_status(page):
-                print("Not logged in on report page. Aborting process.")
+                logger.error("Not logged in on report page. Aborting process.")
                 return
 
-            print("Starting to void unpaid transactions...")
+            logger.info("Starting to void unpaid transactions...")
             void_unpaid_transactions(page, report_url, should_stop)
 
-            print("Exporting CSV...")
+            logger.info("Exporting CSV...")
             csv_content = export_csv(page, event_id, should_stop)
 
             if csv_content:
-                print("CSV exported successfully. Uploading to Airtable...")
+                logger.info("CSV exported successfully. Uploading to Airtable...")
                 send_to_airtable(upload_choice, csv_content, should_stop)
             else:
-                print("CSV content not set due to an error. Skipping Upload to Airtable.")
+                logger.error("CSV content not set due to an error. Skipping Upload to Airtable.")
 
-        except Exception as e:
-            print(f"An error occurred: {str(e)}")
-            should_stop.set()
-        finally:
+    except Exception as e:
+        logger.exception(f"An error occurred in start_playwright_process: {str(e)}")
+        should_stop.set()
+    finally:
+        logger.info("Closing browser")
+        if 'browser' in locals():
             browser.close()
-            if csv_content:
-                print(f"Process completed. CSV data saved to database for event {event_id}.")
-            else:
-                print("Process completed, but CSV data was not saved.")
+        if csv_content:
+            logger.info(f"Process completed. CSV data saved to database for event {event_id}.")
+        else:
+            logger.info("Process completed, but CSV data was not saved.")
 
 if __name__ == "__main__":
     import argparse
