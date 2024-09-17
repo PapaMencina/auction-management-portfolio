@@ -187,47 +187,73 @@ def element_value_is_not_empty(page, element_id):
     """Checks if the value of an element is not empty."""
     return page.evaluate(f"document.getElementById('{element_id}').value !== ''")
 
-async def get_image(page, ending_date_input, relaythat_url, selected_warehouse):
+async def get_image(page, ending_date, selected_warehouse):
     try:
-        logger.info('Logging in to RelayThat...')
         relaythat_email = config_manager.get_global_var('relaythat_email')
         relaythat_password = config_manager.get_global_var('relaythat_password')
-        logger.info(f"Attempting to log in with email: {relaythat_email}")
-        login_success = await login_relaythat(page, relaythat_email, relaythat_password, relaythat_url)
-        
-        if not login_success:
-            logger.error("Failed to log in to RelayThat. Aborting process.")
-            return None
+        relaythat_url = config_manager.get_warehouse_var('relaythat_url')
 
-        logger.info('Login successful. Waiting for page to load...')
+        logger.info(f'Logging in to RelayThat for {selected_warehouse}...')
+        logger.info(f"Attempting to log in with email: {relaythat_email}")
+        
+        await page.goto(relaythat_url)
         await page.wait_for_load_state('networkidle', timeout=60000)
-        logger.info('Page loaded. Preparing to download image...')
+        
+        # Login process
+        await page.fill("#user_email", relaythat_email)
+        await page.fill("#user_password", relaythat_password)
+        await page.click('input[type="submit"][name="commit"][value="Sign in"].button-primary')
+        await page.wait_for_load_state('networkidle', timeout=60000)
+        
+        if "login" in page.url.lower():
+            logger.error("RelayThat login failed. Still on login page.")
+            await page.screenshot(path='relaythat_login_error.png')
+            return None
+        
+        logger.info('RelayThat login successful. Waiting for page to load...')
+        await page.wait_for_load_state('networkidle', timeout=60000)
+
+        if selected_warehouse == "Maule Warehouse":
+            logger.info(f'Inserting ending date: {ending_date} into RelayThat design')
+            date_input_selector = 'textarea.text-input__textarea'
+            await page.wait_for_selector(date_input_selector, state="visible", timeout=10000)
+            
+            await page.evaluate(f'''(selector) => {{
+                const element = document.querySelector(selector);
+                element.value = '';
+                element.dispatchEvent(new Event('input', {{ bubbles: true }}));
+            }}''', date_input_selector)
+            await page.fill(date_input_selector, f"Ending {ending_date}")
+            
+            await page.evaluate(f'''(selector) => {{
+                const element = document.querySelector(selector);
+                element.dispatchEvent(new Event('input', {{ bubbles: true }}));
+            }}''', date_input_selector)
+            
+            await page.wait_for_timeout(3000)
+
+        logger.info('Preparing to download image...')
         
         # Click the first Download button
         first_download_button = await page.wait_for_selector("button.ui.teal.tiny.button:has-text('Download')", state="visible", timeout=60000)
         if first_download_button:
-            logger.info("First Download button found. Clicking...")
             await first_download_button.click()
         else:
-            logger.error("First Download button not found")
-            await page.screenshot(path='first_download_button_not_found.png')
+            logger.error("Download button not found")
+            await page.screenshot(path='download_button_not_found.png')
             return None
 
         # Wait for the download popup to appear
-        await page.wait_for_timeout(2000)  # Wait for 2 seconds for the popup to fully appear
+        await page.wait_for_timeout(2000)
 
         # Click the second Download button in the popup
         second_download_button = await page.wait_for_selector("button.ui.fluid.primary.button:has-text('Download')", state="visible", timeout=60000)
         if second_download_button:
-            logger.info("Second Download button found. Attempting to download...")
-            
-            # Set up the download expectation before clicking the button
             async with page.expect_download(timeout=60000) as download_info:
                 try:
                     await second_download_button.click()
                 except Exception as e:
-                    logger.warning(f"Failed to click second download button normally: {e}")
-                    logger.info("Attempting to click using JavaScript...")
+                    logger.warning(f"Failed to click download button normally: {e}")
                     await page.evaluate("document.querySelector('button.ui.fluid.primary.button').click()")
             
             download = await download_info.value
@@ -243,12 +269,6 @@ async def get_image(page, ending_date_input, relaythat_url, selected_warehouse):
             logger.error("Second Download button not found")
             await page.screenshot(path='second_download_button_not_found.png')
             return None
-
-    except Exception as e:
-        logger.error(f"An error occurred in get_image: {e}")
-        logger.error(traceback.format_exc())
-        await page.screenshot(path='get_image_error.png')
-        return None
 
     except Exception as e:
         logger.error(f"An error occurred in get_image: {e}")
@@ -400,10 +420,6 @@ async def create_auction_main(auction_title, ending_date, show_browser, selected
         config_manager.set_active_warehouse(selected_warehouse)
         logger.info("Warehouse configuration set")
 
-        relaythat_url = config_manager.get_warehouse_var('relaythat_url')
-        if not relaythat_url:
-            raise ValueError("Invalid warehouse selected or missing relaythat_url in config.")
-
         logger.info("Initializing auction creation process")
 
         month_formatted_date, bid_formatted_ending_date = format_date(ending_date)
@@ -419,7 +435,7 @@ async def create_auction_main(auction_title, ending_date, show_browser, selected
             formatted_start_date = datetime.now().strftime('%m/%d/%Y')
             logger.info(f"Getting auction image for date: {month_formatted_date}")
 
-            event_image = await get_image(page, month_formatted_date, relaythat_url, selected_warehouse)
+            event_image = await get_image(page, month_formatted_date, selected_warehouse)
             if not event_image:
                 raise Exception("Failed to download the event image")
 
@@ -436,9 +452,9 @@ async def create_auction_main(auction_title, ending_date, show_browser, selected
                 "title": auction_title,
                 "event_id": event_id,
                 "start_date": formatted_start_date,
-                "ending_date": ending_date.strftime('%Y-%m-%d'),  # Ensure this is in 'YYYY-MM-DD' format
+                "ending_date": ending_date.strftime('%Y-%m-%d'),
                 "timestamp": timestamp
-}
+            }
             await save_event_to_database(event_data)
             logger.info(f"Event {event_id} created at {timestamp}")
 
