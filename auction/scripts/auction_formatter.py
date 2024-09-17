@@ -512,7 +512,7 @@ class AuctionFormatter:
             if processed_records:
                 self.gui_callback("Creating CSV content...")
                 csv_content = processed_records_to_df(processed_records, self.Auction_ID, self.gui_callback)
-                self.final_csv_content = self.format_final_csv(csv_content)
+                self.final_csv_content = await self.format_final_csv(csv_content)
 
             if self.final_csv_content:
                 self.gui_callback("Initializing browser...")
@@ -555,9 +555,8 @@ class AuctionFormatter:
         finally:
             self.callback()
 
-    def format_final_csv(self, csv_content):
+    async def format_final_csv(self, csv_content):
         try:
-            # Use StringIO instead of a file
             from io import StringIO
             data = pd.read_csv(StringIO(csv_content))
             self.gui_callback(f"Initial data loaded with {len(data)} records.")
@@ -577,17 +576,21 @@ class AuctionFormatter:
 
             csv_content = final_data.to_csv(index=False)
             
-            # Store in database using AuctionFormattedData model
-            AuctionFormattedData.objects.create(
-                event=self.event,
-                csv_data=csv_content
-            )
+            # Use sync_to_async for database operation
+            await self.save_formatted_data(csv_content)
 
             self.gui_callback(f"Formatted data saved to database for event {self.Auction_ID}")
             return csv_content
         except Exception as e:
             self.gui_callback(f"Error formatting final CSV: {e}")
             return None
+
+    @sync_to_async
+    def save_formatted_data(self, csv_content):
+        AuctionFormattedData.objects.create(
+            event=self.event,
+            csv_data=csv_content
+        )
 
     def process_items_avoid_adjacency(self, items):
         processed_items = []
