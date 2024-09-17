@@ -8,6 +8,7 @@ import json
 import shutil
 import random
 import asyncio
+from asgiref.sync import sync_to_async
 from playwright.async_api import async_playwright
 from typing import List, Dict, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -546,7 +547,7 @@ class AuctionFormatter:
                 # Store failed records in the database or handle as needed
 
             self.gui_callback("Organizing images...")
-            organize_images(self.event)
+            await organize_images(self.event)
         except Exception as e:
             self.gui_callback(f"Error: {str(e)}")
             import traceback
@@ -817,6 +818,7 @@ def get_event(event_id: str) -> Event:
     except Event.DoesNotExist:
         raise ValueError(f"Event with ID {event_id} does not exist")
 
+@sync_to_async
 def organize_images(event: Event) -> None:
     image_files = ImageMetadata.objects.filter(event=event)
     for image in image_files:
