@@ -423,12 +423,18 @@ class AuctionFormatter:
             return False
 
     async def upload_csv_to_website(self, page, csv_content):
+        temp_file_path = None
         try:
             self.gui_callback("Navigating to upload page...")
             await page.goto("https://bid.702auctions.com/Admin/ImportCSV")
             
             self.gui_callback("Waiting for page to load...")
-            await page.wait_for_selector("#CsvImportForm", state="visible", timeout=20000)
+            try:
+                await page.wait_for_selector("#CsvImportForm", state="visible", timeout=60000)  # Increased timeout to 60 seconds
+            except Exception as e:
+                self.gui_callback(f"Error waiting for form: {str(e)}")
+                await page.screenshot(path='csv_upload_form_not_found.png')
+                return False
             
             self.gui_callback("Uploading CSV file...")
             with tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.csv') as temp_file:
@@ -457,10 +463,19 @@ class AuctionFormatter:
             
             self.gui_callback("Submitting form...")
             submit_button = await page.wait_for_selector("input.btn.btn-info.btn-sm[type='submit'][value='Upload CSV']", state="visible", timeout=20000)
+            if not submit_button:
+                self.gui_callback("Submit button not found")
+                await page.screenshot(path='csv_upload_submit_button_not_found.png')
+                return False
             await submit_button.click()
             
             self.gui_callback("Waiting for upload to complete...")
-            await page.wait_for_selector(".alert-success", state="visible", timeout=120000)
+            try:
+                await page.wait_for_selector(".alert-success", state="visible", timeout=120000)
+            except Exception as e:
+                self.gui_callback(f"Error waiting for success message: {str(e)}")
+                await page.screenshot(path='csv_upload_success_message_not_found.png')
+                return False
             
             success_message = await page.inner_text(".alert-success")
             self.gui_callback(f"Upload result: {success_message}")
@@ -474,11 +489,13 @@ class AuctionFormatter:
             
         except Exception as e:
             self.gui_callback(f"Failed to upload CSV: {str(e)}")
+            await page.screenshot(path='csv_upload_error.png')
             return False
         
         finally:
             # Clean up the temporary file
-            os.unlink(temp_file_path)
+            if temp_file_path and os.path.exists(temp_file_path):
+                os.unlink(temp_file_path)
 
     async def run_auction_formatter(self):
         try:
