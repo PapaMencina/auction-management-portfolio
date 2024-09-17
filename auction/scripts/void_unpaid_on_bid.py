@@ -71,6 +71,7 @@ async def export_csv(page, event_id, should_stop):
             return None
 
         logger.info(f"CSV content length: {len(csv_content)}")
+        logger.info(f"CSV content (first 500 characters): {csv_content[:500]}")
 
         # Save CSV content to database
         logger.info(f"Saving CSV data for event {event_id} to database...")
@@ -162,54 +163,37 @@ async def start_playwright_process(event_id, upload_choice, should_stop):
     
     try:
         async with async_playwright() as p:
-            logger.info("Launching browser")
             browser = await p.chromium.launch(headless=True, args=['--no-sandbox', '--disable-setuid-sandbox'])
             context = await browser.new_context()
             page = await context.new_page()
             
-            logger.info("Initializing browser...")
+            # Login process
             await page.goto(login_url)
-
             username = config_manager.get_warehouse_var("bid_username")
             password = config_manager.get_warehouse_var("bid_password")
-
             if username is None or password is None:
                 logger.error("Failed to retrieve login credentials from config.")
                 return
-
-            logger.info("Attempting login...")
             login_success = await login(page, username, password)
-
             if not login_success:
                 logger.error("Login failed. Aborting process.")
                 return
 
-            logger.info(f"Login successful. Current URL: {page.url}")
-            
-            await page.wait_for_load_state("networkidle")
-
-            logger.info("Navigating to report page...")
+            # Navigate to report page
             await page.goto(report_url)
-            
             try:
                 await page.wait_for_selector("#ReportResults", state="visible", timeout=30000)
-                logger.info(f"Report page loaded. Current URL: {page.url}")
             except:
                 logger.error(f"Timeout waiting for report page. Current URL: {page.url}")
-                
                 if "Account/LogOn" in page.url:
                     logger.info("Redirected to login page. Session might have expired. Attempting to log in again...")
                     login_success = await login(page, username, password)
                     if not login_success:
                         logger.error("Login failed. Aborting process.")
                         return
-                    
-                    logger.info("Navigating to report page after re-login...")
                     await page.goto(report_url)
-                    
                     try:
                         await page.wait_for_selector("#ReportResults", state="visible", timeout=30000)
-                        logger.info(f"Report page loaded after re-login. Current URL: {page.url}")
                     except:
                         logger.error(f"Failed to load report page after re-login. Current URL: {page.url}")
                         return
@@ -218,9 +202,7 @@ async def start_playwright_process(event_id, upload_choice, should_stop):
                 logger.error("Not logged in on report page. Aborting process.")
                 return
 
-            logger.info("Starting to void unpaid transactions...")
-            await void_unpaid_transactions(page, report_url, should_stop)
-
+            # Export CSV first
             logger.info("Exporting CSV...")
             csv_content = await export_csv(page, event_id, should_stop)
 
@@ -229,6 +211,11 @@ async def start_playwright_process(event_id, upload_choice, should_stop):
                 await send_to_airtable(upload_choice, csv_content, should_stop)
             else:
                 logger.error("CSV content not set due to an error. Skipping Upload to Airtable.")
+                return  # Stop the process if CSV export fails
+
+            # Now void the transactions
+            logger.info("Starting to void unpaid transactions...")
+            await void_unpaid_transactions(page, report_url, should_stop)
 
     except Exception as e:
         logger.exception(f"An error occurred in start_playwright_process: {str(e)}")
