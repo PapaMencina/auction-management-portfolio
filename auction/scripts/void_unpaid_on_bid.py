@@ -13,6 +13,7 @@ from datetime import datetime
 from urllib.parse import urljoin
 from django.core.wsgi import get_wsgi_application
 from django.db import transaction
+import tempfile
 
 logger = logging.getLogger(__name__)
 
@@ -94,8 +95,17 @@ def export_csv(page, event_id, should_stop):
         logger.info("Download started, getting download object...")
         download = download_info.value
         
-        logger.info("Saving download content...")
-        csv_content = download.save_as(StringIO()).getvalue()
+        logger.info("Saving download content to temporary file...")
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.csv') as temp_file:
+            temp_path = temp_file.name
+            download.save_as(temp_path)
+        
+        logger.info(f"Reading CSV content from temporary file: {temp_path}")
+        with open(temp_path, 'r') as file:
+            csv_content = file.read()
+
+        logger.info("Removing temporary file...")
+        os.unlink(temp_path)
 
         if should_stop.is_set():
             logger.info("CSV export operation stopped during download.")
