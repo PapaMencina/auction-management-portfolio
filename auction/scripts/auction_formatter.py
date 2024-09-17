@@ -7,6 +7,8 @@ import tempfile
 import json
 import shutil
 import random
+import asyncio
+from playwright.async_api import async_playwright
 from typing import List, Dict, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -29,7 +31,7 @@ def auction_formatter_main(auction_id, selected_warehouse, gui_callback, should_
     config_manager.set_active_warehouse(selected_warehouse)
     event = get_event(auction_id)
     formatter = AuctionFormatter(event, gui_callback, should_stop, callback, selected_warehouse)
-    formatter.run_auction_formatter()
+    asyncio.run(formatter.run_auction_formatter())
     return formatter
 
 # Load configuration
@@ -360,61 +362,82 @@ class AuctionFormatter:
             self.gui_callback(message)
             return False
         return True
+    
+    async def save_screenshot(self, page, name="error_screenshot"):
+        timestamp = time.strftime("%Y%m%d-%H%M%S")
+        screenshot_path = f"/tmp/{name}_{timestamp}.png"
+        await page.screenshot(path=screenshot_path)
+        self.gui_callback(f"Screenshot saved: {screenshot_path}")
 
-    def login_to_website(self, page, username, password):
+    async def login_to_website(self, page, username, password):
         if not self.should_continue("Login operation stopped by user."):
             return False
 
         self.gui_callback("Logging In...")
         try:
-            page.goto(self.website_login_url)
-            page.wait_for_load_state("networkidle")
+            self.gui_callback(f"Navigating to {self.website_login_url}")
+            await page.goto(self.website_login_url)
+            await page.wait_for_load_state('networkidle', timeout=60000)
             
             self.gui_callback("Waiting for username field to be present...")
-            page.wait_for_selector("#username", state="visible", timeout=30000)
+            username_field = await page.wait_for_selector("#username", state="visible", timeout=90000)
             
+            if not username_field:
+                self.gui_callback("Username field not found")
+                await self.save_screenshot(page, "username_field_not_found")
+                return False
+
             self.gui_callback("Entering credentials...")
-            page.fill("#username", username)
-            page.fill("#password", password)
+            await page.fill("#username", username)
+            await page.fill("#password", password)
 
             if not self.should_continue("Login operation stopped before finalizing."):
                 return False
 
             self.gui_callback("Submitting login form...")
-            page.press("#password", "Enter")
+            sign_in_button = await page.wait_for_selector('input[type="submit"][value="Sign In"]', state="visible", timeout=90000)
+            if sign_in_button:
+                await sign_in_button.click()
+            else:
+                self.gui_callback("Sign in button not found")
+                await self.save_screenshot(page, "sign_in_button_not_found")
+                return False
             
             self.gui_callback("Waiting for login to complete...")
-            page.wait_for_load_state("networkidle")
+            await page.wait_for_load_state('networkidle', timeout=60000)
             
-            try:
-                page.wait_for_selector("text=Sign Out", timeout=10000)
-                self.gui_callback("Login successful.")
-                return True
-            except:
-                self.gui_callback("Login failed: Could not find 'Sign Out' link.")
+            # Check if login was successful
+            if "logon" in page.url.lower() or "login" in page.url.lower():
+                self.gui_callback("Login failed. Still on login page.")
+                await self.save_screenshot(page, "login_failure_still_on_login_page")
                 return False
+            
+            self.gui_callback("Login successful.")
+            return True
 
         except Exception as e:
             self.gui_callback(f"Login failed: Unexpected error. Error: {str(e)}")
+            self.gui_callback(f"Current URL: {page.url}")
+            await self.save_screenshot(page, "login_failure_unexpected")
             return False
 
-    def upload_csv_to_website(self, page, csv_content):
+    async def upload_csv_to_website(self, page, csv_content):
         try:
             self.gui_callback("Navigating to upload page...")
-            page.goto("https://bid.702auctions.com/Admin/ImportCSV")
+            await page.goto("https://bid.702auctions.com/Admin/ImportCSV")
             
             self.gui_callback("Waiting for page to load...")
-            page.wait_for_selector("#CsvImportForm", state="visible", timeout=20000)
+            await page.wait_for_selector("#CsvImportForm", state="visible", timeout=20000)
             
             self.gui_callback("Uploading CSV file...")
             with tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.csv') as temp_file:
                 temp_file.write(csv_content)
                 temp_file_path = temp_file.name
 
-            page.set_input_files("#file", temp_file_path)
+            await page.set_input_files("#file", temp_file_path)
             
             self.gui_callback("Unchecking 'Validate Data ONLY' checkbox...")
-            page.evaluate("""
+            await page.evaluate("""
             () => {
                 var checkbox = document.querySelector('input[name="validate"]');
                 var toggle = document.querySelector('.fs-checkbox-toggle');
@@ -427,18 +450,18 @@ class AuctionFormatter:
             """)
             
             self.gui_callback("Updating email address...")
-            page.fill("#Text1", "matthew@702auctions.com")
+            await page.fill("#Text1", "matthew@702auctions.com")
             
-            page.wait_for_timeout(2000)
+            await page.wait_for_timeout(2000)
             
             self.gui_callback("Submitting form...")
-            submit_button = page.wait_for_selector("input.btn.btn-info.btn-sm[type='submit'][value='Upload CSV']", state="visible", timeout=20000)
-            submit_button.click()
+            submit_button = await page.wait_for_selector("input.btn.btn-info.btn-sm[type='submit'][value='Upload CSV']", state="visible", timeout=20000)
+            await submit_button.click()
             
             self.gui_callback("Waiting for upload to complete...")
-            page.wait_for_selector(".alert-success", state="visible", timeout=120000)
+            await page.wait_for_selector(".alert-success", state="visible", timeout=120000)
             
-            success_message = page.inner_text(".alert-success")
+            success_message = await page.inner_text(".alert-success")
             self.gui_callback(f"Upload result: {success_message}")
             
             if "CSV listing import has started" in success_message:
@@ -456,7 +479,7 @@ class AuctionFormatter:
             # Clean up the temporary file
             os.unlink(temp_file_path)
 
-    def run_auction_formatter(self):
+    async def run_auction_formatter(self):
         try:
             self.gui_callback("Starting auction formatting process...")
             airtable_records = get_airtable_records_list(
@@ -492,28 +515,30 @@ class AuctionFormatter:
 
             if self.final_csv_content:
                 self.gui_callback("Initializing browser...")
-                with sync_playwright() as p:
-                    browser = p.chromium.launch(headless=True)
-                    page = browser.new_page()
+                async with async_playwright() as p:
+                    browser = await p.chromium.launch(headless=True)
+                    page = await browser.new_page()
                     
                     username = config_manager.get_warehouse_var('bid_username')
                     password = config_manager.get_warehouse_var('bid_password')
 
                     self.gui_callback("Logging into website...")
-                    login_success = self.login_to_website(page, username, password)
+                    login_success = await self.login_to_website(page, username, password)
                     
                     if login_success:
                         self.gui_callback("Uploading CSV to 702 Auctions...")
-                        upload_success = self.upload_csv_to_website(page, self.final_csv_content)
+                        upload_success = await self.upload_csv_to_website(page, self.final_csv_content)
                         if upload_success:
                             self.gui_callback("CSV uploaded successfully to 702 Auctions.")
                         else:
                             self.gui_callback("CSV upload to 702 Auctions failed.")
+                            await self.save_screenshot(page, "csv_upload_failure")
                     else:
                         self.gui_callback("Login to 702 Auctions failed.")
+                        await self.save_screenshot(page, "login_failure")
                     
                     self.gui_callback(f"Final URL: {page.url}")
-                    browser.close()
+                    await browser.close()
 
             if failed_records:
                 self.gui_callback("Processing failed records...")
@@ -524,6 +549,8 @@ class AuctionFormatter:
             organize_images(self.event)
         except Exception as e:
             self.gui_callback(f"Error: {str(e)}")
+            import traceback
+            self.gui_callback(f"Traceback: {traceback.format_exc()}")
         finally:
             self.callback()
 
