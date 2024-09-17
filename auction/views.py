@@ -201,12 +201,10 @@ def remove_duplicates_view(request):
 def auction_formatter_view(request):
     warehouses = list(config_manager.config.get('warehouses', {}).keys())
     auctions = get_auction_numbers(request)
-    can_use_show_browser = request.user.has_perm('auction.can_use_show_browser')
 
     if request.method == 'POST':
         auction_id = request.POST.get('auction_id')
         selected_warehouse = request.POST.get('selected_warehouse')
-        show_browser = request.POST.get('show_browser') == '1' and can_use_show_browser
 
         config_manager.set_active_warehouse(selected_warehouse)
 
@@ -218,7 +216,6 @@ def auction_formatter_view(request):
             'gui_callback': logger.info,  # Use logger.info as a simple callback
             'should_stop': should_stop,
             'callback': lambda: None,
-            'show_browser': show_browser
         }).start()
 
         return JsonResponse({'message': 'Auction formatter process started'})
@@ -226,7 +223,6 @@ def auction_formatter_view(request):
     context = {
         'warehouses': warehouses,
         'auctions': json.dumps(auctions, cls=DjangoJSONEncoder),
-        'can_use_show_browser': can_use_show_browser,
     }
     return render(request, 'auction/auction_formatter.html', context)
 
