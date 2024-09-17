@@ -245,6 +245,8 @@ async def start_playwright_process(event_id, upload_choice, should_stop):
 async def upload_to_airtable(records_batches, headers, csv_filepath, should_stop):
     all_batches_successful = True
     batch_count = 0
+    total_batches = len(records_batches)
+    logger.info(f"Starting upload to Airtable. Total batches: {total_batches}")
 
     async with aiohttp.ClientSession() as session:
         for batch in records_batches:
@@ -253,32 +255,36 @@ async def upload_to_airtable(records_batches, headers, csv_filepath, should_stop
                 logger.info("Upload to Airtable stopped by user.")
                 return
             try:
+                logger.info(f"Uploading batch {batch_count}/{total_batches} to Airtable")
                 async with session.post(AIRTABLE_URL(config_manager.get_warehouse_var('airtable_sales_base_id'),
                                                      config_manager.get_warehouse_var('airtable_cancels_table_id')),
                                         json={"records": batch}, headers=headers) as response:
                     if response.status != 200:
-                        error_message = f"Failed to send batch {batch_count} to Airtable: {response.status} {await response.text()}"
+                        error_message = f"Failed to send batch {batch_count}/{total_batches} to Airtable: {response.status} {await response.text()}"
                         logger.error(error_message)
                         logger.error(f"Upload CSV Manually. CSV Filepath: {csv_filepath}")
                         all_batches_successful = False
                         break
                     else:
-                        logger.info(f"Successfully uploaded batch {batch_count} to Airtable")
+                        logger.info(f"Successfully uploaded batch {batch_count}/{total_batches} to Airtable")
             except Exception as e:
-                logger.error(f"Exception occurred while uploading batch {batch_count} to Airtable: {str(e)}")
+                logger.error(f"Exception occurred while uploading batch {batch_count}/{total_batches} to Airtable: {str(e)}")
                 all_batches_successful = False
                 break
 
     if all_batches_successful:
         logger.info(f"Successfully Uploaded all {batch_count} batches to Airtable")
     else:
-        logger.warning(f"Upload to Airtable incomplete. {batch_count} batches attempted.")
+        logger.warning(f"Upload to Airtable incomplete. {batch_count}/{total_batches} batches attempted.")
 
 def process_csv_for_airtable(csv_content):
     csv_file = StringIO(csv_content)
     reader = csv.DictReader(csv_file)
     records = [{"fields": record} for record in reader]
-    return (records[i:i+10] for i in range(0, len(records), 10))
+    logger.info(f"Total records processed from CSV: {len(records)}")
+    batches = list(records[i:i+10] for i in range(0, len(records), 10))
+    logger.info(f"Number of batches created: {len(batches)}")
+    return batches
 
 async def send_to_airtable(upload_choice, csv_content, should_stop):
     if should_stop.is_set():
