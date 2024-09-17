@@ -244,24 +244,35 @@ async def start_playwright_process(event_id, upload_choice, should_stop):
 
 async def upload_to_airtable(records_batches, headers, csv_filepath, should_stop):
     all_batches_successful = True
+    batch_count = 0
 
     async with aiohttp.ClientSession() as session:
         for batch in records_batches:
+            batch_count += 1
             if should_stop.is_set():
-                print("Upload to Airtable stopped by user.")
+                logger.info("Upload to Airtable stopped by user.")
                 return
-            async with session.post(AIRTABLE_URL(config_manager.get_warehouse_var('airtable_sales_base_id'),
-                                                 config_manager.get_warehouse_var('airtable_cancels_table_id')),
-                                    json={"records": batch}, headers=headers) as response:
-                if response.status != 200:
-                    error_message = f"Failed to send data to Airtable: {response.status} {await response.text()}"
-                    print(error_message)
-                    print(f"Upload CSV Manually. CSV Filepath: {csv_filepath}")
-                    all_batches_successful = False
-                    break
+            try:
+                async with session.post(AIRTABLE_URL(config_manager.get_warehouse_var('airtable_sales_base_id'),
+                                                     config_manager.get_warehouse_var('airtable_cancels_table_id')),
+                                        json={"records": batch}, headers=headers) as response:
+                    if response.status != 200:
+                        error_message = f"Failed to send batch {batch_count} to Airtable: {response.status} {await response.text()}"
+                        logger.error(error_message)
+                        logger.error(f"Upload CSV Manually. CSV Filepath: {csv_filepath}")
+                        all_batches_successful = False
+                        break
+                    else:
+                        logger.info(f"Successfully uploaded batch {batch_count} to Airtable")
+            except Exception as e:
+                logger.error(f"Exception occurred while uploading batch {batch_count} to Airtable: {str(e)}")
+                all_batches_successful = False
+                break
 
     if all_batches_successful:
-        print("Successfully Uploaded to Airtable")
+        logger.info(f"Successfully Uploaded all {batch_count} batches to Airtable")
+    else:
+        logger.warning(f"Upload to Airtable incomplete. {batch_count} batches attempted.")
 
 def process_csv_for_airtable(csv_content):
     csv_file = StringIO(csv_content)
@@ -271,10 +282,10 @@ def process_csv_for_airtable(csv_content):
 
 async def send_to_airtable(upload_choice, csv_content, should_stop):
     if should_stop.is_set():
-        print("Upload to Airtable stopped by user.")
+        logger.info("Upload to Airtable stopped by user.")
         return
     if upload_choice == 1:
-        print("Uploading data to Airtable...")
+        logger.info("Uploading data to Airtable...")
         records_batches = process_csv_for_airtable(csv_content)
         headers = {
             'Authorization': f'Bearer {config_manager.get_warehouse_var("airtable_api_key")}',
@@ -282,7 +293,7 @@ async def send_to_airtable(upload_choice, csv_content, should_stop):
         }
         await upload_to_airtable(records_batches, headers, csv_content, should_stop)
     else:
-        print("Upload to Airtable skipped.")
+        logger.info("Upload to Airtable skipped due to upload_choice.")
 
 async def void_unpaid_transactions(page, report_url, should_stop, timeout=1000, max_retries=5):
     print("Starting the voiding process for unpaid transactions...")
