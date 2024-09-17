@@ -527,9 +527,11 @@ class AuctionFormatter:
         finally:
             self.callback()
 
-    def format_final_csv(self, file_path):
+    def format_final_csv(self, csv_content):
         try:
-            data = pd.read_csv(file_path)
+            # Use StringIO instead of a file
+            from io import StringIO
+            data = pd.read_csv(StringIO(csv_content))
             self.gui_callback(f"Initial data loaded with {len(data)} records.")
 
             data['UPC'] = data['UPC'].astype(str)
