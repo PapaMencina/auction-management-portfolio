@@ -4,6 +4,7 @@ import time
 import re
 import ftplib
 import tempfile
+import traceback
 import json
 import shutil
 import random
@@ -483,6 +484,8 @@ class AuctionFormatter:
     async def run_auction_formatter(self):
         try:
             self.gui_callback("Starting auction formatting process...")
+            
+            # Fetch Airtable records
             airtable_records = get_airtable_records_list(
                 config_manager.get_warehouse_var('airtable_inventory_base_id'),
                 config_manager.get_warehouse_var('airtable_inventory_table_id'),
@@ -491,6 +494,7 @@ class AuctionFormatter:
                 config_manager.get_warehouse_var('airtable_api_key')
             )
 
+            # Process images
             self.gui_callback("Collecting image URLs...")
             download_tasks = collect_image_urls(airtable_records, self.should_stop)
             
@@ -503,17 +507,20 @@ class AuctionFormatter:
             self.gui_callback("Uploading images...")
             uploaded_image_urls = upload_images_and_get_urls(processed_images, self.gui_callback, self.should_stop)
 
+            # Process records
             self.gui_callback("Processing records...")
             processed_records, failed_records = process_records_concurrently(
                 airtable_records, uploaded_image_urls, self.gui_callback, 
                 self.Auction_ID, self.selected_warehouse, self.should_stop
             )
 
+            # Create and format CSV
             if processed_records:
                 self.gui_callback("Creating CSV content...")
                 csv_content = processed_records_to_df(processed_records, self.Auction_ID, self.gui_callback)
                 self.final_csv_content = await self.format_final_csv(csv_content)
 
+            # Upload CSV to website
             if self.final_csv_content:
                 self.gui_callback("Initializing browser...")
                 async with async_playwright() as p:
@@ -541,16 +548,27 @@ class AuctionFormatter:
                     self.gui_callback(f"Final URL: {page.url}")
                     await browser.close()
 
+            # Process failed records
             if failed_records:
                 self.gui_callback("Processing failed records...")
                 self.failed_records_csv_content = failed_records_csv(failed_records, self.Auction_ID, self.gui_callback)
-                # Store failed records in the database or handle as needed
+                # TODO: Store failed records in the database or handle as needed
 
-            self.gui_callback("Organizing images...")
-            await organize_images(self.event)
+            # Organize images
+            try:
+                self.gui_callback("Organizing images...")
+                await asyncio.wait_for(organize_images(self.event), timeout=300)  # 5 minutes timeout
+                self.gui_callback("Images organized successfully")
+            except asyncio.TimeoutError:
+                self.gui_callback("Organizing images timed out after 5 minutes")
+            except Exception as e:
+                self.gui_callback(f"Error organizing images: {str(e)}")
+                self.gui_callback(f"Traceback: {traceback.format_exc()}")
+
+            self.gui_callback("Auction formatting process completed successfully.")
+
         except Exception as e:
-            self.gui_callback(f"Error: {str(e)}")
-            import traceback
+            self.gui_callback(f"Error in auction formatting process: {str(e)}")
             self.gui_callback(f"Traceback: {traceback.format_exc()}")
         finally:
             self.callback()
@@ -823,8 +841,13 @@ def get_event(event_id: str) -> Event:
 
 @sync_to_async
 def organize_images(event: Event) -> None:
+    print(f"Starting to organize images for event {event.id}")
     image_files = ImageMetadata.objects.filter(event=event)
+    print(f"Found {image_files.count()} images to process")
     for image in image_files:
+        print(f"Processing image: {image.filename}")
         if image.filename.endswith(("_1.jpeg", "_1.png", '_1.jpg')):
+            print(f"Marking image {image.filename} as primary")
             image.is_primary = True
             image.save()
+    print("Finished organizing images")
