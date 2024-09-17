@@ -10,7 +10,7 @@ import shutil
 import random
 import asyncio
 from asgiref.sync import sync_to_async
-from playwright.async_api import async_playwright
+from playwright.async_api import async_playwright, expect
 from typing import List, Dict, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -18,7 +18,6 @@ import requests
 import pandas as pd
 from auction.models import Event, ImageMetadata, AuctionFormattedData
 from PIL import Image, ExifTags
-from playwright.sync_api import sync_playwright, expect
 from auction.utils import config_manager
 
 from django.core.wsgi import get_wsgi_application

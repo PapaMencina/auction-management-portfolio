@@ -80,30 +80,42 @@ def should_continue(should_stop, gui_callback, message):
 
 def export_csv(page, event_id, should_stop):
     if should_stop.is_set():
-        print("CSV export operation stopped by user.")
+        logger.info("CSV export operation stopped by user.")
         return None
 
-    print("Exporting CSV...")
+    logger.info("Starting CSV export...")
     
     try:
-        with page.expect_download() as download_info:
+        logger.info("Waiting for download to start...")
+        with page.expect_download(timeout=30000) as download_info:
+            logger.info("Clicking ExportCSV button...")
             page.click("#ExportCSV")
+        
+        logger.info("Download started, getting download object...")
         download = download_info.value
+        
+        logger.info("Saving download content...")
         csv_content = download.save_as(StringIO()).getvalue()
 
         if should_stop.is_set():
-            print("CSV export operation stopped during download.")
+            logger.info("CSV export operation stopped during download.")
             return None
+
+        logger.info(f"CSV content length: {len(csv_content)}")
 
         # Save CSV content to database
         with transaction.atomic():
+            logger.info(f"Saving CSV data for event {event_id} to database...")
             event, created = Event.objects.get_or_create(event_id=event_id)
             VoidedTransaction.objects.create(event=event, csv_data=csv_content)
         
-        print(f"CSV data for event {event_id} saved to database.")
+        logger.info(f"CSV data for event {event_id} saved to database.")
         return csv_content
     except Exception as e:
-        print(f"Error exporting CSV: {str(e)}")
+        logger.error(f"Error exporting CSV: {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        logger.error(f"Current page URL: {page.url}")
+        logger.error(f"Page content: {page.content()}")
         return None
 
 def upload_to_airtable(records_batches, headers, csv_filepath, should_stop):
