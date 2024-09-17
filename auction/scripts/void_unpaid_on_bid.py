@@ -81,7 +81,7 @@ async def export_csv(page, event_id, should_stop):
     except Exception as e:
         logger.error(f"Error exporting CSV: {str(e)}")
         logger.error(f"Traceback: {traceback.format_exc()}")
-        logger.error(f"Current page URL: {await page.url()}")
+        logger.error(f"Current page URL: {page.url}")
         logger.error(f"Page content: {await page.content()}")
         return None
 
@@ -97,27 +97,43 @@ def void_unpaid_main(event_id, upload_choice, warehouse):
     logger.info("Finished void_unpaid_main")
 
 async def login(page, username, password):
+    """Logs in to the auction site using provided credentials."""
     try:
+        # Wait for and fill username field
+        logger.info("Waiting for username field to be visible...")
         await page.wait_for_selector("#username", state="visible", timeout=15000)
+        await page.fill("#username", username)
+        
+        # Wait for and fill password field
+        logger.info("Waiting for password field to be visible...")
         await page.wait_for_selector("#password", state="visible", timeout=15000)
-    except:
-        print("Login form not found. The page might not have loaded correctly.")
-        print(f"Current URL: {await page.url()}")
-        return False
+        await page.fill("#password", password)
+        
+        # Wait for and click the sign-in button
+        logger.info("Waiting for sign-in button to be visible...")
+        sign_in_button = await page.wait_for_selector('input[type="submit"][value="Sign In"]', state="visible", timeout=15000)
+        if sign_in_button:
+            await sign_in_button.click()
+        else:
+            logger.error("Sign in button not found")
+            await page.screenshot(path='login_error_button_not_found.png')
+            return False
 
-    await page.fill("#username", username)
-    await page.fill("#password", password)
-    
-    await page.press("#password", "Enter")
-
-    await asyncio.sleep(5)
-    
-    try:
-        await page.wait_for_url(lambda url: "LogOn" not in url, timeout=30000)
-        print(f"Login successful. Current URL: {await page.url()}")
+        # Wait for navigation after clicking sign in
+        await page.wait_for_load_state('networkidle', timeout=30000)
+        
+        # Check if login was successful
+        if "logon" in page.url.lower() or "login" in page.url.lower():
+            logger.error("Login failed. Still on login page.")
+            await page.screenshot(path='login_error_still_on_login_page.png')
+            return False
+        
+        logger.info(f"Login successful. Current URL: {page.url}")
         return True
-    except:
-        print(f"Login might have failed. Current URL: {await page.url()}")
+    except Exception as e:
+        logger.error(f"Login failed: {e}")
+        logger.error(f"Current URL: {page.url}")
+        await page.screenshot(path='login_error_exception.png')
         return False
 
 async def check_login_status(page):
@@ -125,7 +141,7 @@ async def check_login_status(page):
         await page.wait_for_selector("text=Sign Out", timeout=10000)
         return True
     except:
-        current_url = await page.url()
+        current_url = page.url
         if "bid.702auctions.com" in current_url and not current_url.endswith("/Account/LogOn"):
             return True
         return False
@@ -168,7 +184,7 @@ async def start_playwright_process(event_id, upload_choice, should_stop):
                 logger.error("Login failed. Aborting process.")
                 return
 
-            logger.info(f"Login successful. Current URL: {await page.url()}")
+            logger.info(f"Login successful. Current URL: {page.url}")
             
             await page.wait_for_load_state("networkidle")
 
@@ -177,11 +193,11 @@ async def start_playwright_process(event_id, upload_choice, should_stop):
             
             try:
                 await page.wait_for_selector("#ReportResults", state="visible", timeout=30000)
-                logger.info(f"Report page loaded. Current URL: {await page.url()}")
+                logger.info(f"Report page loaded. Current URL: {page.url}")
             except:
-                logger.error(f"Timeout waiting for report page. Current URL: {await page.url()}")
+                logger.error(f"Timeout waiting for report page. Current URL: {page.url}")
                 
-                if "Account/LogOn" in await page.url():
+                if "Account/LogOn" in page.url:
                     logger.info("Redirected to login page. Session might have expired. Attempting to log in again...")
                     login_success = await login(page, username, password)
                     if not login_success:
@@ -193,9 +209,9 @@ async def start_playwright_process(event_id, upload_choice, should_stop):
                     
                     try:
                         await page.wait_for_selector("#ReportResults", state="visible", timeout=30000)
-                        logger.info(f"Report page loaded after re-login. Current URL: {await page.url()}")
+                        logger.info(f"Report page loaded after re-login. Current URL: {page.url}")
                     except:
-                        logger.error(f"Failed to load report page after re-login. Current URL: {await page.url()}")
+                        logger.error(f"Failed to load report page after re-login. Current URL: {page.url}")
                         return
 
             if not await check_login_status(page):
@@ -337,7 +353,7 @@ async def verify_base_url(page, base_url):
     try:
         await page.goto(base_url)
         await page.wait_for_load_state("networkidle")
-        print(f"Base URL accessible: {await page.url()}")
+        print(f"Base URL accessible: {page.url}")
         return True
     except Exception as e:
         print(f"Error accessing base URL: {str(e)}")
