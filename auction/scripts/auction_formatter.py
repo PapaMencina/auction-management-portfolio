@@ -340,7 +340,9 @@ def format_html_field(field_name: str, value: str) -> str:
     return f"<b>{field_name}</b>: {value}<br>" if value else ""
     
 def get_image_url(airtable_record: Dict, count: int) -> str:
-    return airtable_record.get("fields", {}).get(f"Image {count}", [{}])[0].get("url", "")
+    url = airtable_record.get("fields", {}).get(f"Image {count}", [{}])[0].get("url", "")
+    print(f"Airtable Image {count} URL: {url}")
+    return url
 
 class AuctionFormatter:
     def __init__(self, event, gui_callback, should_stop, callback, selected_warehouse):
@@ -812,22 +814,32 @@ def process_single_record(airtable_record: Dict, uploaded_image_urls: Dict[str, 
             print(f"Uploaded image URLs: {uploaded_image_urls[record_id]}")
             
             # Get all available images
-            all_images = uploaded_image_urls[record_id]  # Use the uploaded URLs directly
+            all_images = uploaded_image_urls[record_id]
             print(f"All available images: {all_images}")
 
-            # Ensure stock photo (Image 1) is first if it exists
-            # stock_photo = get_image_url(airtable_record, 1)
-            # print(f"Stock photo URL: {stock_photo}")
-            # if stock_photo and stock_photo in all_images:
-            #     all_images.remove(stock_photo)
-            #     all_images.insert(0, stock_photo)
-            #     print(f"Reordered images with stock photo first: {all_images}")
+            # Create a mapping of original Airtable URLs to uploaded URLs
+            airtable_to_uploaded = {}
+            for i in range(1, 11):
+                airtable_url = get_image_url(airtable_record, i)
+                if airtable_url:
+                    for uploaded_url in all_images:
+                        if uploaded_url.split('/')[-1] == airtable_url.split('/')[-1]:
+                            airtable_to_uploaded[airtable_url] = uploaded_url
+                            break
 
-            # Assign images to newRecord
-            for i, url in enumerate(all_images, 1):
+            # Sort images based on their original order in Airtable
+            sorted_images = []
+            for i in range(1, 11):
+                airtable_url = get_image_url(airtable_record, i)
+                if airtable_url in airtable_to_uploaded:
+                    sorted_images.append(airtable_to_uploaded[airtable_url])
+
+            # Assign sorted images to newRecord
+            for i, url in enumerate(sorted_images, 1):
                 if i <= 10:  # Limit to 10 images
                     newRecord[f'Image_{i}'] = url
                     print(f"Assigned Image_{i}: {url}")
+
         else:
             print(f"No uploaded images found for record ID: {record_id}")
 
