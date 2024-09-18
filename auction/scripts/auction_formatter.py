@@ -591,6 +591,8 @@ class AuctionFormatter:
                     
                     # Use Maule Warehouse credentials
                     username, password = self.get_maule_login_credentials()
+                    self.gui_callback("CSV Content Preview:")
+                    self.gui_callback(self.final_csv_content[:1000])  # Print first 1000 characters of CSV
 
                     self.gui_callback("Logging into website...")
                     login_success = await self.login_to_website(page, username, password)
@@ -776,10 +778,10 @@ def save_images_to_database(event: Event, uploaded_image_urls: Dict[str, List[Tu
                 event=event,
                 filename=f"{record_id}_{image_number}.jpg",
                 is_primary=(image_number == 1),
-                image=url  # Save the URL as a string
+                image=url
             )
 
-def process_single_record(airtable_record: Dict, uploaded_image_urls: Dict[str, List[str]], Auction_ID: str, selected_warehouse: str, gui_callback) -> Dict:
+def process_single_record(airtable_record: Dict, uploaded_image_urls: Dict[str, List[Tuple[str, int]]], Auction_ID: str, selected_warehouse: str, gui_callback) -> Dict:
     try:
         newRecord = {}
         record_id = airtable_record.get('id', '')
@@ -854,28 +856,27 @@ def process_single_record(airtable_record: Dict, uploaded_image_urls: Dict[str, 
         )
 
         # Handle image ordering
-        record_id = airtable_record['id']
         if record_id in uploaded_image_urls:
             gui_callback(f"Found uploaded images for record ID: {record_id}")
             gui_callback(f"Uploaded image URLs: {uploaded_image_urls[record_id]}")
             
-            # Get all available images from Airtable
-            airtable_images = []
-            for i in range(1, 11):
-                url, filename, image_number = get_image_url(airtable_record, i)
-                if url:
-                    airtable_images.append((url, filename, image_number))
+            # Sort the uploaded images by image number
+            sorted_images = sorted(uploaded_image_urls[record_id], key=lambda x: x[1])
             
-            # Match Airtable images with uploaded images
-            for airtable_url, airtable_filename, image_number in airtable_images:
-                for uploaded_url in uploaded_image_urls[record_id]:
-                    if airtable_filename in uploaded_url:
-                        newRecord[f'Image_{image_number}'] = uploaded_url
-                        gui_callback(f"Assigned Image_{image_number}: {uploaded_url}")
-                        break
+            for i, (url, image_number) in enumerate(sorted_images, 1):
+                newRecord[f'Image_{i}'] = url
+                gui_callback(f"Assigned Image_{i}: {url}")
+            
+            # Ensure all 10 image fields are present, even if empty
+            for i in range(1, 11):
+                if f'Image_{i}' not in newRecord:
+                    newRecord[f'Image_{i}'] = ''
 
         else:
             gui_callback(f"No uploaded images found for record ID: {record_id}")
+            # Add empty image fields
+            for i in range(1, 11):
+                newRecord[f'Image_{i}'] = ''
 
         gui_callback(f"Final newRecord: {newRecord}")
         newRecord['Success'] = True
@@ -920,16 +921,25 @@ def failed_records_csv(failed_records: List[Dict], Auction_ID: str, gui_callback
 
 def processed_records_to_df(processed_records: List[Dict], Auction_ID: str, gui_callback) -> str:
     df = pd.DataFrame(processed_records)
-    column_order = ["EventID", "LotNumber", "Seller", "Category_not_formatted", "Category", "Region", "ListingType", "Currency",
-                    "Title", "Subtitle", "Description", "Price", "Quantity", "IsTaxable", "Image_1", "Image_2", "Image_3", "Image_4",
-                    "Image_5", "Image_6", "Image_7", "Image_8", "Image_9", "Image_10", "YouTubeID", "PdfAttachments", "Bold", "Badge",
-                    "Highlight", "ShippingOptions", "Duration", "StartDTTM", "EndDTTM", "AutoRelist", "GoodTilCanceled", "Working Condition",
-                    "UPC", "Truck", "Source", "Size", "Photo Taker", "Packaging", "Other Notes", "MSRP", "Lot Number", "Location",
-                    "Item Condition", "ID", "Amazon ID", "HiBid", "AuctionCount", "number"]
+    column_order = ["EventID", "LotNumber", "Seller", "Category", "Region", "ListingType", "Currency",
+                    "Title", "Subtitle", "Description", "Price", "Quantity", "IsTaxable", 
+                    "Image_1", "Image_2", "Image_3", "Image_4", "Image_5", 
+                    "Image_6", "Image_7", "Image_8", "Image_9", "Image_10",
+                    "YouTubeID", "PdfAttachments", "Bold", "Badge", "Highlight", "ShippingOptions", 
+                    "Duration", "StartDTTM", "EndDTTM", "AutoRelist", "GoodTilCanceled", "Working Condition",
+                    "UPC", "Truck", "Source", "Size", "Photo Taker", "Packaging", "Other Notes", "MSRP", 
+                    "Lot Number", "Location", "Item Condition", "ID", "Amazon ID", "HiBid", "AuctionCount"]
+    
     df = df.reindex(columns=column_order, fill_value='')
+    
+    # Ensure all image columns are present
+    for i in range(1, 11):
+        if f'Image_{i}' not in df.columns:
+            df[f'Image_{i}'] = ''
     
     csv_content = df.to_csv(index=False)
     gui_callback(f'Processed {len(processed_records)} records successfully.')
+    gui_callback(f'CSV content preview:\n{df.head().to_string()}')
 
     return csv_content
 
