@@ -69,14 +69,8 @@ def download_image(url: str, file_name: str, gui_callback) -> str:
         content_type = response.headers.get('Content-Type', '')
         if content_type.startswith('image/'):
             file_extension = content_type.split("/")[1]
-        elif content_type.startswith('application/octet-stream'):
-            file_extension = get_extension_from_content_disposition(response.headers.get('Content-Disposition', ''))
-            if file_extension.lower() not in ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp']:
-                gui_callback(f"The URL for {file_name} does not point to a valid image file extension: {file_extension}")
-                return None
         else:
-            gui_callback(f"The URL for {file_name} does not point to a valid image: {content_type}")
-            return None
+            file_extension = 'jpg'  # Default to jpg if content-type is not image
 
         if len(response.content) < 1000:
             gui_callback(f"Image for {file_name} is too small, might be corrupted")
@@ -205,21 +199,23 @@ def upload_file_via_ftp(file_name: str, local_file_path: str, gui_callback, shou
                 ftp.sendcmd('TYPE I')
                 remote_path_full = os.path.join(remote_file_path, file_name)
 
+                gui_callback(f"Uploading file {file_name} to {remote_path_full}")
                 with open(local_file_path, 'rb') as file:
                     ftp.storbinary(f'STOR {remote_path_full}', file)
+                gui_callback(f"File {file_name} uploaded successfully")
 
             formatted_url = remote_path_full.replace("/public_html", "", 1).lstrip('/')
             return f"https://{formatted_url}"
 
         except ftplib.error_temp as e:
-            print(f"Temporary FTP error: {e}. Retrying in 5 seconds...")
+            gui_callback(f"Temporary FTP error: {e}. Retrying in 5 seconds...")
             retries += 1
             time.sleep(5)
         except Exception as e:
-            print(f"FTP upload error: {e}.")
+            gui_callback(f"FTP upload error: {e}.")
             break
 
-    print("Failed to upload after maximum retries.")
+    gui_callback("Failed to upload after maximum retries.")
     return None
 
 def format_subtitle(auction_count: int, msrp: float, other_notes: str) -> str:
@@ -541,6 +537,10 @@ class AuctionFormatter:
             self.gui_callback("Uploading images...")
             uploaded_image_urls = upload_images_and_get_urls(processed_images, self.gui_callback, self.should_stop)
 
+            # Save uploaded image URLs to the database
+            self.gui_callback("Saving image metadata to database...")
+            await save_images_to_database(self.event, uploaded_image_urls)
+
             # Process records
             self.gui_callback("Processing records...")
             processed_records, failed_records = process_records_concurrently(
@@ -688,7 +688,7 @@ def collect_image_urls(airtable_records: List[Dict], should_stop: threading.Even
         product_id = str(record["fields"].get("Lot Number", ""))
         record_id = record['id']
         for count in range(1, 11):
-            image_url = get_image_url(record, count)
+            image_url, _ = get_image_url(record, count)
             if image_url:
                 file_name = f"{product_id}_{count}"
                 download_tasks.append((record_id, image_url, file_name))
@@ -733,22 +733,36 @@ def upload_images_and_get_urls(downloaded_images: Dict[str, List[str]], gui_call
                     if not url.startswith("https://"):
                         url = "https://" + url
                     uploaded_image_urls.setdefault(record_id, []).append(url)
-                    print(f"Uploaded image for record {record_id}: {url}")
+                    gui_callback(f"Uploaded image for record {record_id}: {url}")
             except Exception as e:
                 gui_callback(f"Error uploading image {image_path}: {e}")
 
-    print(f"Final uploaded_image_urls: {uploaded_image_urls}")
+    gui_callback(f"Final uploaded_image_urls: {uploaded_image_urls}")
     return uploaded_image_urls
 
+@sync_to_async
+def save_images_to_database(event: Event, uploaded_image_urls: Dict[str, List[str]]):
+    for record_id, urls in uploaded_image_urls.items():
+        for i, url in enumerate(urls, start=1):
+            ImageMetadata.objects.create(
+                event=event,
+                filename=f"{record_id}_{i}.jpg",
+                is_primary=(i == 1),
+                image=url
+            )
 
-def process_single_record(airtable_record: Dict, uploaded_image_urls: Dict[str, List[str]], Auction_ID: str, selected_warehouse: str) -> Dict:
+def process_single_record(airtable_record: Dict, uploaded_image_urls: Dict[str, List[str]], Auction_ID: str, selected_warehouse: str, gui_callback) -> Dict:
     try:
         newRecord = {}
+        record_id = airtable_record.get('id', '')
+        gui_callback(f"Processing record ID: {record_id}")
+
+        # Basic information
         newRecord["AuctionCount"] = airtable_record["fields"].get("Auction Count", "")
         newRecord["Photo Taker"] = airtable_record["fields"].get("Clerk", "")
         newRecord["Size"] = airtable_record["fields"].get("Size", "")
         newRecord["UPC"] = str(airtable_record["fields"].get("UPC", ""))
-        newRecord["ID"] = airtable_record.get("id", "")
+        newRecord["ID"] = record_id
         product_id = str(airtable_record["fields"].get("Lot Number", ""))
         newRecord["LotNumber"] = newRecord["Lot Number"] = str(product_id)
         newRecord["Other Notes"] = airtable_record["fields"].get("Notes", "")
@@ -756,11 +770,12 @@ def process_single_record(airtable_record: Dict, uploaded_image_urls: Dict[str, 
         newRecord["Truck"] = airtable_record["fields"].get("Shipment", "")
         newRecord["Category_not_formatted"] = airtable_record["fields"].get("Category", "")
         newRecord["Amazon ID"] = airtable_record["fields"].get("B00 ASIN", "")
-        newRecord["Item Condition"] = airtable_record["fields"].get("Condition")
+        newRecord["Item Condition"] = airtable_record["fields"].get("Condition", "")
         newRecord["HibidSearchText"] = airtable_record["fields"].get("Description", "")
         newRecord["FullTitle"] = airtable_record["fields"].get("Product Name", "")
-        newRecord["Location"] = airtable_record["fields"].get("Location")
+        newRecord["Location"] = airtable_record["fields"].get("Location", "")
 
+        # Format fields
         base_fields = [
             format_field("Description", newRecord['FullTitle']),
             format_field("MSRP", newRecord['MSRP']),
@@ -779,72 +794,61 @@ def process_single_record(airtable_record: Dict, uploaded_image_urls: Dict[str, 
             format_html_field("Lot Number", product_id)
         ]
 
+        # HiBid and Description fields
         hibid_message = f"This item is live on our site, 702 Auctions.com. To view additional images and bid on this item, CLICK THE LINK ABOVE or visit bid.702auctions.com and search for lot number {newRecord['LotNumber']}."
         newRecord["HiBid"] = " -- ".join([hibid_message] + [field for field in base_fields if field])
         newRecord["Description"] = ''.join(field for field in html_base_fields if field)
+
+        # Standard fields
         newRecord["Currency"] = "USD"
         newRecord["ListingType"] = "Auction"
         newRecord["Seller"] = "702Auctions"
         newRecord["EventID"] = Auction_ID
-        
         newRecord["Region"] = "88850842" if selected_warehouse == "Maule Warehouse" else "88850843" if selected_warehouse == "Sunrise Warehouse" else ""
-
         newRecord["Source"] = "AMZ FC"
         newRecord["IsTaxable"] = "TRUE"
         newRecord["Quantity"] = "1"
-        
-        title = airtable_record["fields"]["Product Name"]
+
+        # Title and Category
+        title = airtable_record["fields"].get("Product Name", "")
         if selected_warehouse == "Sunrise Warehouse":
             title = "OFFSITE " + title
         newRecord["Title"] = text_shortener(title, 80)
-        
         newRecord["Category"] = category_converter(newRecord.get("Category_not_formatted", ""))
 
+        # Price and Subtitle
         auction_count = int(newRecord.get("AuctionCount", 0))
         newRecord["Price"] = "5.00" if auction_count == 1 else "2.50" if auction_count == 2 else "1.00" if auction_count >= 3 else "5.00"
-
         newRecord["Subtitle"] = format_subtitle(
-            int(newRecord.get("AuctionCount", 0)),
+            auction_count,
             float(newRecord.get("MSRP", 0)),
             newRecord.get("Other Notes", "")
         )
 
         # Handle image ordering
-        record_id = airtable_record['id']
         if record_id in uploaded_image_urls:
-            print(f"Found uploaded images for record ID: {record_id}")
-            print(f"Uploaded image URLs: {uploaded_image_urls[record_id]}")
+            gui_callback(f"Found uploaded images for record ID: {record_id}")
+            gui_callback(f"Uploaded image URLs: {uploaded_image_urls[record_id]}")
             
-            # Get all available images
             all_images = uploaded_image_urls[record_id]
-            print(f"All available images: {all_images}")
+            gui_callback(f"All available images: {all_images}")
 
-            # Create a mapping of original Airtable URLs to uploaded URLs
-            airtable_to_uploaded = {}
-            for i in range(1, 11):
-                airtable_url, airtable_filename = get_image_url(airtable_record, i)
-                if airtable_url:
-                    for uploaded_url in all_images:
-                        if uploaded_url.split('/')[-1].split('.')[0] == airtable_filename.split('.')[0]:
-                            airtable_to_uploaded[i] = uploaded_url
-                            break
-
-            # Assign sorted images to newRecord
-            for i in range(1, 11):
-                if i in airtable_to_uploaded:
-                    newRecord[f'Image_{i}'] = airtable_to_uploaded[i]
-                    print(f"Assigned Image_{i}: {airtable_to_uploaded[i]}")
-
+            for i, url in enumerate(all_images, start=1):
+                if i <= 10:  # Limit to 10 images
+                    newRecord[f'Image_{i}'] = url
+                    gui_callback(f"Assigned Image_{i}: {url}")
         else:
-            print(f"No uploaded images found for record ID: {record_id}")
+            gui_callback(f"No uploaded images found for record ID: {record_id}")
 
-        print(f"Final newRecord: {newRecord}")
+        gui_callback(f"Final newRecord: {newRecord}")
         newRecord['Success'] = True
         return newRecord
+
     except Exception as e:
         lot_number = airtable_record.get('fields', {}).get('Lot Number', 'Unknown')
-        error_message = f"Error processing Lot Number {lot_number}: {e}"
-        print(f"Error: {error_message}")
+        error_message = f"Error processing Lot Number {lot_number}: {str(e)}"
+        gui_callback(f"Error: {error_message}")
+        gui_callback(f"Traceback: {traceback.format_exc()}")
         return {'Lot Number': lot_number, 'Failure Message': error_message, 'Success': False}
 
 def process_records_concurrently(airtable_records: List[Dict], uploaded_image_urls: Dict[str, List[str]], gui_callback, auction_id: str, selected_warehouse: str, should_stop: threading.Event) -> Tuple[List[Dict], List[Dict]]:
@@ -853,7 +857,7 @@ def process_records_concurrently(airtable_records: List[Dict], uploaded_image_ur
     failed_records = []
 
     with ThreadPoolExecutor() as executor:
-        future_to_record = {executor.submit(process_single_record, record, uploaded_image_urls, auction_id, selected_warehouse): record for record in airtable_records}
+        future_to_record = {executor.submit(process_single_record, record, uploaded_image_urls, auction_id, selected_warehouse, gui_callback): record for record in airtable_records}
 
         for future in as_completed(future_to_record):
             if should_stop.is_set():
