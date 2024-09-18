@@ -439,20 +439,22 @@ class AuctionFormatter:
     async def upload_csv_to_website(self, page, csv_content):
         temp_file_path = None
         try:
-            self.gui_callback("Step 1: Preparing for login...")
-            username, password = self.get_maule_login_credentials()
-            
-            self.gui_callback("Step 2: Logging into the website...")
-            login_success = await self.login_to_website(page, username, password)
-            if not login_success:
-                self.gui_callback("Error: Failed to log in. Aborting CSV upload.")
-                return False
+            # Check if we're already logged in
+            if "Account/LogOn" in page.url:
+                self.gui_callback("Not logged in. Proceeding with login...")
+                username, password = self.get_maule_login_credentials()
+                login_success = await self.login_to_website(page, username, password)
+                if not login_success:
+                    self.gui_callback("Error: Failed to log in. Aborting CSV upload.")
+                    return False
+            else:
+                self.gui_callback("Already logged in. Proceeding with CSV upload...")
 
-            self.gui_callback("Step 3: Navigating to ImportCSV URL...")
+            self.gui_callback("Step 1: Navigating to ImportCSV URL...")
             await page.goto("https://bid.702auctions.com/Admin/ImportCSV")
             await page.wait_for_load_state('networkidle', timeout=60000)
             
-            self.gui_callback("Step 4: Waiting for form to load...")
+            self.gui_callback("Step 2: Waiting for form to load...")
             try:
                 await page.wait_for_selector("#CsvImportForm", state="visible", timeout=60000)
             except Exception as e:
@@ -460,7 +462,7 @@ class AuctionFormatter:
                 await page.screenshot(path='form_not_found.png')
                 return False
             
-            self.gui_callback("Step 5: Unchecking 'Validate Data ONLY' checkbox...")
+            self.gui_callback("Step 3: Unchecking 'Validate Data ONLY' checkbox...")
             try:
                 await page.evaluate("""
                 () => {
@@ -477,19 +479,19 @@ class AuctionFormatter:
                 self.gui_callback(f"Error: Failed to uncheck 'Validate Data ONLY'. {str(e)}")
                 await page.screenshot(path='validate_checkbox_error.png')
             
-            self.gui_callback("Step 6: Updating report email address...")
+            self.gui_callback("Step 4: Updating report email address...")
             try:
                 await page.fill("#Text1", "matthew@702auctions.com")
             except Exception as e:
                 self.gui_callback(f"Error: Failed to update email address. {str(e)}")
                 await page.screenshot(path='email_update_error.png')
             
-            self.gui_callback("Step 7: Preparing CSV file for upload...")
+            self.gui_callback("Step 5: Preparing CSV file for upload...")
             with tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.csv') as temp_file:
                 temp_file.write(csv_content)
                 temp_file_path = temp_file.name
             
-            self.gui_callback("Step 8: Selecting CSV file...")
+            self.gui_callback("Step 6: Selecting CSV file...")
             try:
                 await page.set_input_files("#file", temp_file_path)
             except Exception as e:
@@ -497,7 +499,7 @@ class AuctionFormatter:
                 await page.screenshot(path='file_selection_error.png')
                 return False
             
-            self.gui_callback("Step 9: Clicking 'Upload CSV' button...")
+            self.gui_callback("Step 7: Clicking 'Upload CSV' button...")
             try:
                 upload_button = await page.wait_for_selector("input.btn.btn-info.btn-sm[type='submit'][value='Upload CSV']", state="visible", timeout=20000)
                 if upload_button:
@@ -511,7 +513,7 @@ class AuctionFormatter:
                 await page.screenshot(path='upload_click_error.png')
                 return False
             
-            self.gui_callback("Step 10: Waiting for upload to complete...")
+            self.gui_callback("Step 8: Waiting for upload to complete...")
             try:
                 await page.wait_for_selector(".alert-success", state="visible", timeout=120000)
                 success_message = await page.inner_text(".alert-success")
