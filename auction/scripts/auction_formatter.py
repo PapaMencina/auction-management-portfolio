@@ -807,35 +807,27 @@ def process_single_record(airtable_record: Dict, uploaded_image_urls: Dict[str, 
 
         # Handle image ordering
         record_id = airtable_record['id']
-        print(f"Processing record ID: {record_id}")
         if record_id in uploaded_image_urls:
             print(f"Found uploaded images for record ID: {record_id}")
             print(f"Uploaded image URLs: {uploaded_image_urls[record_id]}")
             
             # Get all available images
-            all_images = []
-            for i in range(1, 11):
-                image_url = get_image_url(airtable_record, i)
-                print(f"Image {i} URL from Airtable: {image_url}")
-                if image_url and image_url in uploaded_image_urls[record_id]:
-                    all_images.append(image_url)
-            
+            all_images = uploaded_image_urls[record_id]  # Use the uploaded URLs directly
             print(f"All available images: {all_images}")
 
             # Ensure stock photo (Image 1) is first if it exists
-            stock_photo = get_image_url(airtable_record, 1)
-            print(f"Stock photo URL: {stock_photo}")
-            if stock_photo and stock_photo in all_images:
-                all_images.remove(stock_photo)
-                all_images.insert(0, stock_photo)
-                print(f"Reordered images with stock photo first: {all_images}")
+            # stock_photo = get_image_url(airtable_record, 1)
+            # print(f"Stock photo URL: {stock_photo}")
+            # if stock_photo and stock_photo in all_images:
+            #     all_images.remove(stock_photo)
+            #     all_images.insert(0, stock_photo)
+            #     print(f"Reordered images with stock photo first: {all_images}")
 
             # Assign images to newRecord
             for i, url in enumerate(all_images, 1):
                 if i <= 10:  # Limit to 10 images
                     newRecord[f'Image_{i}'] = url
                     print(f"Assigned Image_{i}: {url}")
-
         else:
             print(f"No uploaded images found for record ID: {record_id}")
 
