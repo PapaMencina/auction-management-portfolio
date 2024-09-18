@@ -764,6 +764,8 @@ def upload_images_and_get_urls(downloaded_images: Dict[str, List[Tuple[str, int]
                         url = "https://" + url
                     uploaded_image_urls.setdefault(record_id, []).append((url, image_number))
                     gui_callback(f"Uploaded image for record {record_id}: {url}")
+                else:
+                    gui_callback(f"Failed to upload image for record {record_id}")
             except Exception as e:
                 gui_callback(f"Error uploading image {image_path}: {e}")
 
@@ -864,19 +866,23 @@ def process_single_record(airtable_record: Dict, uploaded_image_urls: Dict[str, 
             sorted_images = sorted(uploaded_image_urls[record_id], key=lambda x: x[1])
             
             for i, (url, image_number) in enumerate(sorted_images, 1):
-                newRecord[f'Image_{i}'] = url
-                gui_callback(f"Assigned Image_{i}: {url}")
-            
+                if i <= 10:  # Ensure we only use up to 10 images
+                    newRecord[f'Image_{i}'] = url
+                    gui_callback(f"Assigned Image_{i}: {url}")
+                else:
+                    break
+
             # Ensure all 10 image fields are present, even if empty
             for i in range(1, 11):
                 if f'Image_{i}' not in newRecord:
                     newRecord[f'Image_{i}'] = ''
-
+                    gui_callback(f"No Image_{i} assigned")
         else:
             gui_callback(f"No uploaded images found for record ID: {record_id}")
             # Add empty image fields
             for i in range(1, 11):
                 newRecord[f'Image_{i}'] = ''
+                gui_callback(f"No Image_{i} assigned")
 
         gui_callback(f"Final newRecord: {newRecord}")
         newRecord['Success'] = True
@@ -932,14 +938,22 @@ def processed_records_to_df(processed_records: List[Dict], Auction_ID: str, gui_
     
     df = df.reindex(columns=column_order, fill_value='')
     
-    # Ensure all image columns are present
+    # Check image URLs
     for i in range(1, 11):
-        if f'Image_{i}' not in df.columns:
-            df[f'Image_{i}'] = ''
-    
+        col_name = f'Image_{i}'
+        if col_name in df.columns:
+            non_empty_urls = df[df[col_name] != ''][col_name]
+            if not non_empty_urls.empty:
+                gui_callback(f"Sample of {col_name} URLs:")
+                gui_callback(non_empty_urls.head().to_string())
+            else:
+                gui_callback(f"No non-empty URLs found for {col_name}")
+        else:
+            gui_callback(f"{col_name} column not found in DataFrame")
+
     csv_content = df.to_csv(index=False)
     gui_callback(f'Processed {len(processed_records)} records successfully.')
-    gui_callback(f'CSV content preview:\n{df.head().to_string()}')
+    gui_callback(f'CSV content preview:\n{csv_content[:1000]}')
 
     return csv_content
 
