@@ -30,6 +30,20 @@ logger = logging.getLogger(__name__)
 # Define a lock for thread-safe file operations
 file_lock = threading.Lock()
 
+def get_maule_login_credentials():
+    # Temporarily set the active warehouse to Maule
+    original_warehouse = config_manager.active_warehouse
+    config_manager.set_active_warehouse("Maule Warehouse")
+    
+    bid_username = config_manager.get_warehouse_var('bid_username')
+    bid_password = config_manager.get_warehouse_var('bid_password')
+    
+    # Reset the active warehouse to the original selection
+    config_manager.set_active_warehouse(original_warehouse)
+    
+    logger.info('Note: Using Maule warehouse credentials for auction site login, regardless of selected warehouse.')
+    return bid_username, bid_password
+
 # Make sure to keep these helper functions in your script
 def wait_for_element(page, selector, timeout=30000):
     """Wait for an element to be present and return it."""
@@ -285,9 +299,8 @@ async def create_auction(page, auction_title, image_path, formatted_start_date, 
         # Navigate to the login page first
         await page.goto(website_login_url)
         
-        logger.info('Logging in to auction site...')
-        bid_username = config_manager.get_warehouse_var('bid_username')
-        bid_password = config_manager.get_warehouse_var('bid_password')
+        logger.info('Logging in to auction site using Maule Warehouse credentials...')
+        bid_username, bid_password = get_maule_login_credentials()
         login_success = await login_auction_site(page, bid_username, bid_password, website_login_url)
         if not login_success:
             logger.error("Failed to log in to auction site. Aborting process.")

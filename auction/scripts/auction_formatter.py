@@ -319,6 +319,20 @@ def get_airtable_records_list(BASE: str, TABLE: str, VIEW: str, gui_callback, ai
     gui_callback(f"Retrieved a total of {len(responseList)} records from Airtable")
     return responseList
 
+def get_maule_login_credentials(self):
+    # Temporarily set the active warehouse to Maule
+    original_warehouse = config_manager.active_warehouse
+    config_manager.set_active_warehouse("Maule Warehouse")
+    
+    bid_username = config_manager.get_warehouse_var('bid_username')
+    bid_password = config_manager.get_warehouse_var('bid_password')
+    
+    # Reset the active warehouse to the original selection
+    config_manager.set_active_warehouse(original_warehouse)
+    
+    self.gui_callback('Note: Using Maule warehouse credentials for auction site login, regardless of selected warehouse.')
+    return bid_username, bid_password
+
 def text_shortener(inputText: str, strLen: int) -> str:
     if len(inputText) > strLen:
         end = inputText.rfind(' ', 0, strLen)
@@ -543,8 +557,8 @@ class AuctionFormatter:
                     browser = await p.chromium.launch(headless=True)
                     page = await browser.new_page()
                     
-                    username = config_manager.get_warehouse_var('bid_username')
-                    password = config_manager.get_warehouse_var('bid_password')
+                    # Use Maule Warehouse credentials
+                    username, password = self.get_maule_login_credentials()
 
                     self.gui_callback("Logging into website...")
                     login_success = await self.login_to_website(page, username, password)
