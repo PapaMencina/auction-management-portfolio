@@ -138,29 +138,29 @@ def process_image_wrapper(image_path: str, gui_callback, should_stop: threading.
     process_image(image_path, gui_callback)
     return image_path
 
-def process_images_in_bulk(downloaded_images_bulk: Dict[str, List[str]], gui_callback, should_stop: threading.Event) -> Dict[str, List[str]]:
+def process_images_in_bulk(downloaded_images_bulk: Dict[str, List[Tuple[str, int]]], gui_callback, should_stop: threading.Event) -> Dict[str, List[Tuple[str, int]]]:
     gui_callback("Processing Images...")
     all_image_paths = []
     record_id_map = {}
 
     for record_id, image_paths in downloaded_images_bulk.items():
-        for image_path in image_paths:
-            all_image_paths.append(image_path)
+        for image_path, image_number in image_paths:
+            all_image_paths.append((image_path, image_number))
             record_id_map[image_path] = record_id
 
     processed_images = {}
     with ThreadPoolExecutor() as executor:
-        future_to_image = {executor.submit(process_image_wrapper, img_path, gui_callback, should_stop): img_path for img_path in all_image_paths}
+        future_to_image = {executor.submit(process_image_wrapper, img_path, gui_callback, should_stop): (img_path, img_number) for img_path, img_number in all_image_paths}
 
         for future in as_completed(future_to_image):
             if should_stop.is_set():
                 break
 
-            img_path = future_to_image[future]
+            img_path, img_number = future_to_image[future]
             try:
                 result = future.result()
                 record_id = record_id_map[img_path]
-                processed_images.setdefault(record_id, []).append(result)
+                processed_images.setdefault(record_id, []).append((result, img_number))
             except Exception as e:
                 gui_callback(f"Error processing image {img_path}: {e}")
 
@@ -688,51 +688,51 @@ def collect_image_urls(airtable_records: List[Dict], should_stop: threading.Even
         product_id = str(record["fields"].get("Lot Number", ""))
         record_id = record['id']
         for count in range(1, 11):
-            image_url, _ = get_image_url(record, count)
+            image_url, filename, image_number = get_image_url(record, count)
             if image_url:
                 file_name = f"{product_id}_{count}"
-                download_tasks.append((record_id, image_url, file_name))
+                download_tasks.append((record_id, image_url, file_name, image_number))
     return download_tasks
 
-def download_images_bulk(download_tasks: List[tuple], gui_callback, should_stop: threading.Event) -> Dict[str, List[str]]:
+def download_images_bulk(download_tasks: List[tuple], gui_callback, should_stop: threading.Event) -> Dict[str, List[Tuple[str, int]]]:
     gui_callback("Downloading Images...")
     image_paths = {}
 
     with ThreadPoolExecutor(max_workers=7) as executor:
-        future_to_task = {executor.submit(download_image, url, file_name, gui_callback): (record_id, file_name) for record_id, url, file_name in download_tasks}
+        future_to_task = {executor.submit(download_image, url, file_name, gui_callback): (record_id, file_name, image_number) for record_id, url, file_name, image_number in download_tasks}
 
         for future in as_completed(future_to_task):
             if should_stop.is_set():
                 break
 
-            record_id, file_name = future_to_task[future]
+            record_id, file_name, image_number = future_to_task[future]
             try:
                 downloaded_path = future.result()
                 if downloaded_path:
-                    image_paths.setdefault(record_id, []).append(downloaded_path)
+                    image_paths.setdefault(record_id, []).append((downloaded_path, image_number))
             except Exception as e:
                 gui_callback(f"Error downloading image for {file_name}: {e}")
 
     return image_paths
 
-def upload_images_and_get_urls(downloaded_images: Dict[str, List[str]], gui_callback, should_stop: threading.Event) -> Dict[str, List[str]]:
+def upload_images_and_get_urls(downloaded_images: Dict[str, List[Tuple[str, int]]], gui_callback, should_stop: threading.Event) -> Dict[str, List[Tuple[str, int]]]:
     gui_callback("Uploading Images...")
     uploaded_image_urls = {}
 
     with ThreadPoolExecutor(max_workers=4) as executor:
-        future_to_image = {executor.submit(upload_image, image_path, gui_callback, should_stop): (record_id, image_path) for record_id, image_paths in downloaded_images.items() for image_path in image_paths}
+        future_to_image = {executor.submit(upload_image, image_path, gui_callback, should_stop): (record_id, image_path, image_number) for record_id, image_paths in downloaded_images.items() for image_path, image_number in image_paths}
 
         for future in as_completed(future_to_image):
             if should_stop.is_set():
                 return uploaded_image_urls
 
-            record_id, image_path = future_to_image[future]
+            record_id, image_path, image_number = future_to_image[future]
             try:
                 url = future.result()
                 if url:
                     if not url.startswith("https://"):
                         url = "https://" + url
-                    uploaded_image_urls.setdefault(record_id, []).append(url)
+                    uploaded_image_urls.setdefault(record_id, []).append((url, image_number))
                     gui_callback(f"Uploaded image for record {record_id}: {url}")
             except Exception as e:
                 gui_callback(f"Error uploading image {image_path}: {e}")
