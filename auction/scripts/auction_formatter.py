@@ -335,12 +335,12 @@ def format_field(label: str, value: str) -> str:
 def format_html_field(field_name: str, value: str) -> str:
     return f"<b>{field_name}</b>: {value}<br>" if value else ""
     
-def get_image_url(airtable_record: Dict, count: int) -> Tuple[str, str]:
+def get_image_url(airtable_record: Dict, count: int) -> Tuple[str, str, int]:
     url = airtable_record.get("fields", {}).get(f"Image {count}", [{}])[0].get("url", "")
     filename = url.split('/')[-1] if url else ""
     print(f"Airtable Image {count} URL: {url}")
     print(f"Airtable Image {count} Filename: {filename}")
-    return url, filename
+    return url, filename, count
 
 class AuctionFormatter:
     def __init__(self, event, gui_callback, should_stop, callback, selected_warehouse):
@@ -826,17 +826,26 @@ def process_single_record(airtable_record: Dict, uploaded_image_urls: Dict[str, 
         )
 
         # Handle image ordering
+        record_id = airtable_record['id']
         if record_id in uploaded_image_urls:
             gui_callback(f"Found uploaded images for record ID: {record_id}")
             gui_callback(f"Uploaded image URLs: {uploaded_image_urls[record_id]}")
             
-            all_images = uploaded_image_urls[record_id]
-            gui_callback(f"All available images: {all_images}")
+            # Get all available images from Airtable
+            airtable_images = []
+            for i in range(1, 11):
+                url, filename, image_number = get_image_url(airtable_record, i)
+                if url:
+                    airtable_images.append((url, filename, image_number))
+            
+            # Match Airtable images with uploaded images
+            for airtable_url, airtable_filename, image_number in airtable_images:
+                for uploaded_url in uploaded_image_urls[record_id]:
+                    if airtable_filename in uploaded_url:
+                        newRecord[f'Image_{image_number}'] = uploaded_url
+                        gui_callback(f"Assigned Image_{image_number}: {uploaded_url}")
+                        break
 
-            for i, url in enumerate(all_images, start=1):
-                if i <= 10:  # Limit to 10 images
-                    newRecord[f'Image_{i}'] = url
-                    gui_callback(f"Assigned Image_{i}: {url}")
         else:
             gui_callback(f"No uploaded images found for record ID: {record_id}")
 
