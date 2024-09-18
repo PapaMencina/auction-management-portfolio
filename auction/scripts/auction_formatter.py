@@ -436,80 +436,102 @@ class AuctionFormatter:
             await self.save_screenshot(page, "login_failure_unexpected")
             return False
 
-    async def upload_csv_to_website(self, page, csv_content):
-        temp_file_path = None
-        try:
-            self.gui_callback("Navigating to upload page...")
-            await page.goto("https://bid.702auctions.com/Admin/ImportCSV")
-            
-            self.gui_callback("Waiting for page to load...")
+    async def upload_csv_to_website(self, page, csv_content, max_retries=3):
+        for attempt in range(max_retries):
             try:
-                await page.wait_for_selector("#CsvImportForm", state="visible", timeout=60000)  # Increased timeout to 60 seconds
-            except Exception as e:
-                self.gui_callback(f"Error waiting for form: {str(e)}")
-                await page.screenshot(path='csv_upload_form_not_found.png')
-                return False
-            
-            self.gui_callback("Uploading CSV file...")
-            with tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.csv') as temp_file:
-                temp_file.write(csv_content)
-                temp_file_path = temp_file.name
+                self.gui_callback("Navigating to upload page...")
+                await page.goto("https://bid.702auctions.com/Admin/ImportCSV")
+                
+                self.gui_callback("Waiting for page to load...")
+                try:
+                    # Wait for the form to be visible
+                    await page.wait_for_selector("#CsvImportForm", state="visible", timeout=120000)
+                    
+                    # Wait for the file input to be visible
+                    await page.wait_for_selector("#file", state="visible", timeout=30000)
+                except Exception as e:
+                    self.gui_callback(f"Error waiting for form elements: {str(e)}")
+                    
+                    if "Account/Logon" in page.url:
+                        self.gui_callback("Redirected to login page. Attempting to log in again...")
+                        username, password = self.get_maule_login_credentials()
+                        login_success = await self.login_to_website(page, username, password)
+                        if not login_success:
+                            raise Exception("Failed to log in again")
+                        continue
+                    
+                    await page.screenshot(path=f'csv_upload_form_not_found_attempt_{attempt+1}.png')
+                    if attempt == max_retries - 1:
+                        return False
+                    continue
+                
+                self.gui_callback("Uploading CSV file...")
+                with tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.csv') as temp_file:
+                    temp_file.write(csv_content)
+                    temp_file_path = temp_file.name
 
-            await page.set_input_files("#file", temp_file_path)
-            
-            self.gui_callback("Unchecking 'Validate Data ONLY' checkbox...")
-            await page.evaluate("""
-            () => {
-                var checkbox = document.querySelector('input[name="validate"]');
-                var toggle = document.querySelector('.fs-checkbox-toggle');
-                if (checkbox && toggle) {
-                    checkbox.value = 'false';
-                    toggle.classList.remove('fs-checkbox-checked');
-                    toggle.classList.add('fs-checkbox-unchecked');
+                # Use the correct file input selector
+                await page.set_input_files("#file", temp_file_path)
+                
+                self.gui_callback("Unchecking 'Validate Data ONLY' checkbox...")
+                await page.evaluate("""
+                () => {
+                    var checkbox = document.querySelector('input[name="validate"]');
+                    if (checkbox) {
+                        checkbox.checked = false;
+                    }
+                    var toggle = document.querySelector('.fs-checkbox-toggle');
+                    if (toggle) {
+                        toggle.classList.remove('fs-checkbox-checked');
+                        toggle.classList.add('fs-checkbox-unchecked');
+                    }
                 }
-            }
-            """)
-            
-            self.gui_callback("Updating email address...")
-            await page.fill("#Text1", "matthew@702auctions.com")
-            
-            await page.wait_for_timeout(2000)
-            
-            self.gui_callback("Submitting form...")
-            submit_button = await page.wait_for_selector("input.btn.btn-info.btn-sm[type='submit'][value='Upload CSV']", state="visible", timeout=20000)
-            if not submit_button:
-                self.gui_callback("Submit button not found")
-                await page.screenshot(path='csv_upload_submit_button_not_found.png')
-                return False
-            await submit_button.click()
-            
-            self.gui_callback("Waiting for upload to complete...")
-            try:
-                await page.wait_for_selector(".alert-success", state="visible", timeout=120000)
+                """)
+                
+                self.gui_callback("Updating email address...")
+                await page.fill("#Text1", "matthew@702auctions.com")
+                
+                await page.wait_for_timeout(2000)
+                
+                self.gui_callback("Submitting form...")
+                submit_button = await page.wait_for_selector("input.btn.btn-info.btn-sm[type='submit'][value='Upload CSV']", state="visible", timeout=20000)
+                if not submit_button:
+                    self.gui_callback("Submit button not found")
+                    await page.screenshot(path=f'csv_upload_submit_button_not_found_attempt_{attempt+1}.png')
+                    if attempt == max_retries - 1:
+                        return False
+                    continue
+                await submit_button.click()
+                
+                self.gui_callback("Waiting for upload to complete...")
+                try:
+                    await page.wait_for_selector(".alert-success", state="visible", timeout=120000)
+                except Exception as e:
+                    self.gui_callback(f"Error waiting for success message: {str(e)}")
+                    await page.screenshot(path=f'csv_upload_success_message_not_found_attempt_{attempt+1}.png')
+                    if attempt == max_retries - 1:
+                        return False
+                    continue
+                
+                success_message = await page.inner_text(".alert-success")
+                self.gui_callback(f"Upload result: {success_message}")
+                
+                if "CSV listing import has started" in success_message:
+                    self.gui_callback("CSV upload initiated successfully!")
+                    return True
+                else:
+                    self.gui_callback("CSV upload failed.")
+                    if attempt == max_retries - 1:
+                        return False
+                    continue
+                
             except Exception as e:
-                self.gui_callback(f"Error waiting for success message: {str(e)}")
-                await page.screenshot(path='csv_upload_success_message_not_found.png')
-                return False
-            
-            success_message = await page.inner_text(".alert-success")
-            self.gui_callback(f"Upload result: {success_message}")
-            
-            if "CSV listing import has started" in success_message:
-                self.gui_callback("CSV upload initiated successfully!")
-                return True
-            else:
-                self.gui_callback("CSV upload failed.")
-                return False
-            
-        except Exception as e:
-            self.gui_callback(f"Failed to upload CSV: {str(e)}")
-            await page.screenshot(path='csv_upload_error.png')
-            return False
+                self.gui_callback(f"Failed to upload CSV (Attempt {attempt+1}/{max_retries}): {str(e)}")
+                await page.screenshot(path=f'csv_upload_error_attempt_{attempt+1}.png')
+                if attempt == max_retries - 1:
+                    return False
         
-        finally:
-            # Clean up the temporary file
-            if temp_file_path and os.path.exists(temp_file_path):
-                os.unlink(temp_file_path)
+        return False
 
     async def run_auction_formatter(self):
         try:
