@@ -319,20 +319,6 @@ def get_airtable_records_list(BASE: str, TABLE: str, VIEW: str, gui_callback, ai
     gui_callback(f"Retrieved a total of {len(responseList)} records from Airtable")
     return responseList
 
-def get_maule_login_credentials(self):
-    # Temporarily set the active warehouse to Maule
-    original_warehouse = config_manager.active_warehouse
-    config_manager.set_active_warehouse("Maule Warehouse")
-    
-    bid_username = config_manager.get_warehouse_var('bid_username')
-    bid_password = config_manager.get_warehouse_var('bid_password')
-    
-    # Reset the active warehouse to the original selection
-    config_manager.set_active_warehouse(original_warehouse)
-    
-    self.gui_callback('Note: Using Maule warehouse credentials for auction site login, regardless of selected warehouse.')
-    return bid_username, bid_password
-
 def text_shortener(inputText: str, strLen: int) -> str:
     if len(inputText) > strLen:
         end = inputText.rfind(' ', 0, strLen)
@@ -383,6 +369,20 @@ class AuctionFormatter:
         screenshot_path = f"/tmp/{name}_{timestamp}.png"
         await page.screenshot(path=screenshot_path)
         self.gui_callback(f"Screenshot saved: {screenshot_path}")
+    
+    def get_maule_login_credentials(self):
+        # Temporarily set the active warehouse to Maule
+        original_warehouse = config_manager.active_warehouse
+        config_manager.set_active_warehouse("Maule Warehouse")
+        
+        bid_username = config_manager.get_warehouse_var('bid_username')
+        bid_password = config_manager.get_warehouse_var('bid_password')
+        
+        # Reset the active warehouse to the original selection
+        config_manager.set_active_warehouse(original_warehouse)
+        
+        self.gui_callback('Note: Using Maule warehouse credentials for auction site login, regardless of selected warehouse.')
+        return bid_username, bid_password
 
     async def login_to_website(self, page, username, password):
         if not self.should_continue("Login operation stopped by user."):
@@ -683,13 +683,11 @@ def collect_image_urls(airtable_records: List[Dict], should_stop: threading.Even
 
         product_id = str(record["fields"].get("Lot Number", ""))
         record_id = record['id']
-        image_counter = 1
         for count in range(1, 11):
             image_url = get_image_url(record, count)
             if image_url:
-                file_name = f"{product_id}_{image_counter}"
+                file_name = f"{product_id}_{count}"
                 download_tasks.append((record_id, image_url, file_name))
-                image_counter += 1
     return download_tasks
 
 def download_images_bulk(download_tasks: List[tuple], gui_callback, should_stop: threading.Event) -> Dict[str, List[str]]:
@@ -805,10 +803,26 @@ def process_single_record(airtable_record: Dict, uploaded_image_urls: Dict[str, 
             newRecord.get("Other Notes", "")
         )
 
+        # Handle image ordering
         record_id = airtable_record['id']
         if record_id in uploaded_image_urls:
-            for i, url in enumerate(uploaded_image_urls[record_id], 1):
-                newRecord[f'Image_{i}'] = url
+            # Get all available images
+            all_images = []
+            for i in range(1, 11):
+                image_url = get_image_url(airtable_record, i)
+                if image_url and image_url in uploaded_image_urls[record_id]:
+                    all_images.append(image_url)
+
+            # Ensure stock photo (Image 1) is first if it exists
+            stock_photo = get_image_url(airtable_record, 1)
+            if stock_photo and stock_photo in all_images:
+                all_images.remove(stock_photo)
+                all_images.insert(0, stock_photo)
+
+            # Assign images to newRecord
+            for i, url in enumerate(all_images, 1):
+                if i <= 10:  # Limit to 10 images
+                    newRecord[f'Image_{i}'] = url
 
         newRecord['Success'] = True
         return newRecord
