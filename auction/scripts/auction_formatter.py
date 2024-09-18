@@ -440,7 +440,7 @@ class AuctionFormatter:
         for attempt in range(max_retries):
             try:
                 self.gui_callback("Navigating to upload page...")
-                await page.goto("https://bid.702auctions.com/Admin/ImportCSV")
+                await page.goto("https://bid.702auctions.com/Admin/ImportCSV", timeout=120000)
                 
                 self.gui_callback("Waiting for page to load...")
                 try:
@@ -448,7 +448,7 @@ class AuctionFormatter:
                     await page.wait_for_selector("#CsvImportForm", state="visible", timeout=120000)
                     
                     # Wait for the file input to be visible
-                    await page.wait_for_selector("#file", state="visible", timeout=30000)
+                    await page.wait_for_selector("input#file[type='file']", state="visible", timeout=30000)
                 except Exception as e:
                     self.gui_callback(f"Error waiting for form elements: {str(e)}")
                     
@@ -471,7 +471,7 @@ class AuctionFormatter:
                     temp_file_path = temp_file.name
 
                 # Use the correct file input selector
-                await page.set_input_files("#file", temp_file_path)
+                await page.set_input_files("input#file[type='file']", temp_file_path)
                 
                 self.gui_callback("Unchecking 'Validate Data ONLY' checkbox...")
                 await page.evaluate("""
