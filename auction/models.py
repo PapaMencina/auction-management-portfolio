@@ -43,13 +43,12 @@ class VoidedTransaction(models.Model):
     def __str__(self):
         return f"Voided Transaction for Event {self.event.event_id}"
     
-# In models.py
 class ImageMetadata(models.Model):
     event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name='images')
     filename = models.CharField(max_length=255)
     is_primary = models.BooleanField(default=False)
     uploaded_at = models.DateTimeField(auto_now_add=True)
-    image = models.ImageField(upload_to='auction_images/', null=True, blank=True)  # Allow null temporarily
+    image = models.URLField(max_length=1000)  # Change this line
 
     def __str__(self):
         return f"{self.filename} for event {self.event.event_id}"

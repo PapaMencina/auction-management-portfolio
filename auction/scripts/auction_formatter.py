@@ -741,14 +741,14 @@ def upload_images_and_get_urls(downloaded_images: Dict[str, List[Tuple[str, int]
     return uploaded_image_urls
 
 @sync_to_async
-def save_images_to_database(event: Event, uploaded_image_urls: Dict[str, List[str]]):
+def save_images_to_database(event: Event, uploaded_image_urls: Dict[str, List[Tuple[str, int]]]):
     for record_id, urls in uploaded_image_urls.items():
-        for i, url in enumerate(urls, start=1):
+        for url, image_number in urls:
             ImageMetadata.objects.create(
                 event=event,
-                filename=f"{record_id}_{i}.jpg",
-                is_primary=(i == 1),
-                image=url
+                filename=f"{record_id}_{image_number}.jpg",
+                is_primary=(image_number == 1),
+                image=url  # Save the URL as a string
             )
 
 def process_single_record(airtable_record: Dict, uploaded_image_urls: Dict[str, List[str]], Auction_ID: str, selected_warehouse: str, gui_callback) -> Dict:
