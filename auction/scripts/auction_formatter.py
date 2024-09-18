@@ -339,10 +339,12 @@ def format_field(label: str, value: str) -> str:
 def format_html_field(field_name: str, value: str) -> str:
     return f"<b>{field_name}</b>: {value}<br>" if value else ""
     
-def get_image_url(airtable_record: Dict, count: int) -> str:
+def get_image_url(airtable_record: Dict, count: int) -> Tuple[str, str]:
     url = airtable_record.get("fields", {}).get(f"Image {count}", [{}])[0].get("url", "")
+    filename = url.split('/')[-1] if url else ""
     print(f"Airtable Image {count} URL: {url}")
-    return url
+    print(f"Airtable Image {count} Filename: {filename}")
+    return url, filename
 
 class AuctionFormatter:
     def __init__(self, event, gui_callback, should_stop, callback, selected_warehouse):
@@ -820,25 +822,18 @@ def process_single_record(airtable_record: Dict, uploaded_image_urls: Dict[str, 
             # Create a mapping of original Airtable URLs to uploaded URLs
             airtable_to_uploaded = {}
             for i in range(1, 11):
-                airtable_url = get_image_url(airtable_record, i)
+                airtable_url, airtable_filename = get_image_url(airtable_record, i)
                 if airtable_url:
                     for uploaded_url in all_images:
-                        if uploaded_url.split('/')[-1] == airtable_url.split('/')[-1]:
-                            airtable_to_uploaded[airtable_url] = uploaded_url
+                        if uploaded_url.split('/')[-1].split('.')[0] == airtable_filename.split('.')[0]:
+                            airtable_to_uploaded[i] = uploaded_url
                             break
 
-            # Sort images based on their original order in Airtable
-            sorted_images = []
-            for i in range(1, 11):
-                airtable_url = get_image_url(airtable_record, i)
-                if airtable_url in airtable_to_uploaded:
-                    sorted_images.append(airtable_to_uploaded[airtable_url])
-
             # Assign sorted images to newRecord
-            for i, url in enumerate(sorted_images, 1):
-                if i <= 10:  # Limit to 10 images
-                    newRecord[f'Image_{i}'] = url
-                    print(f"Assigned Image_{i}: {url}")
+            for i in range(1, 11):
+                if i in airtable_to_uploaded:
+                    newRecord[f'Image_{i}'] = airtable_to_uploaded[i]
+                    print(f"Assigned Image_{i}: {airtable_to_uploaded[i]}")
 
         else:
             print(f"No uploaded images found for record ID: {record_id}")
@@ -851,7 +846,6 @@ def process_single_record(airtable_record: Dict, uploaded_image_urls: Dict[str, 
         error_message = f"Error processing Lot Number {lot_number}: {e}"
         print(f"Error: {error_message}")
         return {'Lot Number': lot_number, 'Failure Message': error_message, 'Success': False}
-
 
 def process_records_concurrently(airtable_records: List[Dict], uploaded_image_urls: Dict[str, List[str]], gui_callback, auction_id: str, selected_warehouse: str, should_stop: threading.Event) -> Tuple[List[Dict], List[Dict]]:
     gui_callback("Creating CSV...")
