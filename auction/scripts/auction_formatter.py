@@ -727,7 +727,11 @@ class AuctionFormatter:
 
     async def upload_images_and_get_urls(self, processed_images):
         async def upload_image_async(image_path):
-            return await sync_to_async(upload_image)(image_path, self.gui_callback, self.should_stop)
+            try:
+                return await sync_to_async(upload_image)(image_path, self.gui_callback, self.should_stop)
+            except Exception as e:
+                self.gui_callback(f"Error uploading image {image_path}: {e}")
+                return None  # Return None instead of raising an exception
 
         uploaded_image_urls = defaultdict(list)
         for record_id, image_paths in processed_images.items():
@@ -739,6 +743,8 @@ class AuctionFormatter:
                     if not url.startswith("https://"):
                         url = "https://" + url
                     uploaded_image_urls[record_id].append((url, image_number))
+                else:
+                    self.gui_callback(f"Failed to upload image for record {record_id}, image number {image_number}")
         return dict(uploaded_image_urls)
 
     async def process_records_concurrently(self, airtable_records, uploaded_image_urls):
@@ -937,18 +943,13 @@ def process_single_record(airtable_record: Dict, uploaded_image_urls: Dict[str, 
             # Sort the uploaded images by image number
             sorted_images = sorted(uploaded_image_urls[record_id], key=lambda x: x[1])
             
-            for i, (url, image_number) in enumerate(sorted_images, 1):
-                if i <= 10:  # Ensure we only use up to 10 images
-                    newRecord[f'Image_{i}'] = url
-                    gui_callback(f"Assigned Image_{i}: {url}")
-                else:
-                    break
-
-            # Ensure all 10 image fields are present, even if empty
             for i in range(1, 11):
-                if f'Image_{i}' not in newRecord:
-                    newRecord[f'Image_{i}'] = ''
-                    gui_callback(f"No Image_{i} assigned")
+                newRecord[f'Image_{i}'] = ''  # Initialize all image fields as empty
+            
+            for url, image_number in sorted_images:
+                if image_number <= 10:  # Ensure we only use up to 10 images
+                    newRecord[f'Image_{image_number}'] = url
+                    gui_callback(f"Assigned Image_{image_number}: {url}")
         else:
             gui_callback(f"No uploaded images found for record ID: {record_id}")
             # Add empty image fields
