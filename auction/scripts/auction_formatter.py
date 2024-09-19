@@ -9,6 +9,7 @@ import json
 import shutil
 import random
 import asyncio
+from collections import defaultdict
 from asgiref.sync import sync_to_async
 from playwright.async_api import async_playwright, expect
 from typing import List, Dict, Tuple
@@ -544,26 +545,20 @@ class AuctionFormatter:
             self.gui_callback("Starting auction formatting process...")
             
             # Fetch Airtable records
-            airtable_records = get_airtable_records_list(
-                config_manager.get_warehouse_var('airtable_inventory_base_id'),
-                config_manager.get_warehouse_var('airtable_inventory_table_id'),
-                config_manager.get_warehouse_var('airtable_send_to_auction_view_id'),
-                self.gui_callback,
-                config_manager.get_warehouse_var('airtable_api_key')
-            )
+            airtable_records = await self.fetch_airtable_records()
 
             # Process images
             self.gui_callback("Collecting image URLs...")
             download_tasks = collect_image_urls(airtable_records, self.should_stop)
             
             self.gui_callback("Downloading images...")
-            downloaded_images = download_images_bulk(download_tasks, self.gui_callback, self.should_stop)
+            downloaded_images = await self.download_images_bulk(download_tasks)
             
             self.gui_callback("Processing images...")
-            processed_images = process_images_in_bulk(downloaded_images, self.gui_callback, self.should_stop)
+            processed_images = await self.process_images_in_bulk(downloaded_images)
             
             self.gui_callback("Uploading images...")
-            uploaded_image_urls = upload_images_and_get_urls(processed_images, self.gui_callback, self.should_stop)
+            uploaded_image_urls = await self.upload_images_and_get_urls(processed_images)
 
             # Save uploaded image URLs to the database
             self.gui_callback("Saving image metadata to database...")
@@ -571,15 +566,14 @@ class AuctionFormatter:
 
             # Process records
             self.gui_callback("Processing records...")
-            processed_records, failed_records = process_records_concurrently(
-                airtable_records, uploaded_image_urls, self.gui_callback, 
-                self.Auction_ID, self.selected_warehouse, self.should_stop
+            processed_records, failed_records = await self.process_records_concurrently(
+                airtable_records, uploaded_image_urls
             )
 
             # Create and format CSV
             if processed_records:
                 self.gui_callback("Creating CSV content...")
-                csv_content = processed_records_to_df(processed_records, self.Auction_ID, self.gui_callback)
+                csv_content = await self.processed_records_to_df(processed_records)
                 self.final_csv_content = await self.format_final_csv(csv_content)
 
             # Upload CSV to website
@@ -615,19 +609,11 @@ class AuctionFormatter:
             # Process failed records
             if failed_records:
                 self.gui_callback("Processing failed records...")
-                self.failed_records_csv_content = failed_records_csv(failed_records, self.Auction_ID, self.gui_callback)
-                # TODO: Store failed records in the database or handle as needed
+                self.failed_records_csv_content = await self.failed_records_csv(failed_records)
 
             # Organize images
-            try:
-                self.gui_callback("Organizing images...")
-                await asyncio.wait_for(organize_images(self.event), timeout=300)  # 5 minutes timeout
-                self.gui_callback("Images organized successfully")
-            except asyncio.TimeoutError:
-                self.gui_callback("Organizing images timed out after 5 minutes")
-            except Exception as e:
-                self.gui_callback(f"Error organizing images: {str(e)}")
-                self.gui_callback(f"Traceback: {traceback.format_exc()}")
+            self.gui_callback("Organizing images...")
+            await self.organize_images()
 
             self.gui_callback("Auction formatting process completed successfully.")
 
@@ -702,6 +688,92 @@ class AuctionFormatter:
                 processed_items.insert(insert_position, item)
 
         return pd.DataFrame(processed_items)
+    
+    # Add new async methods
+    async def fetch_airtable_records(self):
+        return await sync_to_async(get_airtable_records_list)(
+            config_manager.get_warehouse_var('airtable_inventory_base_id'),
+            config_manager.get_warehouse_var('airtable_inventory_table_id'),
+            config_manager.get_warehouse_var('airtable_send_to_auction_view_id'),
+            self.gui_callback,
+            config_manager.get_warehouse_var('airtable_api_key')
+        )
+
+    async def download_images_bulk(self, download_tasks):
+        async def download_image_async(url, file_name):
+            return await sync_to_async(download_image)(url, file_name, self.gui_callback)
+
+        image_paths = defaultdict(list)
+        for record_id, url, file_name, image_number in download_tasks:
+            if self.should_stop.is_set():
+                break
+            downloaded_path = await download_image_async(url, file_name)
+            if downloaded_path:
+                image_paths[record_id].append((downloaded_path, image_number))
+        return dict(image_paths)
+
+    async def process_images_in_bulk(self, downloaded_images):
+        async def process_image_async(image_path):
+            return await sync_to_async(process_image_wrapper)(image_path, self.gui_callback, self.should_stop)
+
+        processed_images = defaultdict(list)
+        for record_id, image_paths in downloaded_images.items():
+            for image_path, image_number in image_paths:
+                if self.should_stop.is_set():
+                    break
+                processed_path = await process_image_async(image_path)
+                processed_images[record_id].append((processed_path, image_number))
+        return dict(processed_images)
+
+    async def upload_images_and_get_urls(self, processed_images):
+        async def upload_image_async(image_path):
+            return await sync_to_async(upload_image)(image_path, self.gui_callback, self.should_stop)
+
+        uploaded_image_urls = defaultdict(list)
+        for record_id, image_paths in processed_images.items():
+            for image_path, image_number in image_paths:
+                if self.should_stop.is_set():
+                    break
+                url = await upload_image_async(image_path)
+                if url:
+                    if not url.startswith("https://"):
+                        url = "https://" + url
+                    uploaded_image_urls[record_id].append((url, image_number))
+        return dict(uploaded_image_urls)
+
+    async def process_records_concurrently(self, airtable_records, uploaded_image_urls):
+        async def process_record_async(record):
+            return await sync_to_async(process_single_record)(
+                record, uploaded_image_urls, self.Auction_ID, self.selected_warehouse, self.gui_callback
+            )
+
+        processed_records = []
+        failed_records = []
+        for record in airtable_records:
+            if self.should_stop.is_set():
+                break
+            result = await process_record_async(record)
+            if result.get('Success', False):
+                processed_records.append(result)
+            else:
+                failed_records.append(result)
+        return processed_records, failed_records
+
+    async def processed_records_to_df(self, processed_records):
+        return await sync_to_async(processed_records_to_df)(processed_records, self.Auction_ID, self.gui_callback)
+
+    async def failed_records_csv(self, failed_records):
+        return await sync_to_async(failed_records_csv)(failed_records, self.Auction_ID, self.gui_callback)
+
+    async def organize_images(self):
+        try:
+            await asyncio.wait_for(organize_images(self.event), timeout=300)
+            self.gui_callback("Images organized successfully")
+        except asyncio.TimeoutError:
+            self.gui_callback("Organizing images timed out after 5 minutes")
+        except Exception as e:
+            self.gui_callback(f"Error organizing images: {str(e)}")
+            self.gui_callback(f"Traceback: {traceback.format_exc()}")
 
     def find_insert_position(self, processed_items, title):
         for i in range(len(processed_items) - 1, -1, -1):
