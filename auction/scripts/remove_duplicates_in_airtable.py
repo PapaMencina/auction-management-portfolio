@@ -8,9 +8,11 @@ import math
 from auction.utils import config_manager
 from django.conf import settings
 from auction.utils.config_manager import get_warehouse_var, get_global_var, set_active_warehouse
+from auction.utils.redis_utils import RedisTaskStatus
 import sys
 import logging
 from django.core.wsgi import get_wsgi_application
+import time
 
 # Set up Django environment
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "auction_webapp.settings")
@@ -28,7 +30,6 @@ def get_valid_auctions(selected_warehouse):
     logger.debug(f"get_valid_auctions called with selected_warehouse: {selected_warehouse}")
 
     try:
-        # Query the database for valid auctions
         valid_auctions = Event.objects.filter(warehouse=selected_warehouse).values_list('event_id', flat=True)
         logger.debug(f"Found {len(valid_auctions)} valid auctions for warehouse {selected_warehouse}: {list(valid_auctions)}")
         return list(valid_auctions)
@@ -37,27 +38,17 @@ def get_valid_auctions(selected_warehouse):
         logger.exception("Full traceback:")
         return []
 
-def remove_duplicates_main(auction_number, target_msrp, warehouse_name):
+def remove_duplicates_main(auction_number, target_msrp, warehouse_name, task_id):
     logger.info(f"Starting remove duplicates process for auction {auction_number}")
+    RedisTaskStatus.set_status(task_id, "STARTED", f"Starting remove duplicates process for auction {auction_number}")
     
     valid_auctions = get_valid_auctions(warehouse_name)
     if auction_number not in valid_auctions:
         logger.warning(f"Auction {auction_number} is not a valid auction for {warehouse_name}. Aborting process.")
+        RedisTaskStatus.set_status(task_id, "ERROR", f"Auction {auction_number} is not valid for {warehouse_name}")
         return
 
-    run_remove_dups(auction_number, target_msrp, warehouse_name)
-
-if __name__ == '__main__':
-    import argparse
-    
-    parser = argparse.ArgumentParser(description="Remove duplicates in Airtable")
-    parser.add_argument("auction_number", help="Auction number")
-    parser.add_argument("target_msrp", type=float, help="Target MSRP")
-    parser.add_argument("warehouse_name", help="Warehouse name")
-    
-    args = parser.parse_args()
-
-    remove_duplicates_main(args.auction_number, args.target_msrp, args.warehouse_name)
+    run_remove_dups(auction_number, target_msrp, warehouse_name, task_id)
 
 def update_record_if_needed(record, auction_number, table):
     """Updates the record if it needs an update based on its auction listing status."""
@@ -74,7 +65,6 @@ def get_fields_to_update(record, auction_number):
     fields = record['fields']
     auctions = fields.get('Auctions', [])
 
-    # Check if auction number already exists
     if auction_number not in auctions:
         auctions.append(auction_number)
         print(f"Adding auction {auction_number} to record")
@@ -82,33 +72,32 @@ def get_fields_to_update(record, auction_number):
     print(f"Auction {auction_number} already exists in record")
     return {}
 
-def update_records_in_airtable(auction_number, target_msrp, table, view_name):
+def update_records_in_airtable(auction_number, target_msrp, table, view_name, task_id):
     """Main function to update records in Airtable based on the auction number."""
     try:
         logger.info(f"Starting to update records for auction {auction_number}")
+        RedisTaskStatus.set_status(task_id, "IN_PROGRESS", f"Fetching records for auction {auction_number}")
         
-        # Fetch records with specified fields only to optimize performance
         records = table.all(view=view_name, fields=['Product Name', 'Auctions', 'MSRP'])
         logger.info(f"Fetched {len(records)} records from Airtable")
+        RedisTaskStatus.set_status(task_id, "IN_PROGRESS", f"Fetched {len(records)} records from Airtable")
 
         groups = {}
         for record in records:
-            # Group by product name, skip if missing
             product_name = record['fields'].get('Product Name')
             if product_name:
                 groups.setdefault(product_name, []).append(record)
 
         logger.info(f"Grouped records into {len(groups)} unique product names")
+        RedisTaskStatus.set_status(task_id, "IN_PROGRESS", f"Grouped records into {len(groups)} unique product names")
 
         update_count, total_msrp_reached = 0, 0
         total_groups = len(groups)
 
-        # Process groups in random order by converting dict_keys to a list for random.sample
         for i, product_name in enumerate(random.sample(list(groups.keys()), total_groups)):
             if total_msrp_reached >= target_msrp:
                 break
 
-            # Sort by 'Auction Count' after filtering out records with the current auction number
             records_to_update = sorted(
                 (r for r in groups[product_name] if auction_number not in r['fields'].get('Auctions', [])),
                 key=lambda r: r['fields'].get('Auction Count', 0)
@@ -121,18 +110,21 @@ def update_records_in_airtable(auction_number, target_msrp, table, view_name):
                     update_count += 1
                     total_msrp_reached += record['fields'].get('MSRP', 0)
             
-            # Log progress every 10% of groups processed
             if i % (total_groups // 10) == 0:
                 progress = int((i / total_groups) * 100)
                 logger.info(f"Processed {i}/{total_groups} groups ({progress}%)")
+                RedisTaskStatus.set_status(task_id, "IN_PROGRESS", f"Processed {progress}% of groups")
 
         logger.info(f"Auction {auction_number} has been added to {update_count} items with total MSRP of ${total_msrp_reached:.2f}")
+        RedisTaskStatus.set_status(task_id, "COMPLETED", f"Added auction {auction_number} to {update_count} items. Total MSRP: ${total_msrp_reached:.2f}")
     except Exception as e:
         logger.error(f"Error occurred: {e}")
         logger.exception("Full traceback:")
+        RedisTaskStatus.set_status(task_id, "ERROR", f"An error occurred: {str(e)}")
 
-def run_remove_dups(auction_number, target_msrp, warehouse_name):
+def run_remove_dups(auction_number, target_msrp, warehouse_name, task_id):
     logger.info(f"Running remove_dups for auction {auction_number} in {warehouse_name}")
+    RedisTaskStatus.set_status(task_id, "IN_PROGRESS", f"Initializing remove_dups for auction {auction_number}")
     
     config_manager.set_active_warehouse(warehouse_name)
 
@@ -141,26 +133,42 @@ def run_remove_dups(auction_number, target_msrp, warehouse_name):
     AIRTABLE_INVENTORY_TABLE_ID = config_manager.get_warehouse_var('airtable_inventory_table_id')
     AIRTABLE_REMOVE_DUPS_VIEW = config_manager.get_warehouse_var('airtable_remove_dups_view')
 
-    # Check if all required configuration variables are present
     if not all([AIRTABLE_TOKEN, AIRTABLE_INVENTORY_BASE_ID, AIRTABLE_INVENTORY_TABLE_ID, AIRTABLE_REMOVE_DUPS_VIEW]):
         logger.error("Missing Airtable configuration. Please check your config.json file.")
+        RedisTaskStatus.set_status(task_id, "ERROR", "Missing Airtable configuration")
         return
 
     logger.info("Airtable configuration loaded successfully")
+    RedisTaskStatus.set_status(task_id, "IN_PROGRESS", "Airtable configuration loaded")
 
-    # Initialize Table
     try:
         table = Table(AIRTABLE_TOKEN, AIRTABLE_INVENTORY_BASE_ID, AIRTABLE_INVENTORY_TABLE_ID)
         logger.info("Airtable Table initialized successfully")
+        RedisTaskStatus.set_status(task_id, "IN_PROGRESS", "Airtable Table initialized")
     except Exception as e:
         logger.error(f"Failed to initialize Airtable: {str(e)}")
+        RedisTaskStatus.set_status(task_id, "ERROR", f"Failed to initialize Airtable: {str(e)}")
         return
 
-    # Run the update process
     try:
-        update_records_in_airtable(auction_number, target_msrp, table, AIRTABLE_REMOVE_DUPS_VIEW)
+        update_records_in_airtable(auction_number, target_msrp, table, AIRTABLE_REMOVE_DUPS_VIEW, task_id)
     except Exception as e:
         logger.error(f"An error occurred during the update process: {str(e)}")
         logger.exception("Full traceback:")
+        RedisTaskStatus.set_status(task_id, "ERROR", f"Error during update process: {str(e)}")
     finally:
         logger.info("Remove duplicates process completed.")
+        RedisTaskStatus.set_status(task_id, "COMPLETED", "Remove duplicates process completed")
+
+if __name__ == '__main__':
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Remove duplicates in Airtable")
+    parser.add_argument("auction_number", help="Auction number")
+    parser.add_argument("target_msrp", type=float, help="Target MSRP")
+    parser.add_argument("warehouse_name", help="Warehouse name")
+    
+    args = parser.parse_args()
+
+    task_id = f"remove_duplicates_{int(time.time())}"
+    remove_duplicates_main(args.auction_number, args.target_msrp, args.warehouse_name, task_id)

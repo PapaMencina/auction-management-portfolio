@@ -13,6 +13,8 @@ import logging
 from asgiref.sync import sync_to_async
 from auction.models import Event
 from django.utils.dateparse import parse_date
+from django.conf import settings
+from auction.utils.redis_utils import RedisTaskStatus
 
 # Set up logging to console
 logging.basicConfig(level=logging.DEBUG,
@@ -201,13 +203,19 @@ def element_value_is_not_empty(page, element_id):
     """Checks if the value of an element is not empty."""
     return page.evaluate(f"document.getElementById('{element_id}').value !== ''")
 
+from auction.utils.redis_utils import RedisTaskStatus
+import time
+
 async def get_image(page, ending_date, selected_warehouse):
+    task_id = f"get_image_{int(time.time())}"
+    RedisTaskStatus.set_status(task_id, "STARTED", f"Initiating image download for {selected_warehouse}")
+    
     try:
         relaythat_email = config_manager.get_global_var('relaythat_email')
         relaythat_password = config_manager.get_global_var('relaythat_password')
         relaythat_url = config_manager.get_warehouse_var('relaythat_url')
 
-        logger.info(f'Logging in to RelayThat for {selected_warehouse}...')
+        RedisTaskStatus.set_status(task_id, "IN_PROGRESS", f"Logging in to RelayThat for {selected_warehouse}")
         logger.info(f"Attempting to log in with email: {relaythat_email}")
         
         await page.goto(relaythat_url)
@@ -220,14 +228,17 @@ async def get_image(page, ending_date, selected_warehouse):
         await page.wait_for_load_state('networkidle', timeout=60000)
         
         if "login" in page.url.lower():
+            RedisTaskStatus.set_status(task_id, "ERROR", "RelayThat login failed")
             logger.error("RelayThat login failed. Still on login page.")
             await page.screenshot(path='relaythat_login_error.png')
             return None
         
+        RedisTaskStatus.set_status(task_id, "IN_PROGRESS", "RelayThat login successful")
         logger.info('RelayThat login successful. Waiting for page to load...')
         await page.wait_for_load_state('networkidle', timeout=60000)
 
         if selected_warehouse == "Maule Warehouse":
+            RedisTaskStatus.set_status(task_id, "IN_PROGRESS", f"Inserting ending date: {ending_date} into RelayThat design")
             logger.info(f'Inserting ending date: {ending_date} into RelayThat design')
             date_input_selector = 'textarea.text-input__textarea'
             await page.wait_for_selector(date_input_selector, state="visible", timeout=10000)
@@ -246,6 +257,7 @@ async def get_image(page, ending_date, selected_warehouse):
             
             await page.wait_for_timeout(3000)
 
+        RedisTaskStatus.set_status(task_id, "IN_PROGRESS", "Preparing to download image")
         logger.info('Preparing to download image...')
         
         # Click the first Download button
@@ -253,6 +265,7 @@ async def get_image(page, ending_date, selected_warehouse):
         if first_download_button:
             await first_download_button.click()
         else:
+            RedisTaskStatus.set_status(task_id, "ERROR", "Download button not found")
             logger.error("Download button not found")
             await page.screenshot(path='download_button_not_found.png')
             return None
@@ -267,6 +280,7 @@ async def get_image(page, ending_date, selected_warehouse):
                 try:
                     await second_download_button.click()
                 except Exception as e:
+                    RedisTaskStatus.set_status(task_id, "WARNING", f"Failed to click download button normally: {e}")
                     logger.warning(f"Failed to click download button normally: {e}")
                     await page.evaluate("document.querySelector('button.ui.fluid.primary.button').click()")
             
@@ -274,17 +288,21 @@ async def get_image(page, ending_date, selected_warehouse):
             downloaded_file = await download.path()
             
             if downloaded_file:
+                RedisTaskStatus.set_status(task_id, "COMPLETED", f"Image downloaded: {downloaded_file}")
                 logger.info(f"Image downloaded: {downloaded_file}")
                 return downloaded_file
             else:
+                RedisTaskStatus.set_status(task_id, "ERROR", "No file was downloaded")
                 logger.error("No file was downloaded.")
                 return None
         else:
+            RedisTaskStatus.set_status(task_id, "ERROR", "Second Download button not found")
             logger.error("Second Download button not found")
             await page.screenshot(path='second_download_button_not_found.png')
             return None
 
     except Exception as e:
+        RedisTaskStatus.set_status(task_id, "ERROR", f"An error occurred in get_image: {str(e)}")
         logger.error(f"An error occurred in get_image: {e}")
         logger.error(traceback.format_exc())
         await page.screenshot(path='get_image_error.png')
@@ -425,34 +443,37 @@ class SharedEvents:
         await save_event_to_database(event_data)
 
 async def create_auction_main(auction_title, ending_date, show_browser, selected_warehouse):
+    task_id = f"create_auction_{int(time.time())}"
+    RedisTaskStatus.set_status(task_id, "STARTED", f"Starting auction creation for {auction_title}")
+    
     logger.info(f"Starting create_auction_main for auction: {auction_title}, warehouse: {selected_warehouse}")
 
     event_id = None
 
     try:
         config_manager.set_active_warehouse(selected_warehouse)
-        logger.info("Warehouse configuration set")
+        RedisTaskStatus.set_status(task_id, "IN_PROGRESS", "Warehouse configuration set")
 
-        logger.info("Initializing auction creation process")
+        RedisTaskStatus.set_status(task_id, "IN_PROGRESS", "Initializing auction creation process")
 
         month_formatted_date, bid_formatted_ending_date = format_date(ending_date)
-        logger.info(f"Date formatting completed: {month_formatted_date}, {bid_formatted_ending_date}")
+        RedisTaskStatus.set_status(task_id, "IN_PROGRESS", f"Date formatting completed: {month_formatted_date}, {bid_formatted_ending_date}")
 
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=not show_browser)
             context = await browser.new_context()
             page = await context.new_page()
 
-            logger.info("Browser launched")
+            RedisTaskStatus.set_status(task_id, "IN_PROGRESS", "Browser launched")
 
             formatted_start_date = datetime.now().strftime('%m/%d/%Y')
-            logger.info(f"Getting auction image for date: {month_formatted_date}")
+            RedisTaskStatus.set_status(task_id, "IN_PROGRESS", f"Getting auction image for date: {month_formatted_date}")
 
             event_image = await get_image(page, month_formatted_date, selected_warehouse)
             if not event_image:
                 raise Exception("Failed to download the event image")
 
-            logger.info(f"Image downloaded: {event_image}")
+            RedisTaskStatus.set_status(task_id, "IN_PROGRESS", f"Image downloaded: {event_image}")
 
             event_id = await create_auction(page, auction_title, event_image, formatted_start_date, 
                                             bid_formatted_ending_date, selected_warehouse)
@@ -469,15 +490,17 @@ async def create_auction_main(auction_title, ending_date, show_browser, selected
                 "timestamp": timestamp
             }
             await save_event_to_database(event_data)
-            logger.info(f"Event {event_id} created at {timestamp}")
+            RedisTaskStatus.set_status(task_id, "COMPLETED", f"Event {event_id} created at {timestamp}")
 
     except ValueError as e:
+        RedisTaskStatus.set_status(task_id, "ERROR", f"Configuration error: {str(e)}")
         logger.error(f"Configuration error: {str(e)}")
     except Exception as e:
+        RedisTaskStatus.set_status(task_id, "ERROR", f"Error in create_auction_main: {str(e)}")
         logger.error(f"Error in create_auction_main: {str(e)}")
         logger.error(traceback.format_exc())
     
-    return event_id
+    return task_id, event_id
 
 if __name__ == "__main__":
     import asyncio

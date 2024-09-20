@@ -13,6 +13,7 @@ https://docs.djangoproject.com/en/5.0/ref/settings/
 import os
 from pathlib import Path
 import dj_database_url
+import redis
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -39,7 +40,7 @@ ALLOWED_HOSTS = ['auction-management-system-877a79758b85.herokuapp.com', 'localh
 
 PLAYWRIGHT_BROWSERS = os.environ.get('PLAYWRIGHT_BROWSERS', 'chromium').split(',')
 
-# Cache configuration
+# Existing Redis cache configuration
 if 'REDIS_URL' in os.environ:
     CACHES = {
         "default": {
@@ -58,6 +59,10 @@ else:
             'LOCATION': 'unique-snowflake',
         }
     }
+
+# Add this for a separate Redis connection for task status
+REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379')
+REDIS_CONN = redis.from_url(REDIS_URL)
 
 # Application definition
 

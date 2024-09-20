@@ -86,24 +86,29 @@
         const auctions = {{ auctions_json|safe }};
         
         function updateAuctions() {
-            const warehouseSelect = document.getElementById('warehouse_name');
-            const auctionSelect = document.getElementById('auction_number');
-            const selectedWarehouse = warehouseSelect.value;
+            // ... (keep existing function) ...
+        }
 
-            auctionSelect.innerHTML = '<option value="">Select an auction</option>';
-            auctionSelect.disabled = !selectedWarehouse;
-
-            if (selectedWarehouse) {
-                const filteredAuctions = auctions.filter(auction => auction.warehouse === selectedWarehouse);
-                filteredAuctions.forEach(auction => {
-                    const option = document.createElement('option');
-                    option.value = auction.id;
-                    option.textContent = `${auction.id} - ${auction.title} (${auction.timestamp})`;
-                    auctionSelect.appendChild(option);
-                });
-
-                auctionSelect.disabled = filteredAuctions.length === 0;
-            }
+        function pollTaskStatus(taskId) {
+            const statusMessage = document.getElementById('statusMessage');
+            const intervalId = setInterval(() => {
+                fetch(`/check-task-status/${taskId}/`)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.error) {
+                            throw new Error(data.error);
+                        }
+                        statusMessage.textContent = `Status: ${data.status} - ${data.message}`;
+                        if (data.status === 'COMPLETED' || data.status === 'ERROR') {
+                            clearInterval(intervalId);
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        statusMessage.textContent = `Error checking task status: ${error.message}`;
+                        clearInterval(intervalId);
+                    });
+            }, 5000); // Poll every 5 seconds
         }
 
         document.getElementById('removeDuplicatesForm').onsubmit = function(event) {
@@ -118,7 +123,7 @@
             }
 
             const formData = new FormData(this);
-            statusMessage.textContent = 'Processing...';
+            statusMessage.textContent = 'Starting process...';
             
             fetch(this.action, {
                 method: 'POST',
@@ -129,15 +134,17 @@
             })
             .then(response => response.json())
             .then(data => {
-                if (data.message) {
-                    statusMessage.textContent = data.message;
-                } else {
-                    statusMessage.textContent = 'Process started successfully';
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+                statusMessage.textContent = data.message || 'Process started successfully';
+                if (data.task_id) {
+                    pollTaskStatus(data.task_id);
                 }
             })
             .catch(error => {
                 console.error('Error:', error);
-                statusMessage.textContent = 'An error occurred while submitting the form';
+                statusMessage.textContent = `Error: ${error.message}`;
             });
         };
 

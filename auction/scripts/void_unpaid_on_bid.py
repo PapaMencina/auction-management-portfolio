@@ -3,6 +3,7 @@ import threading
 import re
 import time
 import csv
+from auction.utils.redis_utils import RedisTaskStatus
 import requests
 import json
 import logging
@@ -91,11 +92,15 @@ def void_unpaid_main(event_id, upload_choice, warehouse):
     config_manager.load_config(config_path)
     config_manager.set_active_warehouse(warehouse)
     
+    task_id = f"void_unpaid_{int(time.time())}"
+    RedisTaskStatus.set_status(task_id, "STARTED", f"Starting void unpaid process for event {event_id}")
+    
     should_stop = threading.Event()
 
     logger.info("Calling start_playwright_process")
-    asyncio.run(start_playwright_process(event_id, upload_choice, should_stop))
+    asyncio.run(start_playwright_process(event_id, upload_choice, should_stop, task_id))
     logger.info("Finished void_unpaid_main")
+    return task_id
 
 async def login(page, username, password):
     """Logs in to the auction site using provided credentials."""
@@ -153,7 +158,7 @@ def should_continue(should_stop, gui_callback, message):
         return False
     return True
 
-async def start_playwright_process(event_id, upload_choice, should_stop):
+async def start_playwright_process(event_id, upload_choice, should_stop, task_id):
     logger.info(f"Starting playwright process for event_id: {event_id}")
     csv_content = None
     login_url = config_manager.get_global_var('website_login_url')
@@ -167,18 +172,22 @@ async def start_playwright_process(event_id, upload_choice, should_stop):
             context = await browser.new_context()
             page = await context.new_page()
             
+            RedisTaskStatus.set_status(task_id, "IN_PROGRESS", "Logging in to the auction site")
             # Login process
             await page.goto(login_url)
             username = config_manager.get_warehouse_var("bid_username")
             password = config_manager.get_warehouse_var("bid_password")
             if username is None or password is None:
                 logger.error("Failed to retrieve login credentials from config.")
+                RedisTaskStatus.set_status(task_id, "ERROR", "Failed to retrieve login credentials")
                 return
             login_success = await login(page, username, password)
             if not login_success:
                 logger.error("Login failed. Aborting process.")
+                RedisTaskStatus.set_status(task_id, "ERROR", "Login failed")
                 return
 
+            RedisTaskStatus.set_status(task_id, "IN_PROGRESS", "Navigating to report page")
             # Navigate to report page
             await page.goto(report_url)
             try:
@@ -187,38 +196,47 @@ async def start_playwright_process(event_id, upload_choice, should_stop):
                 logger.error(f"Timeout waiting for report page. Current URL: {page.url}")
                 if "Account/LogOn" in page.url:
                     logger.info("Redirected to login page. Session might have expired. Attempting to log in again...")
+                    RedisTaskStatus.set_status(task_id, "IN_PROGRESS", "Re-attempting login")
                     login_success = await login(page, username, password)
                     if not login_success:
                         logger.error("Login failed. Aborting process.")
+                        RedisTaskStatus.set_status(task_id, "ERROR", "Login failed on re-attempt")
                         return
                     await page.goto(report_url)
                     try:
                         await page.wait_for_selector("#ReportResults", state="visible", timeout=30000)
                     except:
                         logger.error(f"Failed to load report page after re-login. Current URL: {page.url}")
+                        RedisTaskStatus.set_status(task_id, "ERROR", "Failed to load report page after re-login")
                         return
 
             if not await check_login_status(page):
                 logger.error("Not logged in on report page. Aborting process.")
+                RedisTaskStatus.set_status(task_id, "ERROR", "Not logged in on report page")
                 return
 
             # Export CSV first
             logger.info("Exporting CSV...")
+            RedisTaskStatus.set_status(task_id, "IN_PROGRESS", "Exporting CSV")
             csv_content = await export_csv(page, event_id, should_stop)
 
             if csv_content:
                 logger.info("CSV exported successfully. Uploading to Airtable...")
+                RedisTaskStatus.set_status(task_id, "IN_PROGRESS", "Uploading to Airtable")
                 await send_to_airtable(upload_choice, csv_content, should_stop)
             else:
                 logger.error("CSV content not set due to an error. Skipping Upload to Airtable.")
+                RedisTaskStatus.set_status(task_id, "ERROR", "Failed to export CSV")
                 return  # Stop the process if CSV export fails
 
             # Now void the transactions
             logger.info("Starting to void unpaid transactions...")
-            await void_unpaid_transactions(page, report_url, should_stop)
+            RedisTaskStatus.set_status(task_id, "IN_PROGRESS", "Voiding unpaid transactions")
+            await void_unpaid_transactions(page, report_url, should_stop, task_id)
 
     except Exception as e:
         logger.exception(f"An error occurred in start_playwright_process: {str(e)}")
+        RedisTaskStatus.set_status(task_id, "ERROR", f"An error occurred: {str(e)}")
         should_stop.set()
     finally:
         logger.info("Closing browser")
@@ -226,8 +244,10 @@ async def start_playwright_process(event_id, upload_choice, should_stop):
             await browser.close()
         if csv_content:
             logger.info(f"Process completed. CSV data saved to database for event {event_id}.")
+            RedisTaskStatus.set_status(task_id, "COMPLETED", f"Process completed for event {event_id}")
         else:
             logger.info("Process completed, but CSV data was not saved.")
+            RedisTaskStatus.set_status(task_id, "COMPLETED", "Process completed, but CSV data was not saved")
 
 async def upload_to_airtable(records_batches, headers, csv_filepath, should_stop):
     all_batches_successful = True
@@ -288,8 +308,9 @@ async def send_to_airtable(upload_choice, csv_content, should_stop):
     else:
         logger.info("Upload to Airtable skipped due to upload_choice.")
 
-async def void_unpaid_transactions(page, report_url, should_stop, timeout=1000, max_retries=5):
+async def void_unpaid_transactions(page, report_url, should_stop, task_id, timeout=1000, max_retries=5):
     print("Starting the voiding process for unpaid transactions...")
+    RedisTaskStatus.set_status(task_id, "IN_PROGRESS", "Starting to void unpaid transactions")
     start_time = time.time()
     count = 0
     retries = 0
@@ -297,27 +318,33 @@ async def void_unpaid_transactions(page, report_url, should_stop, timeout=1000, 
     while not should_stop.is_set():
         if time.time() - start_time > timeout:
             print("Timeout reached, stopping voiding process.")
+            RedisTaskStatus.set_status(task_id, "COMPLETED", f"Timeout reached. Voided {count} transactions")
             break
 
         if retries >= max_retries:
             print("Maximum retries reached, stopping voiding process.")
+            RedisTaskStatus.set_status(task_id, "COMPLETED", f"Max retries reached. Voided {count} transactions")
             break
 
         try:
             await handle_network_error(page, report_url)
             if await are_transactions_voided(page):
                 print(f"All {count} unpaid transactions have been voided.")
+                RedisTaskStatus.set_status(task_id, "COMPLETED", f"All {count} unpaid transactions voided")
                 break
             await void_transaction(page)
             count += 1
             print(f"Voided {count} transactions...")
+            RedisTaskStatus.set_status(task_id, "IN_PROGRESS", f"Voided {count} transactions")
             retries = 0  # Reset retries after successful operation
 
         except Exception as e:
             await handle_retry(page, report_url, e, retries)
             retries += 1
+            RedisTaskStatus.set_status(task_id, "IN_PROGRESS", f"Retry {retries}/{max_retries}. {count} transactions voided so far")
 
     print(f"Voiding process completed. Total transactions voided: {count}")
+    RedisTaskStatus.set_status(task_id, "COMPLETED", f"Voiding process completed. Total transactions voided: {count}")
 
 async def handle_network_error(page, url):
     if await page.locator("#main-frame-error").count() > 0:

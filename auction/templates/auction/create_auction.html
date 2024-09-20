@@ -103,40 +103,72 @@
             }
         }
 
-        document.addEventListener('DOMContentLoaded', function() {
-            document.getElementById('create-auction-form').addEventListener('submit', function(e) {
-                e.preventDefault();
-                var form = this;
-                var formData = new FormData(form);
-                var statusMessage = document.getElementById('status-message');
+        function pollTaskStatus(taskId) {
+        const intervalId = setInterval(async () => {
+            try {
+                const response = await fetch(`/check-task-status/${taskId}/`);
+                const data = await response.json();
+                
+                if (data.error) {
+                    console.error('Error checking task status:', data.error);
+                    clearInterval(intervalId);
+                    return;
+                }
+                
+                updateUI(data.status, data.message);
+                
+                if (data.status === 'COMPLETED' || data.status === 'ERROR') {
+                    clearInterval(intervalId);
+                }
+            } catch (error) {
+                console.error('Error polling task status:', error);
+                clearInterval(intervalId);
+            }
+        }, 5000);  // Check every 5 seconds
+    }
 
-                statusMessage.textContent = 'Starting auction creation...';
+    function updateUI(status, message) {
+        const statusMessage = document.getElementById('status-message');
+        statusMessage.textContent = `Status: ${status} - ${message}`;
+    }
 
-                fetch(form.action, {
-                    method: 'POST',
-                    body: formData,
-                    headers: {
-                        'X-CSRFToken': '{{ csrf_token }}'
-                    }
-                })
-                .then(response => {
-                    if (!response.ok) {
-                        throw new Error('Network response was not ok');
-                    }
-                    return response.json();
-                })
-                .then(data => {
-                    if (data.error) {
-                        throw new Error(data.error);
-                    }
-                    statusMessage.textContent = data.message || 'Auction creation process started successfully.';
-                })
-                .catch(error => {
-                    console.error('Error:', error);
-                    statusMessage.textContent = 'Error starting auction creation: ' + error.message;
-                });
+    document.addEventListener('DOMContentLoaded', function() {
+        document.getElementById('create-auction-form').addEventListener('submit', function(e) {
+            e.preventDefault();
+            var form = this;
+            var formData = new FormData(form);
+            var statusMessage = document.getElementById('status-message');
+
+            statusMessage.textContent = 'Starting auction creation...';
+
+            fetch(form.action, {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'X-CSRFToken': '{{ csrf_token }}'
+                }
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+                statusMessage.textContent = data.message || 'Auction creation process started successfully.';
+                if (data.task_id) {
+                    pollTaskStatus(data.task_id);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                statusMessage.textContent = 'Error starting auction creation: ' + error.message;
             });
         });
-    </script>
+    });
+</script>
 </body>
 </html>

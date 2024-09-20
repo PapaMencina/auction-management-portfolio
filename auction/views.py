@@ -21,6 +21,8 @@ from auction.scripts.remove_duplicates_in_airtable import remove_duplicates_main
 from auction.scripts.auction_formatter import auction_formatter_main
 from auction.scripts.upload_to_hibid import upload_to_hibid_main
 from auction.models import Event
+from auction.utils.redis_utils import RedisTaskStatus
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -77,18 +79,6 @@ def get_warehouse_events(request):
     return JsonResponse(filtered_events, safe=False)
 
 @login_required
-def select_warehouse(request):
-    if request.method == 'POST':
-        selected_warehouse = request.POST.get('warehouse')
-        if selected_warehouse in warehouse_data:
-            config_manager.set_active_warehouse(selected_warehouse)
-            request.session['selected_warehouse'] = selected_warehouse
-            messages.success(request, f"Warehouse {selected_warehouse} selected and configuration loaded.")
-        else:
-            messages.error(request, "Invalid warehouse selection.")
-    return redirect('home')
-
-@login_required
 def create_auction_view(request):
     if request.method == 'POST':
         try:
@@ -102,19 +92,23 @@ def create_auction_view(request):
 
             config_manager.set_active_warehouse(selected_warehouse)
 
+            task_id = f"create_auction_{int(time.time())}"
+            RedisTaskStatus.set_status(task_id, "STARTED", f"Starting auction creation for {auction_title}")
+
             def run_async_task():
                 asyncio.run(create_auction_main(
                     auction_title,
                     ending_date,
                     show_browser,
-                    selected_warehouse
+                    selected_warehouse,
+                    task_id
                 ))
 
             thread = Thread(target=run_async_task)
             thread.start()
 
             logger.info(f"Auction creation thread started for {auction_title}")
-            return JsonResponse({'message': 'Auction creation process started'})
+            return JsonResponse({'message': 'Auction creation process started', 'task_id': task_id})
         except ValueError as e:
             logger.error(f"Invalid date format: {str(e)}")
             return JsonResponse({'error': 'Invalid date format'}, status=400)
@@ -150,7 +144,7 @@ def void_unpaid_view(request):
         try:
             data = json.loads(request.body)
             warehouse = data.get('warehouse')
-            event_id = data.get('auction_id')  # Changed from auction_id to event_id
+            event_id = data.get('auction_id')
             upload_choice = int(data.get('upload_choice'))
             show_browser = data.get('show_browser') and can_use_show_browser
 
@@ -159,13 +153,17 @@ def void_unpaid_view(request):
             if not valid_auction:
                 return JsonResponse({'error': 'Invalid Auction ID - Please confirm the auction ID and Warehouse, then try again.'}, status=400)
 
-            Thread(target=void_unpaid_main, kwargs={
-                'event_id': event_id,  # Changed from auction_id to event_id
-                'upload_choice': upload_choice,
-                'warehouse': warehouse
-            }).start()
+            task_id = f"void_unpaid_{int(time.time())}"
+            RedisTaskStatus.set_status(task_id, "STARTED", f"Starting void unpaid process for auction {event_id}")
 
-            return JsonResponse({'message': 'Void unpaid process started'})
+            Thread(target=void_unpaid_main, kwargs={
+            'event_id': event_id,
+            'upload_choice': upload_choice,
+            'warehouse': warehouse,
+            'task_id': task_id  # Add this line
+        }).start()
+
+            return JsonResponse({'message': 'Void unpaid process started', 'task_id': task_id})
 
         except json.JSONDecodeError:
             return JsonResponse({'error': 'Invalid JSON data'}, status=400)
@@ -183,13 +181,17 @@ def remove_duplicates_view(request):
         target_msrp = float(request.POST.get('target_msrp'))
         warehouse_name = request.POST.get('warehouse_name')
 
+        task_id = f"remove_duplicates_{int(time.time())}"
+        RedisTaskStatus.set_status(task_id, "STARTED", f"Starting remove duplicates process for auction {auction_number}")
+
         Thread(target=remove_duplicates_main, kwargs={
             'auction_number': auction_number,
             'target_msrp': target_msrp,
-            'warehouse_name': warehouse_name
+            'warehouse_name': warehouse_name,
+            'task_id': task_id
         }).start()
 
-        return JsonResponse({'message': 'Remove duplicates process started'})
+        return JsonResponse({'message': 'Remove duplicates process started', 'task_id': task_id})
 
     context = {
         'auctions_json': json.dumps(auctions, cls=DjangoJSONEncoder),
@@ -209,44 +211,25 @@ def auction_formatter_view(request):
         config_manager.set_active_warehouse(selected_warehouse)
 
         should_stop = threading.Event()
+        task_id = f"auction_formatter_{int(time.time())}"
+        RedisTaskStatus.set_status(task_id, "STARTED", f"Starting auction formatter for auction {auction_id}")
 
         Thread(target=auction_formatter_main, kwargs={
             'auction_id': auction_id,
             'selected_warehouse': selected_warehouse,
-            'gui_callback': logger.info,  # Use logger.info as a simple callback
+            'gui_callback': logger.info,
             'should_stop': should_stop,
             'callback': lambda: None,
+            'task_id': task_id
         }).start()
 
-        return JsonResponse({'message': 'Auction formatter process started'})
+        return JsonResponse({'message': 'Auction formatter process started', 'task_id': task_id})
 
     context = {
         'warehouses': warehouses,
         'auctions': json.dumps(auctions, cls=DjangoJSONEncoder),
     }
     return render(request, 'auction/auction_formatter.html', context)
-
-@login_required
-def download_formatted_csv(request, auction_id):
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    resources_dir = os.path.join(script_dir, 'resources', 'processed_csv')
-    csv_path = os.path.join(resources_dir, f'{auction_id}.csv')
-
-    logger.info(f"Attempting to download CSV from: {csv_path}")
-
-    if os.path.exists(csv_path):
-        logger.info(f"CSV file found at: {csv_path}")
-        try:
-            with open(csv_path, 'rb') as fh:
-                response = HttpResponse(fh.read(), content_type='text/csv')
-                response['Content-Disposition'] = f'attachment; filename="{smart_str(auction_id)}.csv"'
-                return response
-        except IOError:
-            logger.error(f"IOError when reading file: {csv_path}")
-            return HttpResponse("Error reading the CSV file", status=500)
-    else:
-        logger.error(f"CSV file not found at: {csv_path}")
-        return HttpResponse(f"CSV file not found at {csv_path}", status=404)
 
 @login_required
 @require_http_methods(["GET", "POST"])
@@ -284,24 +267,37 @@ def upload_to_hibid_view(request):
         config_manager.set_active_warehouse(selected_warehouse)
 
         should_stop = threading.Event()
+        task_id = f"upload_to_hibid_{int(time.time())}"
+        RedisTaskStatus.set_status(task_id, "STARTED", f"Starting HiBid upload for auction {auction_id}")
 
         Thread(target=upload_to_hibid_main, kwargs={
             'auction_id': auction_id,
             'ending_date': ending_date_str,
             'auction_title': auction_title,
-            'gui_callback': logger.info,  # Use logger.info as a simple callback
+            'gui_callback': logger.info,
             'should_stop': should_stop,
             'callback': lambda: None,
             'show_browser': show_browser,
-            'selected_warehouse': selected_warehouse
+            'selected_warehouse': selected_warehouse,
+            'task_id': task_id
         }).start()
 
-        return JsonResponse({'message': 'Upload to HiBid process started'})
+        return JsonResponse({'message': 'Upload to HiBid process started', 'task_id': task_id})
 
-    # GET request handling
     context = {
         'warehouses': warehouses,
         'auctions': json.dumps(auctions, cls=DjangoJSONEncoder),
         'can_use_show_browser': can_use_show_browser,
     }
     return render(request, 'auction/upload_to_hibid.html', context)
+
+@login_required
+def check_task_status(request, task_id):
+    try:
+        status_data = RedisTaskStatus.get_status(task_id)
+        if status_data:
+            return JsonResponse(status_data)
+        return JsonResponse({'error': 'Task not found'}, status=404)
+    except Exception as e:
+        logger.error(f"Error checking task status: {str(e)}")
+        return JsonResponse({'error': 'Internal server error'}, status=500)

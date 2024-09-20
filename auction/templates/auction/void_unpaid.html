@@ -58,33 +58,7 @@
         <h1>Void Unpaid Transactions</h1>
         <form id="voidUnpaidForm" method="post">
             {% csrf_token %}
-            <div>
-                <label for="warehouseSelect">Select Warehouse:</label>
-                <select name="warehouse" id="warehouseSelect" required>
-                    {% for warehouse in warehouses %}
-                        <option value="{{ warehouse }}" {% if warehouse == default_warehouse %}selected{% endif %}>
-                            {{ warehouse }}
-                        </option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div>
-                <label for="auction_id">Auction ID:</label>
-                <input type="text" id="auction_id" name="auction_id" required>
-            </div>
-            <div>
-                <label>Upload to Airtable:</label>
-                <input type="radio" id="upload_yes" name="upload_choice" value="1" required>
-                <label for="upload_yes">Yes</label>
-                <input type="radio" id="upload_no" name="upload_choice" value="0" required>
-                <label for="upload_no">No</label>
-            </div>
-            {% if can_use_show_browser %}
-            <div>
-                <label for="show_browser">Show Browser:</label>
-                <input type="checkbox" id="show_browser" name="show_browser">
-            </div>
-            {% endif %}
+            <!-- ... (keep existing form fields) ... -->
             <button type="submit">Void Unpaid Transactions</button>
         </form>
         <div class="status-message" id="statusMessage"></div>
@@ -127,13 +101,40 @@
                     throw new Error(data.error);
                 }
                 statusMessage.textContent = data.message || 'Process started successfully';
+                if (data.task_id) {
+                    pollTaskStatus(data.task_id);
+                }
             })
             .catch(error => {
                 statusMessage.textContent = "Error: " + error.message;
-            })
-            .finally(() => {
                 submitButton.disabled = false;
             });
+        }
+
+        function pollTaskStatus(taskId) {
+            const statusMessage = document.getElementById('statusMessage');
+            const submitButton = document.querySelector('button[type="submit"]');
+
+            const intervalId = setInterval(() => {
+                fetch(`/check-task-status/${taskId}/`)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.error) {
+                            throw new Error(data.error);
+                        }
+                        statusMessage.textContent = `Status: ${data.status} - ${data.message}`;
+                        if (data.status === 'COMPLETED' || data.status === 'ERROR') {
+                            clearInterval(intervalId);
+                            submitButton.disabled = false;
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        statusMessage.textContent = `Error checking task status: ${error.message}`;
+                        clearInterval(intervalId);
+                        submitButton.disabled = false;
+                    });
+            }, 5000); // Poll every 5 seconds
         }
     </script>
 </body>
