@@ -70,6 +70,28 @@ def get_auction_numbers(request):
         logger.error(f"Error in get_auction_numbers: {str(e)}")
         logger.exception("Full traceback:")
         return []
+    
+@login_required
+def download_formatted_csv(request, auction_id):
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    resources_dir = os.path.join(script_dir, 'resources', 'processed_csv')
+    csv_path = os.path.join(resources_dir, f'{auction_id}.csv')
+
+    logger.info(f"Attempting to download CSV from: {csv_path}")
+
+    if os.path.exists(csv_path):
+        logger.info(f"CSV file found at: {csv_path}")
+        try:
+            with open(csv_path, 'rb') as fh:
+                response = HttpResponse(fh.read(), content_type='text/csv')
+                response['Content-Disposition'] = f'attachment; filename="{smart_str(auction_id)}.csv"'
+                return response
+        except IOError:
+            logger.error(f"IOError when reading file: {csv_path}")
+            return HttpResponse("Error reading the CSV file", status=500)
+    else:
+        logger.error(f"CSV file not found at: {csv_path}")
+        return HttpResponse(f"CSV file not found at {csv_path}", status=404)
 
 @login_required
 def get_warehouse_events(request):
