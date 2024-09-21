@@ -60,9 +60,8 @@ else:
         }
     }
 
-# Add this for a separate Redis connection for task status
 REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379')
-REDIS_CONN = redis.from_url(REDIS_URL)
+REDIS_CONN = redis.from_url(REDIS_URL, ssl_cert_reqs=None)
 
 # Application definition
 

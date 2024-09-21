@@ -442,7 +442,7 @@ class SharedEvents:
         }
         await save_event_to_database(event_data)
 
-async def create_auction_main(auction_title, ending_date, show_browser, selected_warehouse):
+async def create_auction_main(auction_title, ending_date, show_browser, selected_warehouse, task_id):
     task_id = f"create_auction_{int(time.time())}"
     RedisTaskStatus.set_status(task_id, "STARTED", f"Starting auction creation for {auction_title}")
     
