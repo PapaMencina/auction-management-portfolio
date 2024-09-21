@@ -87,9 +87,10 @@ async def export_csv(page, event_id, should_stop):
         logger.error(f"Page content: {await page.content()}")
         return None
 
-def void_unpaid_main(event_id, upload_choice, warehouse):
+def void_unpaid_main(event_id, upload_choice, warehouse, task_id):
     logger.info(f"Starting void_unpaid_main for event_id: {event_id}, upload_choice: {upload_choice}, warehouse: {warehouse}")
     config_manager.load_config(config_path)
+
     config_manager.set_active_warehouse(warehouse)
     
     task_id = f"void_unpaid_{int(time.time())}"
