@@ -315,11 +315,15 @@ def upload_to_hibid_view(request):
 
 @login_required
 def check_task_status(request, task_id):
+    logger.info(f"Checking status for task: {task_id}")
     try:
         status_data = RedisTaskStatus.get_status(task_id)
+        logger.info(f"Status data for task {task_id}: {status_data}")
         if status_data:
             return JsonResponse(status_data)
+        logger.warning(f"Task not found: {task_id}")
         return JsonResponse({'error': 'Task not found'}, status=404)
     except Exception as e:
         logger.error(f"Error checking task status: {str(e)}")
+        logger.exception("Full traceback:")
         return JsonResponse({'error': 'Internal server error'}, status=500)

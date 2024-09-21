@@ -104,32 +104,39 @@
         }
 
         function pollTaskStatus(taskId) {
-        const intervalId = setInterval(async () => {
-            try {
-                const response = await fetch(`/check-task-status/${taskId}/`);
-                const data = await response.json();
-                
-                if (data.error) {
-                    console.error('Error checking task status:', data.error);
-                    clearInterval(intervalId);
-                    return;
-                }
-                
-                updateUI(data.status, data.message);
-                
-                if (data.status === 'COMPLETED' || data.status === 'ERROR') {
-                    clearInterval(intervalId);
-                }
-            } catch (error) {
-                console.error('Error polling task status:', error);
+    const intervalId = setInterval(async () => {
+        try {
+            const response = await fetch(`/auction/check-task-status/${taskId}/`);
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            const data = await response.json();
+            
+            console.log('Task status data:', data);  // Add this line for debugging
+            
+            if (data.error) {
+                console.error('Error checking task status:', data.error);
+                updateUI('ERROR', data.error);
+                clearInterval(intervalId);
+                return;
+            }
+            
+            updateUI(data.status, data.message);
+            
+            if (data.status === 'COMPLETED' || data.status === 'ERROR') {
                 clearInterval(intervalId);
             }
-        }, 5000);  // Check every 5 seconds
-    }
+        } catch (error) {
+            console.error('Error polling task status:', error);
+            updateUI('ERROR', 'Failed to check task status');
+            clearInterval(intervalId);
+        }
+    }, 5000);  // Check every 5 seconds
+}
 
-    function updateUI(status, message) {
-        const statusMessage = document.getElementById('status-message');
-        statusMessage.textContent = `Status: ${status} - ${message}`;
+        function updateUI(status, message) {
+            const statusMessage = document.getElementById('status-message');
+            statusMessage.textContent = `Status: ${status} - ${message}`;
     }
 
     document.addEventListener('DOMContentLoaded', function() {
@@ -155,12 +162,16 @@
                 return response.json();
             })
             .then(data => {
+                console.log('Response data:', data);  // Add this line
                 if (data.error) {
                     throw new Error(data.error);
                 }
                 statusMessage.textContent = data.message || 'Auction creation process started successfully.';
                 if (data.task_id) {
+                    console.log('Starting polling for task:', data.task_id);  // Add this line
                     pollTaskStatus(data.task_id);
+                } else {
+                    console.warn('No task_id received from server');  // Add this line
                 }
             })
             .catch(error => {
