@@ -1,184 +1,119 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Void Unpaid Transactions</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            background-color: #f4f4f4;
-            margin: 0;
-            padding: 20px;
-        }
-        .container {
-            max-width: 600px;
-            margin: 0 auto;
-            background-color: #fff;
-            padding: 20px;
-            border-radius: 5px;
-            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
-        }
-        h1 {
-            text-align: center;
-            color: #333;
-        }
-        form div {
-            margin-bottom: 15px;
-        }
-        label {
-            display: block;
-            margin-bottom: 5px;
-        }
-        select, input[type="text"], button {
-            width: 100%;
-            padding: 10px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-        }
-        button {
-            background-color: #4CAF50;
-            color: white;
-            font-size: 16px;
-            border: none;
-            cursor: pointer;
-        }
-        button:hover {
-            background-color: #45a049;
-        }
-        .status-message {
-            margin-top: 10px;
-            text-align: center;
-            color: #333;
-        }
-        .radio-group {
-            display: flex;
-            justify-content: space-between;
-            width: 100%;
-        }
-        .radio-option {
-            display: flex;
-            align-items: center;
-        }
-        .radio-option input[type="radio"] {
-            width: auto;
-            margin-right: 5px;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>Void Unpaid Transactions</h1>
-        <form id="voidUnpaidForm" method="post">
-            {% csrf_token %}
-            <div>
-                <label for="warehouse">Select Warehouse:</label>
-                <select id="warehouse" name="warehouse">
-                    {% for warehouse in warehouses %}
-                        <option value="{{ warehouse }}">{{ warehouse }}</option>
-                    {% endfor %}
-                </select>
+{% extends "base.html" %}
+{% block title %}Void Unpaid Transactions - Auction Management System{% endblock %}
+{% block content %}
+<div class="max-w-2xl mx-auto bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
+    <h1 class="text-2xl font-bold mb-6 text-center text-gray-900 dark:text-white">Void Unpaid Transactions</h1>
+    <form id="voidUnpaidForm" method="post" class="space-y-4">
+        {% csrf_token %}
+        <div>
+            <label for="warehouse" class="block mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">Select Warehouse:</label>
+            <select id="warehouse" name="warehouse" class="w-full p-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+                {% for warehouse in warehouses %}
+                    <option value="{{ warehouse }}">{{ warehouse }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label for="auction_id" class="block mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">Auction ID:</label>
+            <input type="text" id="auction_id" name="auction_id" required class="w-full p-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+        </div>
+        <div>
+            <label class="block mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">Upload to Airtable:</label>
+            <div class="flex space-x-4">
+                <label class="inline-flex items-center">
+                    <input type="radio" name="upload_choice" value="1" required class="form-radio text-indigo-600 dark:text-indigo-400">
+                    <span class="ml-2 text-gray-700 dark:text-gray-300">Yes</span>
+                </label>
+                <label class="inline-flex items-center">
+                    <input type="radio" name="upload_choice" value="0" required class="form-radio text-indigo-600 dark:text-indigo-400">
+                    <span class="ml-2 text-gray-700 dark:text-gray-300">No</span>
+                </label>
             </div>
-            <div>
-                <label for="auction_id">Auction ID:</label>
-                <input type="text" id="auction_id" name="auction_id" required>
-            </div>
-            <div>
-                <label>Upload to Airtable:</label>
-                <div class="radio-group">
-                    <div class="radio-option">
-                        <input type="radio" id="upload_yes" name="upload_choice" value="1" required>
-                        <label for="upload_yes">Yes</label>
-                    </div>
-                    <div class="radio-option">
-                        <input type="radio" id="upload_no" name="upload_choice" value="0" required>
-                        <label for="upload_no">No</label>
-                    </div>
-                </div>
-            </div>
-            {% if can_use_show_browser %}
-            <div>
-                <label for="show_browser">Show Browser:</label>
-                <input type="checkbox" id="show_browser" name="show_browser">
-            </div>
-            {% endif %}
-            <button type="submit">Void Unpaid Transactions</button>
-        </form>
-        <div class="status-message" id="statusMessage"></div>
-    </div>
+        </div>
+        {% if can_use_show_browser %}
+        <div class="flex items-center">
+            <input type="checkbox" id="show_browser" name="show_browser" class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded">
+            <label for="show_browser" class="ml-2 block text-sm text-gray-700 dark:text-gray-300">Show Browser</label>
+        </div>
+        {% endif %}
+        <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline transition duration-150 ease-in-out">
+            Void Unpaid Transactions
+        </button>
+    </form>
+    <div id="statusMessage" class="mt-4 text-center text-sm text-gray-600 dark:text-gray-400"></div>
+</div>
 
-    <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            document.getElementById('voidUnpaidForm').addEventListener('submit', function(e) {
-                e.preventDefault();
-                voidUnpaid();
-            });
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        document.getElementById('voidUnpaidForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            voidUnpaid();
         });
+    });
 
-        function voidUnpaid() {
-            const form = document.getElementById('voidUnpaidForm');
-            const data = {
-                warehouse: form.warehouse.value,
-                auction_id: form.auction_id.value,
-                upload_choice: parseInt(form.upload_choice.value),
-                show_browser: form.show_browser ? form.show_browser.checked : false,
-            };
+    function voidUnpaid() {
+        const form = document.getElementById('voidUnpaidForm');
+        const data = {
+            warehouse: form.warehouse.value,
+            auction_id: form.auction_id.value,
+            upload_choice: parseInt(form.upload_choice.value),
+            show_browser: form.show_browser ? form.show_browser.checked : false,
+        };
 
-            const statusMessage = document.getElementById('statusMessage');
-            const submitButton = document.querySelector('button[type="submit"]');
+        const statusMessage = document.getElementById('statusMessage');
+        const submitButton = document.querySelector('button[type="submit"]');
 
-            submitButton.disabled = true;
-            statusMessage.textContent = 'Starting process...';
+        submitButton.disabled = true;
+        statusMessage.textContent = 'Starting process...';
 
-            fetch('{% url "auction:void_unpaid" %}', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRFToken': '{{ csrf_token }}'
-                },
-                body: JSON.stringify(data)
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.error) {
-                    throw new Error(data.error);
-                }
-                statusMessage.textContent = data.message || 'Process started successfully';
-                if (data.task_id) {
-                    pollTaskStatus(data.task_id);
-                }
-            })
-            .catch(error => {
-                statusMessage.textContent = "Error: " + error.message;
-                submitButton.disabled = false;
-            });
-        }
+        fetch('{% url "auction:void_unpaid" %}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': '{{ csrf_token }}'
+            },
+            body: JSON.stringify(data)
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                throw new Error(data.error);
+            }
+            statusMessage.textContent = data.message || 'Process started successfully';
+            if (data.task_id) {
+                pollTaskStatus(data.task_id);
+            }
+        })
+        .catch(error => {
+            statusMessage.textContent = "Error: " + error.message;
+            submitButton.disabled = false;
+        });
+    }
 
-        function pollTaskStatus(taskId) {
-            const statusMessage = document.getElementById('statusMessage');
-            const submitButton = document.querySelector('button[type="submit"]');
+    function pollTaskStatus(taskId) {
+        const statusMessage = document.getElementById('statusMessage');
+        const submitButton = document.querySelector('button[type="submit"]');
 
-            const intervalId = setInterval(() => {
-                fetch(`/check-task-status/${taskId}/`)
-                    .then(response => response.json())
-                    .then(data => {
-                        if (data.error) {
-                            throw new Error(data.error);
-                        }
-                        statusMessage.textContent = `Status: ${data.status} - ${data.message}`;
-                        if (data.status === 'COMPLETED' || data.status === 'ERROR') {
-                            clearInterval(intervalId);
-                            submitButton.disabled = false;
-                        }
-                    })
-                    .catch(error => {
-                        console.error('Error:', error);
-                        statusMessage.textContent = `Error checking task status: ${error.message}`;
+        const intervalId = setInterval(() => {
+            fetch(`/auction/check-task-status/${taskId}/`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        throw new Error(data.error);
+                    }
+                    statusMessage.textContent = `Status: ${data.status} - ${data.message}`;
+                    if (data.status === 'COMPLETED' || data.status === 'ERROR') {
                         clearInterval(intervalId);
                         submitButton.disabled = false;
-                    });
-            }, 5000); // Poll every 5 seconds
-        }
-    </script>
-</body>
-</html>
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    statusMessage.textContent = `Error checking task status: ${error.message}`;
+                    clearInterval(intervalId);
+                    submitButton.disabled = false;
+                });
+        }, 5000); // Poll every 5 seconds
+    }
+</script>
+{% endblock %}

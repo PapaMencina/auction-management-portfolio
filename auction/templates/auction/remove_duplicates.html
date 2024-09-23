@@ -1,156 +1,120 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Remove Duplicates in Airtable</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            background-color: #f4f4f4;
-            margin: 0;
-            padding: 20px;
-        }
-        .container {
-            max-width: 600px;
-            margin: 0 auto;
-            background-color: #fff;
-            padding: 20px;
-            border-radius: 5px;
-            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
-        }
-        h1 {
-            text-align: center;
-            color: #333;
-        }
-        form div {
-            margin-bottom: 15px;
-        }
-        label {
-            display: block;
-            margin-bottom: 5px;
-        }
-        select, input[type="number"], button {
-            width: 100%;
-            padding: 10px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-        }
-        button {
-            background-color: #4CAF50;
-            color: white;
-            font-size: 16px;
-            border: none;
-            cursor: pointer;
-        }
-        button:hover {
-            background-color: #45a049;
-        }
-        .status-message {
-            margin-top: 10px;
-            text-align: center;
-            color: #333;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>Remove Duplicates in Airtable</h1>
-        <form method="post" id="removeDuplicatesForm">
-            {% csrf_token %}
-            <div>
-                <label for="warehouse_name">Warehouse Name:</label>
-                <select name="warehouse_name" id="warehouse_name" required onchange="updateAuctions()">
-                    <option value="">Select a warehouse</option>
-                    {% for warehouse in warehouses %}
-                        <option value="{{ warehouse }}">{{ warehouse }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div>
-                <label for="auction_number">Auction Number:</label>
-                <select name="auction_number" id="auction_number" required disabled>
-                    <option value="">Select an auction</option>
-                </select>
-            </div>
-            <div>
-                <label for="target_msrp">Target MSRP:</label>
-                <input type="number" name="target_msrp" id="target_msrp" required>
-            </div>
-            <button type="submit">Remove Duplicates</button>
-        </form>
-        <div class="status-message" id="statusMessage"></div>
-    </div>
+{% extends "base.html" %}
+{% block title %}Remove Duplicates in Airtable - Auction Management System{% endblock %}
+{% block content %}
+<div class="max-w-2xl mx-auto bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
+    <h1 class="text-2xl font-bold mb-6 text-center text-gray-900 dark:text-white">Remove Duplicates in Airtable</h1>
+    <form method="post" id="removeDuplicatesForm" class="space-y-4">
+        {% csrf_token %}
+        <div>
+            <label for="warehouse_name" class="block mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">Warehouse Name:</label>
+            <select name="warehouse_name" id="warehouse_name" required onchange="updateAuctions()" class="w-full p-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+                <option value="">Select a warehouse</option>
+                {% for warehouse in warehouses %}
+                    <option value="{{ warehouse }}">{{ warehouse }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label for="auction_number" class="block mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">Auction Number:</label>
+            <select name="auction_number" id="auction_number" required disabled class="w-full p-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+                <option value="">Select an auction</option>
+            </select>
+        </div>
+        <div>
+            <label for="target_msrp" class="block mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">Target MSRP:</label>
+            <input type="number" name="target_msrp" id="target_msrp" required class="w-full p-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+        </div>
+        <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline transition duration-150 ease-in-out">
+            Remove Duplicates
+        </button>
+    </form>
+    <div id="statusMessage" class="mt-4 text-center text-sm text-gray-600 dark:text-gray-400"></div>
+</div>
 
-    <script>
-        const auctions = {{ auctions_json|safe }};
-        
-        function updateAuctions() {
-            // ... (keep existing function) ...
-        }
+<script>
+    const auctions = {{ auctions_json|safe }};
+    
+    function updateAuctions() {
+        const warehouseSelect = document.getElementById('warehouse_name');
+        const auctionSelect = document.getElementById('auction_number');
+        const selectedWarehouse = warehouseSelect.value;
 
-        function pollTaskStatus(taskId) {
-            const statusMessage = document.getElementById('statusMessage');
-            const intervalId = setInterval(() => {
-                fetch(`/check-task-status/${taskId}/`)
-                    .then(response => response.json())
-                    .then(data => {
-                        if (data.error) {
-                            throw new Error(data.error);
-                        }
-                        statusMessage.textContent = `Status: ${data.status} - ${data.message}`;
-                        if (data.status === 'COMPLETED' || data.status === 'ERROR') {
-                            clearInterval(intervalId);
-                        }
-                    })
-                    .catch(error => {
-                        console.error('Error:', error);
-                        statusMessage.textContent = `Error checking task status: ${error.message}`;
-                        clearInterval(intervalId);
-                    });
-            }, 5000); // Poll every 5 seconds
-        }
+        auctionSelect.innerHTML = '<option value="">Select an auction</option>';
+        auctionSelect.disabled = true;
 
-        document.getElementById('removeDuplicatesForm').onsubmit = function(event) {
-            event.preventDefault();
-            const warehouseSelect = document.getElementById('warehouse_name');
-            const auctionSelect = document.getElementById('auction_number');
-            const statusMessage = document.getElementById('statusMessage');
-
-            if (!warehouseSelect.value || !auctionSelect.value) {
-                alert('Please select both a warehouse and an auction.');
-                return;
-            }
-
-            const formData = new FormData(this);
-            statusMessage.textContent = 'Starting process...';
-            
-            fetch(this.action, {
-                method: 'POST',
-                body: formData,
-                headers: {
-                    'X-CSRFToken': formData.get('csrfmiddlewaretoken')
-                }
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.error) {
-                    throw new Error(data.error);
-                }
-                statusMessage.textContent = data.message || 'Process started successfully';
-                if (data.task_id) {
-                    pollTaskStatus(data.task_id);
-                }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                statusMessage.textContent = `Error: ${error.message}`;
+        if (selectedWarehouse) {
+            const warehouseAuctions = auctions.filter(auction => auction.warehouse === selectedWarehouse);
+            warehouseAuctions.forEach(auction => {
+                const option = document.createElement('option');
+                option.value = auction.id;
+                option.textContent = `${auction.id} - ${auction.title}`;
+                auctionSelect.appendChild(option);
             });
-        };
+            auctionSelect.disabled = false;
+        }
+    }
 
-        document.addEventListener('DOMContentLoaded', function() {
-            updateAuctions();
+    function pollTaskStatus(taskId) {
+        const statusMessage = document.getElementById('statusMessage');
+        const intervalId = setInterval(() => {
+            fetch(`/auction/check-task-status/${taskId}/`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        throw new Error(data.error);
+                    }
+                    statusMessage.textContent = `Status: ${data.status} - ${data.message}`;
+                    if (data.status === 'COMPLETED' || data.status === 'ERROR') {
+                        clearInterval(intervalId);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    statusMessage.textContent = `Error checking task status: ${error.message}`;
+                    clearInterval(intervalId);
+                });
+        }, 5000); // Poll every 5 seconds
+    }
+
+    document.getElementById('removeDuplicatesForm').onsubmit = function(event) {
+        event.preventDefault();
+        const warehouseSelect = document.getElementById('warehouse_name');
+        const auctionSelect = document.getElementById('auction_number');
+        const statusMessage = document.getElementById('statusMessage');
+
+        if (!warehouseSelect.value || !auctionSelect.value) {
+            alert('Please select both a warehouse and an auction.');
+            return;
+        }
+
+        const formData = new FormData(this);
+        statusMessage.textContent = 'Starting process...';
+        
+        fetch(this.action, {
+            method: 'POST',
+            body: formData,
+            headers: {
+                'X-CSRFToken': formData.get('csrfmiddlewaretoken')
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                throw new Error(data.error);
+            }
+            statusMessage.textContent = data.message || 'Process started successfully';
+            if (data.task_id) {
+                pollTaskStatus(data.task_id);
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            statusMessage.textContent = `Error: ${error.message}`;
         });
-    </script>
-</body>
-</html>
+    };
+
+    document.addEventListener('DOMContentLoaded', function() {
+        updateAuctions();
+    });
+</script>
+{% endblock %}

@@ -1,19 +1,26 @@
 {% extends "base.html" %}
-
 {% block title %}Home - Auction Management System{% endblock %}
-
 {% block content %}
-{% if user.is_authenticated %}
-    <nav>
-        <ul>
-            <li><a href="{% url 'auction:create_auction' %}">Create Auction</a></li>
-            <li><a href="{% url 'auction:void_unpaid' %}">Void Unpaid Transactions</a></li>
-            <li><a href="{% url 'auction:remove_duplicates' %}">Remove Duplicates</a></li>
-            <li><a href="{% url 'auction:auction_formatter' %}">Format Auction</a></li>
-            <li><a href="{% url 'auction:upload_to_hibid' %}">Upload to Hibid</a></li>
-        </ul>
-    </nav>
-{% else %}
-    <p>Please log in to access the Auction Management System.</p>
-{% endif %}
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+    <a href="{% url 'auction:create_auction' %}" class="block p-6 bg-white dark:bg-gray-800 rounded-lg shadow-md hover:shadow-lg transition-shadow duration-300">
+        <h2 class="text-2xl font-bold mb-2 text-indigo-600 dark:text-indigo-400">Create Auction</h2>
+        <p class="text-gray-600 dark:text-gray-300">Start a new auction for your items.</p>
+    </a>
+    <a href="{% url 'auction:void_unpaid' %}" class="block p-6 bg-white dark:bg-gray-800 rounded-lg shadow-md hover:shadow-lg transition-shadow duration-300">
+        <h2 class="text-2xl font-bold mb-2 text-indigo-600 dark:text-indigo-400">Void Unpaid Transactions</h2>
+        <p class="text-gray-600 dark:text-gray-300">Manage unpaid transactions in your auctions.</p>
+    </a>
+    <a href="{% url 'auction:remove_duplicates' %}" class="block p-6 bg-white dark:bg-gray-800 rounded-lg shadow-md hover:shadow-lg transition-shadow duration-300">
+        <h2 class="text-2xl font-bold mb-2 text-indigo-600 dark:text-indigo-400">Remove Duplicates</h2>
+        <p class="text-gray-600 dark:text-gray-300">Clean up duplicate entries in your auction listings.</p>
+    </a>
+    <a href="{% url 'auction:auction_formatter' %}" class="block p-6 bg-white dark:bg-gray-800 rounded-lg shadow-md hover:shadow-lg transition-shadow duration-300">
+        <h2 class="text-2xl font-bold mb-2 text-indigo-600 dark:text-indigo-400">Format Auction</h2>
+        <p class="text-gray-600 dark:text-gray-300">Standardize and format your auction data.</p>
+    </a>
+    <a href="{% url 'auction:upload_to_hibid' %}" class="block p-6 bg-white dark:bg-gray-800 rounded-lg shadow-md hover:shadow-lg transition-shadow duration-300">
+        <h2 class="text-2xl font-bold mb-2 text-indigo-600 dark:text-indigo-400">Upload to Hibid</h2>
+        <p class="text-gray-600 dark:text-gray-300">Transfer your auction data to the Hibid platform.</p>
+    </a>
+</div>
 {% endblock %}

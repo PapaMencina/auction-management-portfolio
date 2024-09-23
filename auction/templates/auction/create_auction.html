@@ -1,142 +1,89 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Create Auction</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            background-color: #f4f4f4;
-            margin: 0;
-            padding: 20px;
-        }
-        .container {
-            max-width: 600px;
-            margin: 0 auto;
-            background-color: #fff;
-            padding: 20px;
-            border-radius: 5px;
-            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
-        }
-        h1 {
-            text-align: center;
-            color: #333;
-        }
-        form div {
-            margin-bottom: 15px;
-        }
-        label {
-            display: block;
-            margin-bottom: 5px;
-        }
-        select, input[type="text"], input[type="date"], button {
-            width: 100%;
-            padding: 10px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-        }
-        button {
-            background-color: #4CAF50;
-            color: white;
-            font-size: 16px;
-            border: none;
-            cursor: pointer;
-        }
-        button:hover {
-            background-color: #45a049;
-        }
-        .status-message {
-            margin-top: 10px;
-            text-align: center;
-            color: #333;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>Create Auction</h1>
-        <form id="create-auction-form" method="post">
-            {% csrf_token %}
-            <div>
-                <label for="warehouse">Select Warehouse:</label>
-                <select id="warehouse" name="selected_warehouse" onchange="updateAuctionTitle()">
-                    <option value="">Select a warehouse</option>
-                    {% for warehouse in warehouses %}
-                        <option value="{{ warehouse }}">{{ warehouse }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div>
-                <label for="auction_title">Auction Title:</label>
-                <input type="text" id="auction_title" name="auction_title" required>
-            </div>
-            <div>
-                <label for="ending_date">Ending Date (MM-DD-YYYY):</label>
-                <input type="date" id="ending_date" name="ending_date" required>
-            </div>
-            {% if can_use_show_browser %}
-            <div>
-                <label for="show_browser">
-                    <input type="checkbox" id="show_browser" name="show_browser">
-                    Show Browser
-                </label>
-            </div>
-            {% endif %}
-            <button type="submit">Run Create Auction Script</button>
-        </form>
-        <div class="status-message" id="status-message"></div>
-    </div>
+{% extends "base.html" %}
+{% block title %}Create Auction - Auction Management System{% endblock %}
+{% block content %}
+<div class="max-w-2xl mx-auto bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
+    <h1 class="text-2xl font-bold mb-6 text-center text-gray-900 dark:text-white">Create Auction</h1>
+    <form id="create-auction-form" method="post" class="space-y-4">
+        {% csrf_token %}
+        <div>
+            <label for="warehouse" class="block mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">Select Warehouse:</label>
+            <select id="warehouse" name="selected_warehouse" onchange="updateAuctionTitle()" class="w-full p-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+                <option value="">Select a warehouse</option>
+                {% for warehouse in warehouses %}
+                    <option value="{{ warehouse }}">{{ warehouse }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label for="auction_title" class="block mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">Auction Title:</label>
+            <input type="text" id="auction_title" name="auction_title" required class="w-full p-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+        </div>
+        <div>
+            <label for="ending_date" class="block mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">Ending Date:</label>
+            <input type="date" id="ending_date" name="ending_date" required class="w-full p-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+        </div>
+        {% if can_use_show_browser %}
+        <div class="flex items-center">
+            <input type="checkbox" id="show_browser" name="show_browser" class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded">
+            <label for="show_browser" class="ml-2 block text-sm text-gray-700 dark:text-gray-300">Show Browser</label>
+        </div>
+        {% endif %}
+        <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline transition duration-150 ease-in-out">
+            Run Create Auction Script
+        </button>
+    </form>
+    <div id="status-message" class="mt-4 text-center text-sm text-gray-600 dark:text-gray-400"></div>
+</div>
 
-    <script>
-        function updateAuctionTitle() {
-            var warehouseSelect = document.getElementById('warehouse');
-            var auctionTitleInput = document.getElementById('auction_title');
-            var selectedWarehouse = warehouseSelect.value;
+<script>
+    function updateAuctionTitle() {
+        var warehouseSelect = document.getElementById('warehouse');
+        var auctionTitleInput = document.getElementById('auction_title');
+        var selectedWarehouse = warehouseSelect.value;
 
-            if (selectedWarehouse === 'Maule Warehouse') {
-                auctionTitleInput.value = 'Amazon Liquidation Returns & Brand New Overstock Items #';
-            } else if (selectedWarehouse === 'Sunrise Warehouse') {
-                auctionTitleInput.value = 'OFFSITE LOCATION Liquidation Returns & Brand New Overstock Items #';
-            } else {
-                auctionTitleInput.value = '';
-            }
+        if (selectedWarehouse === 'Maule Warehouse') {
+            auctionTitleInput.value = 'Amazon Liquidation Returns & Brand New Overstock Items #';
+        } else if (selectedWarehouse === 'Sunrise Warehouse') {
+            auctionTitleInput.value = 'OFFSITE LOCATION Liquidation Returns & Brand New Overstock Items #';
+        } else {
+            auctionTitleInput.value = '';
         }
+    }
 
-        function pollTaskStatus(taskId) {
-    const intervalId = setInterval(async () => {
-        try {
-            const response = await fetch(`/auction/check-task-status/${taskId}/`);
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            const data = await response.json();
-            
-            console.log('Task status data:', data);  // Add this line for debugging
-            
-            if (data.error) {
-                console.error('Error checking task status:', data.error);
-                updateUI('ERROR', data.error);
-                clearInterval(intervalId);
-                return;
-            }
-            
-            updateUI(data.status, data.message);
-            
-            if (data.status === 'COMPLETED' || data.status === 'ERROR') {
+    function pollTaskStatus(taskId) {
+        const intervalId = setInterval(async () => {
+            try {
+                const response = await fetch(`/auction/check-task-status/${taskId}/`);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const data = await response.json();
+                
+                console.log('Task status data:', data);
+                
+                if (data.error) {
+                    console.error('Error checking task status:', data.error);
+                    updateUI('ERROR', data.error);
+                    clearInterval(intervalId);
+                    return;
+                }
+                
+                updateUI(data.status, data.message);
+                
+                if (data.status === 'COMPLETED' || data.status === 'ERROR') {
+                    clearInterval(intervalId);
+                }
+            } catch (error) {
+                console.error('Error polling task status:', error);
+                updateUI('ERROR', 'Failed to check task status');
                 clearInterval(intervalId);
             }
-        } catch (error) {
-            console.error('Error polling task status:', error);
-            updateUI('ERROR', 'Failed to check task status');
-            clearInterval(intervalId);
-        }
-    }, 5000);  // Check every 5 seconds
-}
+        }, 5000);
+    }
 
-        function updateUI(status, message) {
-            const statusMessage = document.getElementById('status-message');
-            statusMessage.textContent = `Status: ${status} - ${message}`;
+    function updateUI(status, message) {
+        const statusMessage = document.getElementById('status-message');
+        statusMessage.textContent = `Status: ${status} - ${message}`;
     }
 
     document.addEventListener('DOMContentLoaded', function() {
@@ -162,16 +109,16 @@
                 return response.json();
             })
             .then(data => {
-                console.log('Response data:', data);  // Add this line
+                console.log('Response data:', data);
                 if (data.error) {
                     throw new Error(data.error);
                 }
                 statusMessage.textContent = data.message || 'Auction creation process started successfully.';
                 if (data.task_id) {
-                    console.log('Starting polling for task:', data.task_id);  // Add this line
+                    console.log('Starting polling for task:', data.task_id);
                     pollTaskStatus(data.task_id);
                 } else {
-                    console.warn('No task_id received from server');  // Add this line
+                    console.warn('No task_id received from server');
                 }
             })
             .catch(error => {
@@ -181,5 +128,4 @@
         });
     });
 </script>
-</body>
-</html>
+{% endblock %}
