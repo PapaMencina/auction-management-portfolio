@@ -35,9 +35,6 @@
 </div>
 
 <script>
-    // Parse the auctions JSON data passed from the view
-    const auctions = JSON.parse('{{ auctions|safe }}');
-
     function updateAuctionDropdown() {
         const warehouseSelect = document.getElementById('selected_warehouse');
         const auctionSelect = document.getElementById('auction_id');
@@ -46,16 +43,23 @@
         // Clear existing options
         auctionSelect.innerHTML = '<option value="">Select an auction</option>';
 
-        // Filter auctions for the selected warehouse
-        const filteredAuctions = auctions.filter(auction => auction.warehouse === selectedWarehouse);
-
-        // Add new options
-        filteredAuctions.forEach(auction => {
-            const option = document.createElement('option');
-            option.value = auction.id;
-            option.textContent = `${auction.title} (${auction.id})`;
-            auctionSelect.appendChild(option);
-        });
+        if (selectedWarehouse) {
+            // Fetch filtered auctions from the server
+            fetch(`/auction/get-warehouse-events/?warehouse=${selectedWarehouse}`)
+                .then(response => response.json())
+                .then(filteredAuctions => {
+                    // Add new options
+                    filteredAuctions.forEach(auction => {
+                        const option = document.createElement('option');
+                        option.value = auction.id;
+                        option.textContent = `${auction.title} (${auction.id}) - Ends: ${auction.ending_date}`;
+                        auctionSelect.appendChild(option);
+                    });
+                })
+                .catch(error => {
+                    console.error('Error fetching auctions:', error);
+                });
+        }
     }
 
     function uploadToHiBid(event) {

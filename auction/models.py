@@ -1,6 +1,7 @@
 from django.db import models
 from django.contrib.auth.models import AbstractUser
 from django.conf import settings
+from django.utils import timezone
 
 class CustomUser(AbstractUser):
     is_standard_user = models.BooleanField(default=False)
@@ -31,6 +32,9 @@ class Event(models.Model):
     start_date = models.DateField()
     ending_date = models.DateField()
     timestamp = models.DateTimeField(auto_now_add=True)
+
+    def is_active(self):
+        return self.ending_date >= timezone.now().date()
 
     def __str__(self):
         return f"{self.title} ({self.event_id})"

@@ -97,7 +97,14 @@ def download_formatted_csv(request, auction_id):
 def get_warehouse_events(request):
     warehouse = request.GET.get('warehouse')
     all_events = get_auction_numbers(request)
-    filtered_events = [event for event in all_events if event['warehouse'] == warehouse]
+    today = timezone.now().date()
+
+    filtered_events = [
+        event for event in all_events 
+        if event['warehouse'] == warehouse and 
+           datetime.strptime(event['ending_date'], "%Y-%m-%d").date() >= today
+    ]
+
     return JsonResponse(filtered_events, safe=False)
 
 @login_required
