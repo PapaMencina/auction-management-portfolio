@@ -14,20 +14,21 @@ from asgiref.sync import sync_to_async
 from playwright.async_api import async_playwright, expect
 from typing import List, Dict, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
-
+from django.core.files.storage import default_storage
+from django.core.files.base import ContentFile
+from auction.utils.redis_utils import RedisTaskStatus
+import time
 import requests
 import pandas as pd
 from auction.models import Event, ImageMetadata, AuctionFormattedData
 from PIL import Image, ExifTags
 from auction.utils import config_manager
-
 from django.core.wsgi import get_wsgi_application
 import os
+
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "auction_webapp.settings")
 application = get_wsgi_application()
 
-from django.core.files.storage import default_storage
-from django.core.files.base import ContentFile
 
 def auction_formatter_main(auction_id, selected_warehouse, gui_callback, should_stop, callback, task_id=None):
     config_manager.set_active_warehouse(selected_warehouse)
@@ -387,6 +388,7 @@ class AuctionFormatter:
         return bid_username, bid_password
 
     async def login_to_website(self, page, username, password):
+        RedisTaskStatus.set_status(self.task_id, "IN_PROGRESS", "Logging in to auction site")
         if not self.should_continue("Login operation stopped by user."):
             return False
 
@@ -439,6 +441,7 @@ class AuctionFormatter:
             return False
 
     async def upload_csv_to_website(self, page, csv_content):
+        RedisTaskStatus.set_status(self.task_id, "IN_PROGRESS", "Uploading CSV to auction site")
         temp_file_path = None
         try:
             # Check if we're already logged in
@@ -543,82 +546,72 @@ class AuctionFormatter:
 
     async def run_auction_formatter(self):
         try:
-            self.gui_callback("Starting auction formatting process...")
+            RedisTaskStatus.set_status(self.task_id, "STARTED", f"Starting auction formatting for event {self.event.event_id}")
             
-            # Fetch Airtable records
+            RedisTaskStatus.set_status(self.task_id, "IN_PROGRESS", "Fetching Airtable records")
             airtable_records = await self.fetch_airtable_records()
+            RedisTaskStatus.set_status(self.task_id, "IN_PROGRESS", f"Retrieved {len(airtable_records)} records from Airtable")
 
-            # Process images
-            self.gui_callback("Collecting image URLs...")
+            RedisTaskStatus.set_status(self.task_id, "IN_PROGRESS", "Processing images")
             download_tasks = collect_image_urls(airtable_records, self.should_stop)
-            
-            self.gui_callback("Downloading images...")
             downloaded_images = await self.download_images_bulk(download_tasks)
+            RedisTaskStatus.set_status(self.task_id, "IN_PROGRESS", f"Downloaded {sum(len(imgs) for imgs in downloaded_images.values())} images")
             
-            self.gui_callback("Processing images...")
             processed_images = await self.process_images_in_bulk(downloaded_images)
+            RedisTaskStatus.set_status(self.task_id, "IN_PROGRESS", f"Processed {sum(len(imgs) for imgs in processed_images.values())} images")
             
-            self.gui_callback("Uploading images...")
+            RedisTaskStatus.set_status(self.task_id, "IN_PROGRESS", "Uploading images")
             uploaded_image_urls = await self.upload_images_and_get_urls(processed_images)
+            RedisTaskStatus.set_status(self.task_id, "IN_PROGRESS", f"Uploaded {sum(len(urls) for urls in uploaded_image_urls.values())} images")
 
-            # Save uploaded image URLs to the database
-            self.gui_callback("Saving image metadata to database...")
+            RedisTaskStatus.set_status(self.task_id, "IN_PROGRESS", "Saving image metadata to database")
             await save_images_to_database(self.event, uploaded_image_urls)
 
-            # Process records
-            self.gui_callback("Processing records...")
+            RedisTaskStatus.set_status(self.task_id, "IN_PROGRESS", "Processing records")
             processed_records, failed_records = await self.process_records_concurrently(
                 airtable_records, uploaded_image_urls
             )
+            RedisTaskStatus.set_status(self.task_id, "IN_PROGRESS", f"Processed {len(processed_records)} records, {len(failed_records)} failed")
 
-            # Create and format CSV
             if processed_records:
-                self.gui_callback("Creating CSV content...")
+                RedisTaskStatus.set_status(self.task_id, "IN_PROGRESS", "Creating CSV content")
                 csv_content = await self.processed_records_to_df(processed_records)
                 self.final_csv_content = await self.format_final_csv(csv_content)
+                RedisTaskStatus.set_status(self.task_id, "IN_PROGRESS", "CSV content created")
 
-            # Upload CSV to website
             if self.final_csv_content:
-                self.gui_callback("Initializing browser...")
+                RedisTaskStatus.set_status(self.task_id, "IN_PROGRESS", "Uploading CSV to website")
                 async with async_playwright() as p:
                     browser = await p.chromium.launch(headless=True)
                     page = await browser.new_page()
                     
-                    # Use Maule Warehouse credentials
                     username, password = self.get_maule_login_credentials()
-                    self.gui_callback("CSV Content Preview:")
-                    self.gui_callback(self.final_csv_content[:1000])  # Print first 1000 characters of CSV
-
-                    self.gui_callback("Logging into website...")
+                    RedisTaskStatus.set_status(self.task_id, "IN_PROGRESS", "Logging into auction site")
                     login_success = await self.login_to_website(page, username, password)
                     
                     if login_success:
-                        self.gui_callback("Uploading CSV to 702 Auctions...")
+                        RedisTaskStatus.set_status(self.task_id, "IN_PROGRESS", "Uploading CSV to auction site")
                         upload_success = await self.upload_csv_to_website(page, self.final_csv_content)
                         if upload_success:
-                            self.gui_callback("CSV uploaded successfully to 702 Auctions.")
+                            RedisTaskStatus.set_status(self.task_id, "IN_PROGRESS", "CSV uploaded successfully")
                         else:
-                            self.gui_callback("CSV upload to 702 Auctions failed.")
-                            await self.save_screenshot(page, "csv_upload_failure")
+                            RedisTaskStatus.set_status(self.task_id, "WARNING", "CSV upload failed")
                     else:
-                        self.gui_callback("Login to 702 Auctions failed.")
-                        await self.save_screenshot(page, "login_failure")
+                        RedisTaskStatus.set_status(self.task_id, "ERROR", "Login to auction site failed")
                     
-                    self.gui_callback(f"Final URL: {page.url}")
                     await browser.close()
 
-            # Process failed records
             if failed_records:
-                self.gui_callback("Processing failed records...")
+                RedisTaskStatus.set_status(self.task_id, "IN_PROGRESS", "Processing failed records")
                 self.failed_records_csv_content = await self.failed_records_csv(failed_records)
 
-            # Organize images
-            self.gui_callback("Organizing images...")
+            RedisTaskStatus.set_status(self.task_id, "IN_PROGRESS", "Organizing images")
             await self.organize_images()
 
-            self.gui_callback("Auction formatting process completed successfully.")
+            RedisTaskStatus.set_status(self.task_id, "COMPLETED", "Auction formatting process completed successfully")
 
         except Exception as e:
+            RedisTaskStatus.set_status(self.task_id, "ERROR", f"Error in auction formatting process: {str(e)}")
             self.gui_callback(f"Error in auction formatting process: {str(e)}")
             self.gui_callback(f"Traceback: {traceback.format_exc()}")
         finally:
@@ -808,13 +801,13 @@ def download_images_bulk(download_tasks: List[tuple], gui_callback, should_stop:
     image_paths = {}
 
     with ThreadPoolExecutor(max_workers=7) as executor:
-        future_to_task = {executor.submit(download_image, url, file_name, gui_callback): (record_id, file_name, image_number) for record_id, url, file_name, image_number in download_tasks}
+        future_to_task = {executor.submit(download_image, url, file_name, gui_callback): (record_id, image_url, file_name, image_number) for record_id, url, file_name, image_number in download_tasks}
 
         for future in as_completed(future_to_task):
             if should_stop.is_set():
                 break
 
-            record_id, file_name, image_number = future_to_task[future]
+            record_id, image_url, file_name, image_number = future_to_task[future]
             try:
                 downloaded_path = future.result()
                 if downloaded_path:
