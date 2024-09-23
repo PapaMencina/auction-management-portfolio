@@ -29,10 +29,10 @@ application = get_wsgi_application()
 from django.core.files.storage import default_storage
 from django.core.files.base import ContentFile
 
-def auction_formatter_main(auction_id, selected_warehouse, gui_callback, should_stop, callback):
+def auction_formatter_main(auction_id, selected_warehouse, gui_callback, should_stop, callback, task_id=None):
     config_manager.set_active_warehouse(selected_warehouse)
     event = get_event(auction_id)
-    formatter = AuctionFormatter(event, gui_callback, should_stop, callback, selected_warehouse)
+    formatter = AuctionFormatter(event, gui_callback, should_stop, callback, selected_warehouse, task_id)
     asyncio.run(formatter.run_auction_formatter())
     return formatter
 
@@ -344,13 +344,14 @@ def get_image_url(airtable_record: Dict, count: int) -> Tuple[str, str, int]:
     return url, filename, count
 
 class AuctionFormatter:
-    def __init__(self, event, gui_callback, should_stop, callback, selected_warehouse):
+    def __init__(self, event, gui_callback, should_stop, callback, selected_warehouse, task_id):
         self.event = event
         self.Auction_ID = event.event_id
         self.gui_callback = gui_callback
         self.should_stop = should_stop
         self.callback = callback
         self.selected_warehouse = selected_warehouse
+        self.task_id = task_id
         
         config_manager.set_active_warehouse(selected_warehouse)
         
