@@ -21,7 +21,7 @@ from auction.scripts.create_auction import create_auction_main
 from auction.scripts.void_unpaid_on_bid import void_unpaid_main
 from auction.scripts.remove_duplicates_in_airtable import remove_duplicates_main
 from auction.scripts.auction_formatter import auction_formatter_main
-from auction.scripts.upload_to_hibid import upload_to_hibid_main
+# from auction.scripts.upload_to_hibid import upload_to_hibid_main
 from auction.models import Event
 from auction.utils.redis_utils import RedisTaskStatus
 import time
