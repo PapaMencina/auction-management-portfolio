@@ -43,7 +43,7 @@
 
         if (selectedWarehouse) {
             // Fetch filtered auctions from the server
-            fetch(`/auction/get-warehouse-events/?warehouse=${selectedWarehouse}`)
+            fetch(`/auction/get-warehouse-events/?warehouse=${selectedWarehouse}&process_type=future`)
                 .then(response => response.json())
                 .then(filteredAuctions => {
                     // Add new options
