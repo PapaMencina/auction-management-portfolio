@@ -199,7 +199,7 @@ LOGGING = {
     },
 }
 
-N8N_HIBID_UPLOAD_ENDPOINT = 'https://n8n.702market.com/webhook-test/2e1ca1fa-9078-4c82-bb38-3650b38fea20'
+N8N_HIBID_UPLOAD_ENDPOINT = 'https://n8n.702market.com/webhook/2e1ca1fa-9078-4c82-bb38-3650b38fea20'
 SESSION_COOKIE_AGE = 3600  # 1 hour in seconds
 SESSION_EXPIRE_AT_BROWSER_CLOSE = True
 SESSION_SAVE_EVERY_REQUEST = True

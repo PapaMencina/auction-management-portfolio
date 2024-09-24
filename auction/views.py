@@ -274,31 +274,29 @@ def upload_to_hibid_view(request):
         event_id = request.POST.get('auction_id')
         selected_warehouse = request.POST.get('selected_warehouse')
 
+        logger.info(f"Received POST request - event_id: {event_id}, selected_warehouse: {selected_warehouse}")
+
         if not all([event_id, selected_warehouse]):
+            logger.error("Missing event_id or selected_warehouse")
             return JsonResponse({'status': 'error', 'message': "Please select both a warehouse and an event."})
 
         selected_auction = next((a for a in auctions if a['id'] == event_id and a['warehouse'] == selected_warehouse), None)
 
         if not selected_auction:
+            logger.error(f"Invalid auction selected - event_id: {event_id}, warehouse: {selected_warehouse}")
             return JsonResponse({'status': 'error', 'message': "Invalid auction selected for the given warehouse."})
 
-        # Prepare the data for the n8n workflow
-        n8n_data = {
-            'event_id': event_id
-        }
-
-        # Send POST request to n8n workflow
-        n8n_endpoint = getattr(settings, 'N8N_HIBID_UPLOAD_ENDPOINT', None)
-        if not n8n_endpoint:
-            logger.error("N8N_HIBID_UPLOAD_ENDPOINT is not set in settings.")
-            return JsonResponse({'status': 'error', 'message': "Server configuration error."})
+        # Construct the n8n endpoint URL with the event_id as a query parameter
+        n8n_endpoint = f"{settings.N8N_HIBID_UPLOAD_ENDPOINT}?event_id={event_id}"
 
         try:
-            response = requests.post(n8n_endpoint, json=n8n_data)
+            logger.info(f"Sending request to n8n workflow - endpoint: {n8n_endpoint}")
+            response = requests.post(n8n_endpoint)
             response.raise_for_status()
+            logger.info(f"n8n workflow response: {response.status_code} - {response.text}")
         except requests.RequestException as e:
             logger.error(f"Error sending request to n8n workflow: {str(e)}")
-            return JsonResponse({'status': 'error', 'message': "Failed to start HiBid upload process."})
+            return JsonResponse({'status': 'error', 'message': f"Failed to start HiBid upload process: {str(e)}"})
 
         # Create a HiBidUpload record
         try:
@@ -307,7 +305,9 @@ def upload_to_hibid_view(request):
                 event=event,
                 status='in_progress'
             )
+            logger.info(f"Created HiBidUpload record for event {event_id}")
         except Event.DoesNotExist:
+            logger.error(f"Event not found in the database - event_id: {event_id}")
             return JsonResponse({'status': 'error', 'message': "Event not found in the database."})
 
         return JsonResponse({'status': 'success', 'message': "HiBid upload process started successfully."})
