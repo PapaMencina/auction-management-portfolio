@@ -99,14 +99,34 @@ def download_formatted_csv(request, auction_id):
 @login_required
 def get_warehouse_events(request):
     warehouse = request.GET.get('warehouse')
-    all_events = get_auction_numbers(request)
+    process_type = request.GET.get('process_type', 'future')  # Default to future auctions
+    all_events = Event.objects.filter(warehouse=warehouse)
     today = timezone.now().date()
 
-    filtered_events = [
-        event for event in all_events 
-        if event['warehouse'] == warehouse and 
-           datetime.strptime(event['ending_date'], "%Y-%m-%d %H:%M:%S").date() >= today
-    ]
+    if process_type == 'past':
+        # For void_unpaid process
+        filtered_events = [
+            {
+                'id': event.event_id,
+                'title': event.title,
+                'ending_date': event.ending_date.strftime("%Y-%m-%d %H:%M:%S"),
+                'warehouse': event.warehouse
+            }
+            for event in all_events
+            if event.ending_date.date() <= today
+        ]
+    else:
+        # For other processes (auction creation, formatting, etc.)
+        filtered_events = [
+            {
+                'id': event.event_id,
+                'title': event.title,
+                'ending_date': event.ending_date.strftime("%Y-%m-%d %H:%M:%S"),
+                'warehouse': event.warehouse
+            }
+            for event in all_events
+            if event.ending_date.date() > today
+        ]
 
     return JsonResponse(filtered_events, safe=False)
 
@@ -157,7 +177,6 @@ def create_auction_view(request):
 def void_unpaid_view(request):
     warehouses = list(warehouse_data.keys())
     default_warehouse = warehouses[0] if warehouses else None
-    auctions = get_auction_numbers(request)
 
     if request.method == 'GET':
         context = {
@@ -173,20 +192,25 @@ def void_unpaid_view(request):
             event_id = data.get('auction_id')
             upload_choice = int(data.get('upload_choice'))
 
-            valid_auction = any(auction for auction in auctions if auction['id'] == event_id and auction['warehouse'] == warehouse)
+            today = timezone.now().date()
+            event = Event.objects.filter(
+                event_id=event_id,
+                warehouse=warehouse,
+                ending_date__lte=today
+            ).first()
 
-            if not valid_auction:
-                return JsonResponse({'error': 'Invalid Auction ID - Please confirm the auction ID and Warehouse, then try again.'}, status=400)
+            if not event:
+                return JsonResponse({'error': 'Invalid Auction ID or auction has not ended yet.'}, status=400)
 
             task_id = f"void_unpaid_{int(time.time())}"
             RedisTaskStatus.set_status(task_id, "STARTED", f"Starting void unpaid process for auction {event_id}")
 
             Thread(target=void_unpaid_main, kwargs={
-            'event_id': event_id,
-            'upload_choice': upload_choice,
-            'warehouse': warehouse,
-            'task_id': task_id  # Add this line
-        }).start()
+                'event_id': event_id,
+                'upload_choice': upload_choice,
+                'warehouse': warehouse,
+                'task_id': task_id
+            }).start()
 
             return JsonResponse({'message': 'Void unpaid process started', 'task_id': task_id})
 
