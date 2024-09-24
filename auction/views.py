@@ -15,7 +15,8 @@ import os
 import asyncio
 from auction.models import HiBidUpload
 from threading import Thread, Event
-from datetime import datetime, timezone
+from datetime import datetime
+from django.utils import timezone
 from auction.utils import config_manager
 from auction.scripts.create_auction import create_auction_main
 from auction.scripts.void_unpaid_on_bid import void_unpaid_main
@@ -104,7 +105,7 @@ def get_warehouse_events(request):
     filtered_events = [
         event for event in all_events 
         if event['warehouse'] == warehouse and 
-           datetime.strptime(event['ending_date'], "%Y-%m-%d").date() >= today
+           datetime.strptime(event['ending_date'], "%Y-%m-%d %H:%M:%S").date() >= today
     ]
 
     return JsonResponse(filtered_events, safe=False)
