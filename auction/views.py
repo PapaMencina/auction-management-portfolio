@@ -268,23 +268,15 @@ def auction_formatter_view(request):
 def upload_to_hibid_view(request):
     warehouses = list(config_manager.config.get('warehouses', {}).keys())
     auctions = get_auction_numbers(request)
-    can_use_show_browser = request.user.has_perm('auction.can_use_show_browser')
 
     if request.method == 'POST':
         event_id = request.POST.get('auction_id')
-        selected_warehouse = request.POST.get('selected_warehouse')
+        
+        logger.info(f"Received POST request - event_id: {event_id}")
 
-        logger.info(f"Received POST request - event_id: {event_id}, selected_warehouse: {selected_warehouse}")
-
-        if not all([event_id, selected_warehouse]):
-            logger.error("Missing event_id or selected_warehouse")
-            return JsonResponse({'status': 'error', 'message': "Please select both a warehouse and an event."})
-
-        selected_auction = next((a for a in auctions if a['id'] == event_id and a['warehouse'] == selected_warehouse), None)
-
-        if not selected_auction:
-            logger.error(f"Invalid auction selected - event_id: {event_id}, warehouse: {selected_warehouse}")
-            return JsonResponse({'status': 'error', 'message': "Invalid auction selected for the given warehouse."})
+        if not event_id:
+            logger.error("Missing event_id")
+            return JsonResponse({'status': 'error', 'message': "Please select an event."})
 
         # Construct the n8n endpoint URL with the event_id as a query parameter
         n8n_endpoint = f"{settings.N8N_HIBID_UPLOAD_ENDPOINT}?event_id={event_id}"
@@ -315,7 +307,6 @@ def upload_to_hibid_view(request):
     context = {
         'warehouses': warehouses,
         'auctions': json.dumps(auctions, cls=DjangoJSONEncoder),
-        'can_use_show_browser': can_use_show_browser,
     }
     return render(request, 'auction/upload_to_hibid.html', context)
 

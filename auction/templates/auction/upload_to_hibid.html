@@ -3,11 +3,11 @@
 {% block content %}
 <div class="max-w-2xl mx-auto bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
     <h1 class="text-2xl font-bold mb-6 text-center text-gray-900 dark:text-white">Upload to HiBid</h1>
-    <form method="post" onsubmit="uploadToHiBid(event)" class="space-y-4">
+    <form id="uploadToHiBidForm" method="post" class="space-y-4">
         {% csrf_token %}
         <div>
             <label for="selected_warehouse" class="block mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">Select Warehouse:</label>
-            <select id="selected_warehouse" name="selected_warehouse" onchange="updateAuctionDropdown()" class="w-full p-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+            <select id="selected_warehouse" onchange="updateAuctionDropdown()" class="w-full p-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white">
                 <option value="">Select a warehouse</option>
                 {% for warehouse in warehouses %}
                     <option value="{{ warehouse }}">{{ warehouse }}</option>
@@ -56,56 +56,32 @@
         }
     }
 
-    function uploadToHiBid(event) {
-    event.preventDefault();
-    const formData = new FormData();
-    const auctionId = document.getElementById('auction_id').value;
-    formData.append('auction_id', auctionId);
-
-    const statusMessage = document.getElementById('status-message');
-    statusMessage.textContent = 'Processing...';
-
-    fetch('{% url "auction:upload_to_hibid" %}', {
-        method: 'POST',
-        body: formData,
-        headers: {
-            'X-CSRFToken': '{{ csrf_token }}'
-        }
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.task_id) {
-            pollTaskStatus(data.task_id);
-        } else {
-            statusMessage.textContent = data.message || 'Upload process started';
-        }
-    })
-    .catch(error => {
-        statusMessage.textContent = 'An error occurred: ' + error;
-    });
-}
-
-    function pollTaskStatus(taskId) {
+    document.getElementById('uploadToHiBidForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        const formData = new FormData(this);
         const statusMessage = document.getElementById('status-message');
-        const intervalId = setInterval(() => {
-            fetch(`/auction/check-task-status/${taskId}/`)
-                .then(response => response.json())
-                .then(data => {
-                    if (data.error) {
-                        throw new Error(data.error);
-                    }
-                    statusMessage.textContent = `Status: ${data.status} - ${data.message}`;
-                    if (data.status === 'COMPLETED' || data.status === 'ERROR') {
-                        clearInterval(intervalId);
-                    }
-                })
-                .catch(error => {
-                    console.error('Error:', error);
-                    statusMessage.textContent = `Error checking task status: ${error.message}`;
-                    clearInterval(intervalId);
-                });
-        }, 5000); // Poll every 5 seconds
-    }
+        statusMessage.textContent = 'Processing...';
+
+        fetch('{% url "auction:upload_to_hibid" %}', {
+            method: 'POST',
+            body: formData,
+            headers: {
+                'X-CSRFToken': '{{ csrf_token }}'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                statusMessage.textContent = data.message;
+            } else {
+                statusMessage.textContent = 'Error: ' + data.message;
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            statusMessage.textContent = 'An error occurred: ' + error;
+        });
+    });
 
     // Call updateAuctionDropdown when the page loads to set initial state
     document.addEventListener('DOMContentLoaded', updateAuctionDropdown);
