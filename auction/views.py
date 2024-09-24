@@ -99,7 +99,9 @@ def download_formatted_csv(request, auction_id):
 @login_required
 def get_warehouse_events(request):
     warehouse = request.GET.get('warehouse')
-    process_type = request.GET.get('process_type', 'future')  # Default to future auctions
+    process_type = request.GET.get('process_type', 'future')
+    logger.info(f"Fetching events for warehouse: {warehouse}, process_type: {process_type}")
+    
     all_events = Event.objects.filter(warehouse=warehouse)
     today = timezone.now().date()
 
@@ -113,7 +115,7 @@ def get_warehouse_events(request):
                 'warehouse': event.warehouse
             }
             for event in all_events
-            if event.ending_date.date() <= today
+            if event.ending_date <= today
         ]
     else:
         # For other processes (auction creation, formatting, etc.)
@@ -125,9 +127,10 @@ def get_warehouse_events(request):
                 'warehouse': event.warehouse
             }
             for event in all_events
-            if event.ending_date.date() > today
+            if event.ending_date > today
         ]
 
+    logger.info(f"Filtered events count: {len(filtered_events)}")
     return JsonResponse(filtered_events, safe=False)
 
 @login_required
