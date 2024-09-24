@@ -25,9 +25,12 @@
                 <div class="flex-1 flex justify-end items-center">
                     {% if user.is_authenticated %}
                     <span class="text-gray-800 dark:text-gray-200 mr-4">Welcome, {{ user.username }}!</span>
-                    <a href="{% url 'logout' %}" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded">
-                        Logout
-                    </a>
+                    <form id="logout-form" action="{% url 'logout' %}" method="post" class="inline">
+                        {% csrf_token %}
+                        <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded">
+                            Logout
+                        </button>
+                    </form>
                     {% endif %}
                     <button id="theme-toggle" class="ml-4 p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-700">
                         <svg id="theme-toggle-dark-icon" class="w-5 h-5 hidden" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z"></path></svg>
