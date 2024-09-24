@@ -6,12 +6,14 @@ from django.contrib import messages
 from django.views.decorators.http import require_http_methods
 from django.utils.encoding import smart_str
 from django.conf import settings
+import requests
 import logging
 import threading
 import json
 import traceback
 import os
 import asyncio
+from auction.models import HiBidUpload
 from threading import Thread, Event
 from datetime import datetime, timezone
 from auction.utils import config_manager
@@ -263,55 +265,51 @@ def auction_formatter_view(request):
 @login_required
 @require_http_methods(["GET", "POST"])
 def upload_to_hibid_view(request):
-    warehouses = list(warehouse_data.keys())
+    warehouses = list(config_manager.config.get('warehouses', {}).keys())
     auctions = get_auction_numbers(request)
     can_use_show_browser = request.user.has_perm('auction.can_use_show_browser')
 
     if request.method == 'POST':
-        auction_id = request.POST.get('auction_id')
-        show_browser = 'show_browser' in request.POST and can_use_show_browser
+        event_id = request.POST.get('auction_id')
         selected_warehouse = request.POST.get('selected_warehouse')
 
-        if not all([auction_id, selected_warehouse]):
+        if not all([event_id, selected_warehouse]):
             return JsonResponse({'status': 'error', 'message': "Please select both a warehouse and an event."})
 
-        selected_auction = next((a for a in auctions if a['id'] == auction_id), None)
+        selected_auction = next((a for a in auctions if a['id'] == event_id and a['warehouse'] == selected_warehouse), None)
 
         if not selected_auction:
-            return JsonResponse({'status': 'error', 'message': "Invalid auction selected."})
+            return JsonResponse({'status': 'error', 'message': "Invalid auction selected for the given warehouse."})
 
-        ending_date_str = selected_auction.get('ending_date')
+        # Prepare the data for the n8n workflow
+        n8n_data = {
+            'event_id': event_id
+        }
 
-        if not ending_date_str:
-            return JsonResponse({'status': 'error', 'message': "No valid ending date found for the selected auction."})
+        # Send POST request to n8n workflow
+        n8n_endpoint = getattr(settings, 'N8N_HIBID_UPLOAD_ENDPOINT', None)
+        if not n8n_endpoint:
+            logger.error("N8N_HIBID_UPLOAD_ENDPOINT is not set in settings.")
+            return JsonResponse({'status': 'error', 'message': "Server configuration error."})
 
         try:
-            ending_date = datetime.strptime(ending_date_str, '%Y-%m-%d %H:%M:%S')
-            ending_date_str = ending_date.strftime('%Y-%m-%d %H:%M:%S')
-        except ValueError as e:
-            return JsonResponse({'status': 'error', 'message': "Invalid date format in auction data."})
+            response = requests.post(n8n_endpoint, json=n8n_data)
+            response.raise_for_status()
+        except requests.RequestException as e:
+            logger.error(f"Error sending request to n8n workflow: {str(e)}")
+            return JsonResponse({'status': 'error', 'message': "Failed to start HiBid upload process."})
 
-        auction_title = selected_auction['title']
+        # Create a HiBidUpload record
+        try:
+            event = Event.objects.get(event_id=event_id)
+            HiBidUpload.objects.create(
+                event=event,
+                status='in_progress'
+            )
+        except Event.DoesNotExist:
+            return JsonResponse({'status': 'error', 'message': "Event not found in the database."})
 
-        config_manager.set_active_warehouse(selected_warehouse)
-
-        should_stop = threading.Event()
-        task_id = f"upload_to_hibid_{int(time.time())}"
-        RedisTaskStatus.set_status(task_id, "STARTED", f"Starting HiBid upload for auction {auction_id}")
-
-        Thread(target=upload_to_hibid_main, kwargs={
-            'auction_id': auction_id,
-            'ending_date': ending_date_str,
-            'auction_title': auction_title,
-            'gui_callback': logger.info,
-            'should_stop': should_stop,
-            'callback': lambda: None,
-            'show_browser': show_browser,
-            'selected_warehouse': selected_warehouse,
-            'task_id': task_id
-        }).start()
-
-        return JsonResponse({'message': 'Upload to HiBid process started', 'task_id': task_id})
+        return JsonResponse({'status': 'success', 'message': "HiBid upload process started successfully."})
 
     context = {
         'warehouses': warehouses,

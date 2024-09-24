@@ -69,9 +69,6 @@ class HiBidUpload(models.Model):
     event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name='hibid_uploads')
     upload_date = models.DateTimeField(auto_now_add=True)
     status = models.CharField(max_length=50, default='pending')
-    lot_count = models.IntegerField(default=0)
-    auction_id = models.CharField(max_length=100)
-    ending_date = models.DateTimeField()
 
     def __str__(self):
         return f"HiBid Upload for Event {self.event.event_id} on {self.upload_date}"
