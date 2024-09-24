@@ -116,7 +116,6 @@ def create_auction_view(request):
         try:
             auction_title = request.POST.get('auction_title')
             ending_date = datetime.strptime(request.POST.get('ending_date'), '%Y-%m-%d')
-            show_browser = 'show_browser' in request.POST and request.user.has_perm('auction.can_use_show_browser')
             selected_warehouse = request.POST.get('selected_warehouse')
 
             if not all([auction_title, ending_date, selected_warehouse]):
@@ -131,7 +130,6 @@ def create_auction_view(request):
                 asyncio.run(create_auction_main(
                     auction_title,
                     ending_date,
-                    show_browser,
                     selected_warehouse,
                     task_id
                 ))
@@ -150,10 +148,8 @@ def create_auction_view(request):
             return JsonResponse({'error': 'Failed to start auction creation task', 'details': str(e)}, status=500)
 
     warehouses = list(warehouse_data.keys())
-    can_use_show_browser = request.user.has_perm('auction.can_use_show_browser')
     return render(request, 'auction/create_auction.html', {
         'warehouses': warehouses,
-        'can_use_show_browser': can_use_show_browser
     })
 
 @login_required
@@ -162,13 +158,11 @@ def void_unpaid_view(request):
     warehouses = list(warehouse_data.keys())
     default_warehouse = warehouses[0] if warehouses else None
     auctions = get_auction_numbers(request)
-    can_use_show_browser = request.user.has_perm('auction.can_use_show_browser')
 
     if request.method == 'GET':
         context = {
             'warehouses': warehouses,
             'default_warehouse': default_warehouse,
-            'can_use_show_browser': can_use_show_browser,
         }
         return render(request, 'auction/void_unpaid.html', context)
 
@@ -178,7 +172,6 @@ def void_unpaid_view(request):
             warehouse = data.get('warehouse')
             event_id = data.get('auction_id')
             upload_choice = int(data.get('upload_choice'))
-            show_browser = data.get('show_browser') and can_use_show_browser
 
             valid_auction = any(auction for auction in auctions if auction['id'] == event_id and auction['warehouse'] == warehouse)
 
@@ -239,6 +232,7 @@ def auction_formatter_view(request):
     if request.method == 'POST':
         auction_id = request.POST.get('auction_id')
         selected_warehouse = request.POST.get('selected_warehouse')
+        starting_price = request.POST.get('starting_price')  # Get the starting price
 
         config_manager.set_active_warehouse(selected_warehouse)
 
@@ -249,6 +243,7 @@ def auction_formatter_view(request):
         Thread(target=auction_formatter_main, kwargs={
             'auction_id': auction_id,
             'selected_warehouse': selected_warehouse,
+            'starting_price': starting_price,  # Pass the starting price
             'gui_callback': logger.info,
             'should_stop': should_stop,
             'callback': lambda: None,

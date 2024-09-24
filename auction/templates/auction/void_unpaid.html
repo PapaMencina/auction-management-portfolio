@@ -30,12 +30,6 @@
                 </label>
             </div>
         </div>
-        {% if can_use_show_browser %}
-        <div class="flex items-center">
-            <input type="checkbox" id="show_browser" name="show_browser" class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded">
-            <label for="show_browser" class="ml-2 block text-sm text-gray-700 dark:text-gray-300">Show Browser</label>
-        </div>
-        {% endif %}
         <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline transition duration-150 ease-in-out">
             Void Unpaid Transactions
         </button>
@@ -57,7 +51,6 @@
             warehouse: form.warehouse.value,
             auction_id: form.auction_id.value,
             upload_choice: parseInt(form.upload_choice.value),
-            show_browser: form.show_browser ? form.show_browser.checked : false,
         };
 
         const statusMessage = document.getElementById('statusMessage');

@@ -30,10 +30,10 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "auction_webapp.settings")
 application = get_wsgi_application()
 
 
-def auction_formatter_main(auction_id, selected_warehouse, gui_callback, should_stop, callback, task_id=None):
+def auction_formatter_main(auction_id, selected_warehouse, starting_price, gui_callback, should_stop, callback, task_id=None):
     config_manager.set_active_warehouse(selected_warehouse)
     event = get_event(auction_id)
-    formatter = AuctionFormatter(event, gui_callback, should_stop, callback, selected_warehouse, task_id)
+    formatter = AuctionFormatter(event, gui_callback, should_stop, callback, selected_warehouse, starting_price, task_id)
     asyncio.run(formatter.run_auction_formatter())
     return formatter
 
@@ -345,13 +345,14 @@ def get_image_url(airtable_record: Dict, count: int) -> Tuple[str, str, int]:
     return url, filename, count
 
 class AuctionFormatter:
-    def __init__(self, event, gui_callback, should_stop, callback, selected_warehouse, task_id):
+    def __init__(self, event, gui_callback, should_stop, callback, selected_warehouse, starting_price, task_id):
         self.event = event
         self.Auction_ID = event.event_id
         self.gui_callback = gui_callback
         self.should_stop = should_stop
         self.callback = callback
         self.selected_warehouse = selected_warehouse
+        self.starting_price = starting_price
         self.task_id = task_id
         
         config_manager.set_active_warehouse(selected_warehouse)
@@ -744,7 +745,7 @@ class AuctionFormatter:
     async def process_records_concurrently(self, airtable_records, uploaded_image_urls):
         async def process_record_async(record):
             return await sync_to_async(process_single_record)(
-                record, uploaded_image_urls, self.Auction_ID, self.selected_warehouse, self.gui_callback
+                record, uploaded_image_urls, self.Auction_ID, self.selected_warehouse, self.starting_price, self.gui_callback
             )
 
         processed_records = []
@@ -855,7 +856,7 @@ def save_images_to_database(event: Event, uploaded_image_urls: Dict[str, List[Tu
                 image=url
             )
 
-def process_single_record(airtable_record: Dict, uploaded_image_urls: Dict[str, List[Tuple[str, int]]], Auction_ID: str, selected_warehouse: str, gui_callback) -> Dict:
+def process_single_record(airtable_record: Dict, uploaded_image_urls: Dict[str, List[Tuple[str, int]]], Auction_ID: str, selected_warehouse: str, starting_price: str, gui_callback) -> Dict:
     try:
         newRecord = {}
         record_id = airtable_record.get('id', '')
@@ -922,7 +923,7 @@ def process_single_record(airtable_record: Dict, uploaded_image_urls: Dict[str, 
 
         # Price and Subtitle
         auction_count = int(newRecord.get("AuctionCount", 0))
-        newRecord["Price"] = "5.00" if auction_count == 1 else "2.50" if auction_count == 2 else "1.00" if auction_count >= 3 else "5.00"
+        newRecord["Price"] = starting_price
         newRecord["Subtitle"] = format_subtitle(
             auction_count,
             float(newRecord.get("MSRP", 0)),
