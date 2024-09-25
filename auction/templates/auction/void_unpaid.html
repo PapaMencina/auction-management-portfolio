@@ -33,7 +33,7 @@
                 </label>
             </div>
         </div>
-        <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline transition duration-150 ease-in-out">
+        <button type="submit" id="submit-button" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline transition duration-150 ease-in-out">
             Void Unpaid Transactions
         </button>
     </form>
@@ -68,34 +68,6 @@ function updateAuctionDropdown() {
     }
 }
 
-document.getElementById('void-unpaid-form').addEventListener('submit', function(e) {
-    e.preventDefault();
-    const formData = new FormData(this);
-    const statusMessage = document.getElementById('statusMessage');
-
-    statusMessage.textContent = 'Processing...';
-
-    fetch('{% url "auction:void_unpaid" %}', {
-        method: 'POST',
-        body: JSON.stringify(Object.fromEntries(formData)),
-        headers: {
-            'Content-Type': 'application/json',
-            'X-CSRFToken': '{{ csrf_token }}'
-        }
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.task_id) {
-            pollTaskStatus(data.task_id);
-        } else {
-            statusMessage.textContent = data.message || 'Void unpaid process started';
-        }
-    })
-    .catch(error => {
-        statusMessage.textContent = 'An error occurred: ' + error;
-    });
-});
-
 function pollTaskStatus(taskId) {
     const statusMessage = document.getElementById('statusMessage');
     const intervalId = setInterval(() => {
@@ -108,16 +80,72 @@ function pollTaskStatus(taskId) {
                 statusMessage.textContent = `Status: ${data.status} - ${data.message}`;
                 if (data.status === 'COMPLETED' || data.status === 'ERROR') {
                     clearInterval(intervalId);
+                    hideLoadingSpinner();
                 }
             })
             .catch(error => {
                 console.error('Error:', error);
                 statusMessage.textContent = `Error checking task status: ${error.message}`;
                 clearInterval(intervalId);
+                hideLoadingSpinner();
             });
     }, 5000); // Poll every 5 seconds
 }
 
-document.addEventListener('DOMContentLoaded', updateAuctionDropdown);
+document.addEventListener('DOMContentLoaded', function() {
+    const form = document.getElementById('void-unpaid-form');
+    const submitButton = document.getElementById('submit-button');
+    const statusMessage = document.getElementById('statusMessage');
+
+    updateAuctionDropdown();
+
+    form.addEventListener('submit', function(e) {
+        e.preventDefault();
+        const auctionId = document.getElementById('auction_id').value;
+        
+        if (submitButton.dataset.processingAuctionId === auctionId) {
+            alert('This auction is already being processed. Please wait for it to complete.');
+            return;
+        }
+
+        const formData = new FormData(this);
+        submitButton.disabled = true;
+        submitButton.dataset.processingAuctionId = auctionId;
+        submitButton.textContent = 'Processing...';
+        
+        showLoadingSpinner('Voiding unpaid transactions...');
+
+        fetch('{% url "auction:void_unpaid" %}', {
+            method: 'POST',
+            body: JSON.stringify(Object.fromEntries(formData)),
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': '{{ csrf_token }}'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                throw new Error(data.error);
+            }
+            statusMessage.textContent = data.message || 'Void unpaid process started';
+            if (data.task_id) {
+                pollTaskStatus(data.task_id);
+            } else {
+                hideLoadingSpinner();
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            statusMessage.textContent = 'An error occurred: ' + error.message;
+            hideLoadingSpinner();
+        })
+        .finally(() => {
+            submitButton.disabled = false;
+            submitButton.dataset.processingAuctionId = '';
+            submitButton.textContent = 'Void Unpaid Transactions';
+        });
+    });
+});
 </script>
 {% endblock %}

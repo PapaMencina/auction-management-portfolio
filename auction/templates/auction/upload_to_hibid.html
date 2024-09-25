@@ -21,7 +21,7 @@
                 <!-- Options will be populated dynamically by JavaScript -->
             </select>
         </div>
-        <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline transition duration-150 ease-in-out">
+        <button type="submit" id="submit-button" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline transition duration-150 ease-in-out">
             Run Upload to HiBid Script
         </button>
     </form>
@@ -56,34 +56,61 @@
         }
     }
 
-    document.getElementById('uploadToHiBidForm').addEventListener('submit', function(e) {
-        e.preventDefault();
-        const formData = new FormData(this);
+    document.addEventListener('DOMContentLoaded', function() {
+        const form = document.getElementById('uploadToHiBidForm');
+        const submitButton = document.getElementById('submit-button');
         const statusMessage = document.getElementById('status-message');
-        statusMessage.textContent = 'Processing...';
 
-        fetch('{% url "auction:upload_to_hibid" %}', {
-            method: 'POST',
-            body: formData,
-            headers: {
-                'X-CSRFToken': '{{ csrf_token }}'
+        updateAuctionDropdown();
+
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            const auctionId = document.getElementById('auction_id').value;
+            
+            if (submitButton.dataset.processingAuctionId === auctionId) {
+                alert('This auction is already being processed for HiBid upload. Please wait for it to complete.');
+                return;
             }
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.status === 'success') {
-                statusMessage.textContent = data.message;
-            } else {
-                statusMessage.textContent = 'Error: ' + data.message;
-            }
-        })
-        .catch(error => {
-            console.error('Error:', error);
-            statusMessage.textContent = 'An error occurred: ' + error;
+
+            const formData = new FormData(this);
+            submitButton.disabled = true;
+            submitButton.dataset.processingAuctionId = auctionId;
+            submitButton.textContent = 'Processing...';
+            
+            showLoadingSpinner('Initiating HiBid upload...');
+
+            statusMessage.textContent = 'Initiating HiBid upload...';
+
+            fetch('{% url "auction:upload_to_hibid" %}', {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'X-CSRFToken': '{{ csrf_token }}'
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    statusMessage.textContent = data.message;
+                    statusMessage.classList.add('text-green-500');
+                    statusMessage.classList.remove('text-red-500');
+                } else {
+                    throw new Error(data.message);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                statusMessage.textContent = 'An error occurred: ' + error.message;
+                statusMessage.classList.add('text-red-500');
+                statusMessage.classList.remove('text-green-500');
+            })
+            .finally(() => {
+                submitButton.disabled = false;
+                submitButton.dataset.processingAuctionId = '';
+                submitButton.textContent = 'Run Upload to HiBid Script';
+                hideLoadingSpinner();
+            });
         });
     });
-
-    // Call updateAuctionDropdown when the page loads to set initial state
-    document.addEventListener('DOMContentLoaded', updateAuctionDropdown);
 </script>
 {% endblock %}

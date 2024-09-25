@@ -866,7 +866,14 @@ def process_single_record(airtable_record: Dict, uploaded_image_urls: Dict[str, 
         newRecord["AuctionCount"] = airtable_record["fields"].get("Auction Count", "")
         newRecord["Photo Taker"] = airtable_record["fields"].get("Clerk", "")
         newRecord["Size"] = airtable_record["fields"].get("Size", "")
-        newRecord["UPC"] = str(airtable_record["fields"].get("UPC", ""))
+        
+        # Handle UPC field
+        upc = str(airtable_record["fields"].get("UPC", ""))
+        if upc.lower() == 'nan' or not upc.isdigit():
+            newRecord["UPC"] = ""
+        else:
+            newRecord["UPC"] = upc
+
         newRecord["ID"] = record_id
         product_id = str(airtable_record["fields"].get("Lot Number", ""))
         newRecord["LotNumber"] = newRecord["Lot Number"] = str(product_id)

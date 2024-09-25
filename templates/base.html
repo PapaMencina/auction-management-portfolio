@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en" class="h-full">
 <head>
+    {% load static %}
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Auction Management System{% endblock %}</title>
@@ -100,5 +101,7 @@
             }
         });
     </script>
+    <script src="{% static 'js/loading-spinner.js' %}"></script>
+    <script src="{% static 'js/form-submission-handler.js' %}"></script>
 </body>
 </html>

@@ -22,7 +22,7 @@
             <label for="ending_date" class="block mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">Ending Date:</label>
             <input type="date" id="ending_date" name="ending_date" required class="w-full p-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white">
         </div>
-        <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline transition duration-150 ease-in-out">
+        <button type="submit" id="submit-button" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline transition duration-150 ease-in-out">
             Run Create Auction Script
         </button>
     </form>
@@ -66,11 +66,13 @@
                 
                 if (data.status === 'COMPLETED' || data.status === 'ERROR') {
                     clearInterval(intervalId);
+                    hideLoadingSpinner();
                 }
             } catch (error) {
                 console.error('Error polling task status:', error);
                 updateUI('ERROR', 'Failed to check task status');
                 clearInterval(intervalId);
+                hideLoadingSpinner();
             }
         }, 5000);
     }
@@ -81,27 +83,34 @@
     }
 
     document.addEventListener('DOMContentLoaded', function() {
-        document.getElementById('create-auction-form').addEventListener('submit', function(e) {
-            e.preventDefault();
-            var form = this;
-            var formData = new FormData(form);
-            var statusMessage = document.getElementById('status-message');
+        const form = document.getElementById('create-auction-form');
+        const submitButton = document.getElementById('submit-button');
+        const statusMessage = document.getElementById('status-message');
 
-            statusMessage.textContent = 'Starting auction creation...';
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            const auctionId = document.getElementById('auction_title').value;
+            
+            if (submitButton.dataset.processingAuctionId === auctionId) {
+                alert('This auction is already being processed. Please wait for it to complete.');
+                return;
+            }
+
+            const formData = new FormData(form);
+            submitButton.disabled = true;
+            submitButton.dataset.processingAuctionId = auctionId;
+            submitButton.textContent = 'Processing...';
+            
+            showLoadingSpinner('Creating auction...');
 
             fetch(form.action, {
                 method: 'POST',
                 body: formData,
                 headers: {
-                    'X-CSRFToken': '{{ csrf_token }}'
+                    'X-CSRFToken': formData.get('csrfmiddlewaretoken')
                 }
             })
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error('Network response was not ok');
-                }
-                return response.json();
-            })
+            .then(response => response.json())
             .then(data => {
                 console.log('Response data:', data);
                 if (data.error) {
@@ -113,11 +122,18 @@
                     pollTaskStatus(data.task_id);
                 } else {
                     console.warn('No task_id received from server');
+                    hideLoadingSpinner();
                 }
             })
             .catch(error => {
                 console.error('Error:', error);
                 statusMessage.textContent = 'Error starting auction creation: ' + error.message;
+                hideLoadingSpinner();
+            })
+            .finally(() => {
+                submitButton.disabled = false;
+                submitButton.dataset.processingAuctionId = '';
+                submitButton.textContent = 'Run Create Auction Script';
             });
         });
     });
