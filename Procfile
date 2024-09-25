@@ -1,2 +1,2 @@
 release: python manage.py migrate
-web: gunicorn auction_webapp.wsgi:application
+web: python manage.py collectstatic --noinput && gunicorn auction_webapp.wsgi
