@@ -22,9 +22,14 @@
             <label for="ending_date" class="block mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">Ending Date:</label>
             <input type="date" id="ending_date" name="ending_date" required class="w-full p-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white">
         </div>
-        <button type="submit" id="submit-button" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline transition duration-150 ease-in-out">
-            Run Create Auction Script
-        </button>
+        <div class="relative">
+            <button type="submit" id="submit-button" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline transition duration-150 ease-in-out">
+                Run Create Auction Script
+            </button>
+            <div id="spinner" class="hidden absolute right-3 top-1/2 transform -translate-y-1/2">
+                <div class="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+            </div>
+        </div>
     </form>
     <div id="status-message" class="mt-4 text-center text-sm text-gray-600 dark:text-gray-400"></div>
 </div>
@@ -66,13 +71,15 @@
                 
                 if (data.status === 'COMPLETED' || data.status === 'ERROR') {
                     clearInterval(intervalId);
-                    hideLoadingSpinner();
+                    hideSpinner();
+                    enableSubmitButton();
                 }
             } catch (error) {
                 console.error('Error polling task status:', error);
                 updateUI('ERROR', 'Failed to check task status');
                 clearInterval(intervalId);
-                hideLoadingSpinner();
+                hideSpinner();
+                enableSubmitButton();
             }
         }, 5000);
     }
@@ -80,6 +87,28 @@
     function updateUI(status, message) {
         const statusMessage = document.getElementById('status-message');
         statusMessage.textContent = `Status: ${status} - ${message}`;
+        statusMessage.classList.remove('text-gray-600', 'text-green-600', 'text-red-600');
+        statusMessage.classList.add(status === 'COMPLETED' ? 'text-green-600' : status === 'ERROR' ? 'text-red-600' : 'text-gray-600');
+    }
+
+    function showSpinner() {
+        document.getElementById('spinner').classList.remove('hidden');
+    }
+
+    function hideSpinner() {
+        document.getElementById('spinner').classList.add('hidden');
+    }
+
+    function disableSubmitButton() {
+        const submitButton = document.getElementById('submit-button');
+        submitButton.disabled = true;
+        submitButton.classList.add('opacity-50', 'cursor-not-allowed');
+    }
+
+    function enableSubmitButton() {
+        const submitButton = document.getElementById('submit-button');
+        submitButton.disabled = false;
+        submitButton.classList.remove('opacity-50', 'cursor-not-allowed');
     }
 
     document.addEventListener('DOMContentLoaded', function() {
@@ -92,16 +121,16 @@
             const auctionId = document.getElementById('auction_title').value;
             
             if (submitButton.dataset.processingAuctionId === auctionId) {
-                alert('This auction is already being processed. Please wait for it to complete.');
+                updateUI('WARNING', 'This auction is already being processed. Please wait for it to complete.');
                 return;
             }
 
             const formData = new FormData(form);
-            submitButton.disabled = true;
+            disableSubmitButton();
             submitButton.dataset.processingAuctionId = auctionId;
-            submitButton.textContent = 'Processing...';
+            showSpinner();
             
-            showLoadingSpinner('Creating auction...');
+            updateUI('PROCESSING', 'Creating auction...');
 
             fetch(form.action, {
                 method: 'POST',
@@ -116,24 +145,21 @@
                 if (data.error) {
                     throw new Error(data.error);
                 }
-                statusMessage.textContent = data.message || 'Auction creation process started successfully.';
+                updateUI('STARTED', data.message || 'Auction creation process started successfully.');
                 if (data.task_id) {
                     console.log('Starting polling for task:', data.task_id);
                     pollTaskStatus(data.task_id);
                 } else {
                     console.warn('No task_id received from server');
-                    hideLoadingSpinner();
+                    hideSpinner();
+                    enableSubmitButton();
                 }
             })
             .catch(error => {
                 console.error('Error:', error);
-                statusMessage.textContent = 'Error starting auction creation: ' + error.message;
-                hideLoadingSpinner();
-            })
-            .finally(() => {
-                submitButton.disabled = false;
-                submitButton.dataset.processingAuctionId = '';
-                submitButton.textContent = 'Run Create Auction Script';
+                updateUI('ERROR', 'Error starting auction creation: ' + error.message);
+                hideSpinner();
+                enableSubmitButton();
             });
         });
     });

@@ -21,9 +21,14 @@
                 <!-- Options will be populated dynamically by JavaScript -->
             </select>
         </div>
-        <button type="submit" id="submit-button" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline transition duration-150 ease-in-out">
-            Run Upload to HiBid Script
-        </button>
+        <div class="relative">
+            <button type="submit" id="submit-button" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline transition duration-150 ease-in-out">
+                Run Upload to HiBid Script
+            </button>
+            <div id="spinner" class="hidden absolute right-3 top-1/2 transform -translate-y-1/2">
+                <div class="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+            </div>
+        </div>
     </form>
     <div id="status-message" class="mt-4 text-center text-sm text-gray-600 dark:text-gray-400"></div>
 </div>
@@ -52,14 +57,41 @@
                 })
                 .catch(error => {
                     console.error('Error fetching auctions:', error);
+                    updateUI('ERROR', 'Failed to fetch auctions');
                 });
         }
+    }
+
+    function updateUI(status, message) {
+        const statusMessage = document.getElementById('status-message');
+        statusMessage.textContent = message;
+        statusMessage.classList.remove('text-gray-600', 'text-green-600', 'text-red-600');
+        statusMessage.classList.add(status === 'SUCCESS' ? 'text-green-600' : status === 'ERROR' ? 'text-red-600' : 'text-gray-600');
+    }
+
+    function showSpinner() {
+        document.getElementById('spinner').classList.remove('hidden');
+    }
+
+    function hideSpinner() {
+        document.getElementById('spinner').classList.add('hidden');
+    }
+
+    function disableSubmitButton() {
+        const submitButton = document.getElementById('submit-button');
+        submitButton.disabled = true;
+        submitButton.classList.add('opacity-50', 'cursor-not-allowed');
+    }
+
+    function enableSubmitButton() {
+        const submitButton = document.getElementById('submit-button');
+        submitButton.disabled = false;
+        submitButton.classList.remove('opacity-50', 'cursor-not-allowed');
     }
 
     document.addEventListener('DOMContentLoaded', function() {
         const form = document.getElementById('uploadToHiBidForm');
         const submitButton = document.getElementById('submit-button');
-        const statusMessage = document.getElementById('status-message');
 
         updateAuctionDropdown();
 
@@ -68,18 +100,16 @@
             const auctionId = document.getElementById('auction_id').value;
             
             if (submitButton.dataset.processingAuctionId === auctionId) {
-                alert('This auction is already being processed for HiBid upload. Please wait for it to complete.');
+                updateUI('WARNING', 'This auction is already being processed for HiBid upload. Please wait for it to complete.');
                 return;
             }
 
             const formData = new FormData(this);
-            submitButton.disabled = true;
+            disableSubmitButton();
             submitButton.dataset.processingAuctionId = auctionId;
-            submitButton.textContent = 'Processing...';
+            showSpinner();
             
-            showLoadingSpinner('Initiating HiBid upload...');
-
-            statusMessage.textContent = 'Initiating HiBid upload...';
+            updateUI('PROCESSING', 'Initiating HiBid upload...');
 
             fetch('{% url "auction:upload_to_hibid" %}', {
                 method: 'POST',
@@ -91,24 +121,19 @@
             .then(response => response.json())
             .then(data => {
                 if (data.status === 'success') {
-                    statusMessage.textContent = data.message;
-                    statusMessage.classList.add('text-green-500');
-                    statusMessage.classList.remove('text-red-500');
+                    updateUI('SUCCESS', data.message);
                 } else {
                     throw new Error(data.message);
                 }
             })
             .catch(error => {
                 console.error('Error:', error);
-                statusMessage.textContent = 'An error occurred: ' + error.message;
-                statusMessage.classList.add('text-red-500');
-                statusMessage.classList.remove('text-green-500');
+                updateUI('ERROR', 'An error occurred: ' + error.message);
             })
             .finally(() => {
-                submitButton.disabled = false;
+                hideSpinner();
+                enableSubmitButton();
                 submitButton.dataset.processingAuctionId = '';
-                submitButton.textContent = 'Run Upload to HiBid Script';
-                hideLoadingSpinner();
             });
         });
     });
