@@ -346,3 +346,4 @@ def check_task_status(request, task_id):
         logger.error(f"Error checking task status: {str(e)}")
         logger.exception("Full traceback:")
         return JsonResponse({'error': 'Internal server error'}, status=500)
+    
