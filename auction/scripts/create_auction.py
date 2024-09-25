@@ -443,7 +443,7 @@ class SharedEvents:
         await save_event_to_database(event_data)
 
 async def create_auction_main(auction_title, ending_date, show_browser, selected_warehouse, task_id):
-    task_id = f"create_auction_{int(time.time())}"
+    # task_id = f"create_auction_{int(time.time())}"
     RedisTaskStatus.set_status(task_id, "STARTED", f"Starting auction creation for {auction_title}")
     
     logger.info(f"Starting create_auction_main for auction: {auction_title}, warehouse: {selected_warehouse}")
@@ -460,7 +460,7 @@ async def create_auction_main(auction_title, ending_date, show_browser, selected
         RedisTaskStatus.set_status(task_id, "IN_PROGRESS", f"Date formatting completed: {month_formatted_date}, {bid_formatted_ending_date}")
 
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=not show_browser)
+            browser = await p.chromium.launch(headless=True)
             context = await browser.new_context()
             page = await context.new_page()
 
@@ -500,9 +500,10 @@ async def create_auction_main(auction_title, ending_date, show_browser, selected
         logger.error(f"Error in create_auction_main: {str(e)}")
         logger.error(traceback.format_exc())
     
-    return task_id, event_id
+    return event_id
 
 if __name__ == "__main__":
     import asyncio
     end_date = datetime.now() + timedelta(days=14)  # Set end date to 14 days from now
-    asyncio.run(create_auction_main("Sample Auction", end_date, True, "Maule Warehouse"))
+    task_id = f"create_auction_{int(time.time())}"
+    asyncio.run(create_auction_main("Sample Auction", end_date, "Maule Warehouse", task_id))
