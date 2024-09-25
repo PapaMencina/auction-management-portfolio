@@ -115,7 +115,7 @@ def get_warehouse_events(request):
                 'warehouse': event.warehouse
             }
             for event in all_events
-            if event.ending_date <= today
+            if event.ending_date < today
         ]
     else:
         # For other processes (auction creation, formatting, etc.)
@@ -127,7 +127,7 @@ def get_warehouse_events(request):
                 'warehouse': event.warehouse
             }
             for event in all_events
-            if event.ending_date > today
+            if event.ending_date >= today
         ]
 
     logger.info(f"Filtered events count: {len(filtered_events)}")
