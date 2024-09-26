@@ -138,9 +138,9 @@ async def upload_file_via_ftp_async(file_name: str, file_content: bytes, gui_cal
 
                 gui_callback(f"Uploading file {file_name} to {remote_path_full}")
 
-                # Ensure the remote directory exists
+                # Ensure the remote directory exists using ensure_directory
                 remote_dir = os.path.dirname(remote_path_full)
-                await client.make_directory(remote_dir, exist_ok=True)
+                await client.ensure_directory(remote_dir)
 
                 # Upload the file to the specified remote path
                 await client.upload_stream(BytesIO(file_content), path=remote_path_full)
