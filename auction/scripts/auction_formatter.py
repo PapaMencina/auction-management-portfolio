@@ -115,35 +115,40 @@ async def process_image_async(image_data: bytes, gui_callback, width_threshold: 
         return None
 
 
-async def upload_file_via_ftp_async(file_name: str, file_content: bytes, gui_callback, max_retries: int = 3) -> str:
+async def upload_file_via_ftp_async(
+    file_name: str, file_content: bytes, gui_callback, max_retries: int = 3
+) -> str:
     remote_file_path = config_manager.get_global_var('ftp_remote_path')
     server = config_manager.get_global_var('ftp_server')
-    port = config_manager.get_global_var('ftp_port')  # Added FTP port retrieval
+    port = config_manager.get_global_var('ftp_port')
     username = config_manager.get_global_var('ftp_username')
     password = config_manager.get_global_var('ftp_password')
 
     # Ensure port is an integer and default to 21 if not specified
-    if not port:
-        port = 21
-    else:
-        port = int(port)
+    port = int(port) if port else 21
 
     retries = 0
     while retries < max_retries:
         try:
             gui_callback(f"Connecting to FTP server at {server}:{port}")
-            async with aioftp.Client.context(server, port=port, user=username, password=password) as client:
+            async with aioftp.Client.context(
+                server, port=port, user=username, password=password
+            ) as client:
                 # Construct the full remote path
-                remote_path_full = os.path.join(remote_file_path, file_name)
+                remote_path_full = os.path.normpath(
+                    os.path.join(remote_file_path, file_name)
+                )
 
                 gui_callback(f"Uploading file {file_name} to {remote_path_full}")
 
-                # Ensure the remote directory exists using ensure_directory
+                # Ensure the remote directory exists using ensure_dir
                 remote_dir = os.path.dirname(remote_path_full)
-                await client.ensure_directory(remote_dir)
+                await client.ensure_dir(remote_dir)
 
                 # Upload the file to the specified remote path
-                await client.upload_stream(BytesIO(file_content), path=remote_path_full)
+                await client.upload_stream(
+                    BytesIO(file_content), path=remote_path_full
+                )
                 gui_callback(f"File {file_name} uploaded successfully")
 
             # Construct the accessible URL
