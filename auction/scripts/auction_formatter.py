@@ -118,13 +118,21 @@ async def process_image_async(image_data: bytes, gui_callback, width_threshold: 
 async def upload_file_via_ftp_async(file_name: str, file_content: bytes, gui_callback, max_retries: int = 3) -> str:
     remote_file_path = config_manager.get_global_var('ftp_remote_path')
     server = config_manager.get_global_var('ftp_server')
+    port = config_manager.get_global_var('ftp_port')  # Added FTP port retrieval
     username = config_manager.get_global_var('ftp_username')
     password = config_manager.get_global_var('ftp_password')
+
+    # Ensure port is an integer and default to 21 if not specified
+    if not port:
+        port = 21
+    else:
+        port = int(port)
 
     retries = 0
     while retries < max_retries:
         try:
-            async with aioftp.Client.context(server, username, password) as client:
+            gui_callback(f"Connecting to FTP server at {server}:{port}")
+            async with aioftp.Client.context(server, port=port, user=username, password=password) as client:
                 await client.change_directory('/')
                 remote_path_full = os.path.join(remote_file_path, file_name)
 
@@ -140,12 +148,12 @@ async def upload_file_via_ftp_async(file_name: str, file_content: bytes, gui_cal
             retries += 1
             await asyncio.sleep(5)
         except Exception as e:
-            gui_callback(f"FTP upload error: {e}.")
-            break
+            gui_callback(f"FTP upload error: {e}. Retrying in 5 seconds...")
+            retries += 1
+            await asyncio.sleep(5)
 
     gui_callback("Failed to upload after maximum retries.")
     return None
-
 
 async def get_cached_airtable_records(BASE: str, TABLE: str, VIEW: str, gui_callback, airtable_token: str) -> List[Dict]:
     # Caching is omitted as Redis is not used in this refactoring
