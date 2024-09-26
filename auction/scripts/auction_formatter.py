@@ -6,6 +6,7 @@ import json
 import random
 import asyncio
 import tempfile
+from asyncio import Semaphore
 from collections import defaultdict
 from typing import List, Dict, Tuple
 from io import BytesIO
@@ -617,7 +618,10 @@ class AuctionFormatter:
             if self.should_stop.is_set():
                 return
 
-            # Collect image URLs
+            # Define a semaphore to limit concurrency
+            semaphore = Semaphore(5)  # Adjust this number based on testing and memory usage
+
+            # Collect image URLs for downloading and processing
             download_tasks = []
             for record in airtable_records:
                 if self.should_stop.is_set():
@@ -632,50 +636,67 @@ class AuctionFormatter:
                         if url:
                             download_tasks.append((record_id, url, f"{product_id}_{count}", count))
 
-            # Download and process images concurrently
-            self.gui_callback("Downloading and processing images...")
+            # Download and process images with limited concurrency
+            self.gui_callback("Downloading and processing images with limited concurrency...")
             image_data_dict = defaultdict(list)
-            async with aiohttp.ClientSession() as session:
-                tasks = []
-                for record_id, url, file_name, image_number in download_tasks:
-                    if self.should_stop.is_set():
-                        break
-                    tasks.append(self.download_and_process_image(session, record_id, url, image_number, image_data_dict))
 
-                await asyncio.gather(*tasks)
+            async def limited_download_and_process_image(record_id, url, image_number):
+                async with semaphore:
+                    await self.download_and_process_image(record_id, url, image_number, image_data_dict)
+
+            download_process_tasks = []
+            for record_id, url, file_name, image_number in download_tasks:
+                if self.should_stop.is_set():
+                    break
+                download_process_tasks.append(limited_download_and_process_image(record_id, url, image_number))
+
+            await asyncio.gather(*download_process_tasks)
 
             if self.should_stop.is_set():
                 return
 
-            # Upload images and get URLs
-            self.gui_callback("Uploading images...")
+            # Upload images and get URLs with limited concurrency
+            self.gui_callback("Uploading images with limited concurrency...")
             uploaded_image_urls = defaultdict(list)
-            tasks = []
+
+            async def limited_upload_image(record_id, image_data, image_number):
+                async with semaphore:
+                    await self.upload_image_and_get_url(record_id, image_data, image_number, uploaded_image_urls)
+
+            upload_tasks = []
             for record_id, images in image_data_dict.items():
                 for image_data, image_number in images:
                     if self.should_stop.is_set():
                         break
-                    tasks.append(self.upload_image_and_get_url(record_id, image_data, image_number, uploaded_image_urls))
+                    upload_tasks.append(limited_upload_image(record_id, image_data, image_number))
 
-            await asyncio.gather(*tasks)
+            await asyncio.gather(*upload_tasks)
 
             if self.should_stop.is_set():
                 return
 
+            # Clear image_data_dict to free memory
+            image_data_dict.clear()
+
             # Save images to database
             await self.save_images_to_database(uploaded_image_urls)
 
-            # Process records
-            self.gui_callback("Processing records...")
+            # Process records with limited concurrency
+            self.gui_callback("Processing records with limited concurrency...")
             processed_records = []
             failed_records = []
-            tasks = []
+
+            async def limited_process_record(record):
+                async with semaphore:
+                    await self.process_record(record, uploaded_image_urls, processed_records, failed_records)
+
+            process_tasks = []
             for record in airtable_records:
                 if self.should_stop.is_set():
                     break
-                tasks.append(self.process_record(record, uploaded_image_urls, processed_records, failed_records))
+                process_tasks.append(limited_process_record(record))
 
-            await asyncio.gather(*tasks)
+            await asyncio.gather(*process_tasks)
 
             if self.should_stop.is_set():
                 return
@@ -699,16 +720,20 @@ class AuctionFormatter:
         finally:
             await sync_to_async(self.callback)()
 
-    async def download_and_process_image(self, session, record_id, url, image_number, image_data_dict):
+    async def download_and_process_image(self, record_id, url, image_number, image_data_dict):
         image_data = await download_image_async(url, self.gui_callback)
         if image_data:
             processed_image_data = await process_image_async(image_data, self.gui_callback)
+            # Free up memory by deleting the original image data
+            del image_data
             if processed_image_data:
                 image_data_dict[record_id].append((processed_image_data, image_number))
 
     async def upload_image_and_get_url(self, record_id, image_data, image_number, uploaded_image_urls):
         file_name = f"{record_id}_{image_number}.jpg"
         url = await upload_file_via_ftp_async(file_name, image_data, self.gui_callback)
+        # Free up memory by deleting the processed image data
+        del image_data
         if url:
             if not url.startswith("https://"):
                 url = "https://" + url
@@ -763,7 +788,6 @@ class AuctionFormatter:
                 self.gui_callback("Login to auction site failed")
 
             await browser.close()
-
 
 def auction_formatter_main(auction_id, selected_warehouse, starting_price, gui_callback, should_stop, callback, task_id=None):
     config_manager.set_active_warehouse(selected_warehouse)
