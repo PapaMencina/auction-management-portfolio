@@ -276,114 +276,100 @@ def process_single_record(airtable_record: Dict, uploaded_image_urls: Dict[str, 
         record_id = airtable_record.get('id', '')
         gui_callback(f"Processing record ID: {record_id}")
 
+        # Extract fields from Airtable record
+        fields = airtable_record.get('fields', {})
+
         # Basic information
-        new_record["AuctionCount"] = airtable_record["fields"].get("Auction Count", "")
-        new_record["Photo Taker"] = airtable_record["fields"].get("Clerk", "")
-        new_record["Size"] = airtable_record["fields"].get("Size", "")
-
-        # Handle UPC field
-        upc = str(airtable_record["fields"].get("UPC", ""))
-        if upc.lower() == 'nan' or not upc.isdigit():
-            new_record["UPC"] = ""
-        else:
-            new_record["UPC"] = upc
-
-        new_record["ID"] = record_id
-        product_id = str(airtable_record["fields"].get("Lot Number", ""))
-        new_record["LotNumber"] = new_record["Lot Number"] = str(product_id)
-        new_record["Other Notes"] = airtable_record["fields"].get("Notes", "")
-        new_record["MSRP"] = airtable_record["fields"].get("MSRP", "0.00")
-        new_record["Truck"] = airtable_record["fields"].get("Shipment", "")
-        new_record["Category_not_formatted"] = airtable_record["fields"].get("Category", "")
-        new_record["Amazon ID"] = airtable_record["fields"].get("B00 ASIN", "")
-        new_record["Item Condition"] = airtable_record["fields"].get("Condition", "")
-        new_record["HibidSearchText"] = airtable_record["fields"].get("Description", "")
-        new_record["FullTitle"] = airtable_record["fields"].get("Product Name", "")
-        new_record["Location"] = airtable_record["fields"].get("Location", "")
-
-        # Format fields
-        base_fields = [
-            format_field("Description", new_record['FullTitle']),
-            format_field("MSRP", new_record['MSRP']),
-            format_field("Condition", new_record['Item Condition']),
-            format_field("Notes", new_record['Other Notes']),
-            format_field("Other info", new_record['HibidSearchText']),
-            format_field("Lot Number", product_id)
-        ]
-
-        html_base_fields = [
-            format_html_field("Description", new_record['FullTitle']),
-            format_html_field("MSRP", new_record['MSRP']),
-            format_html_field("Condition", new_record['Item Condition']),
-            format_html_field("Notes", new_record['Other Notes']),
-            format_html_field("Other info", new_record['HibidSearchText']),
-            format_html_field("Lot Number", product_id)
-        ]
-
-        # HiBid and Description fields
-        hibid_message = f"This item is live on our site, 702 Auctions.com. To view additional images and bid on this item, CLICK THE LINK ABOVE or visit bid.702auctions.com and search for lot number {new_record['LotNumber']}."
-        new_record["HiBid"] = " -- ".join([hibid_message] + [field for field in base_fields if field])
-        new_record["Description"] = ''.join(field for field in html_base_fields if field)
-
-        # Standard fields
-        new_record["Currency"] = "USD"
-        new_record["ListingType"] = "Auction"
-        new_record["Seller"] = "702Auctions"
         new_record["EventID"] = auction_id
+        new_record["LotNumber"] = fields.get("Lot Number", "")
+        new_record["Seller"] = "702Auctions"  # Replace with actual seller name if different
+        new_record["ConsignorNumber"] = ""  # Provide appropriate value or leave empty
+        new_record["Category"] = category_converter(fields.get("Category", ""))
         new_record["Region"] = "88850842" if selected_warehouse == "Maule Warehouse" else "88850843" if selected_warehouse == "Sunrise Warehouse" else ""
-        new_record["Source"] = "AMZ FC"
-        new_record["IsTaxable"] = "TRUE"
-        new_record["Quantity"] = "1"
+        new_record["ListingType"] = "Auction"
+        new_record["Currency"] = "USD"
 
-        # Title and Category
-        title = airtable_record["fields"].get("Product Name", "")
+        # Title and Subtitle
+        title = fields.get("Product Name", "")
         if selected_warehouse == "Sunrise Warehouse":
             title = "OFFSITE " + title
         new_record["Title"] = text_shortener(title, 80)
-        new_record["Category"] = category_converter(new_record.get("Category_not_formatted", ""))
+        auction_count = int(fields.get("Auction Count", 0))
+        msrp = float(fields.get("MSRP", 0))
+        other_notes = fields.get("Notes", "")
+        new_record["Subtitle"] = format_subtitle(auction_count, msrp, other_notes)
 
-        # Price and Subtitle
-        auction_count = int(new_record.get("AuctionCount", 0))
+        # Description
+        description_parts = [
+            format_html_field("Description", fields.get("Product Name", "")),
+            format_html_field("MSRP", fields.get("MSRP", "")),
+            format_html_field("Condition", fields.get("Condition", "")),
+            format_html_field("Notes", fields.get("Notes", "")),
+            format_html_field("Other info", fields.get("Description", "")),
+            format_html_field("Lot Number", new_record["LotNumber"])
+        ]
+        new_record["Description"] = ''.join(part for part in description_parts if part)
+
+        # Price and Quantity
         new_record["Price"] = starting_price
-        new_record["Subtitle"] = format_subtitle(
-            auction_count,
-            float(new_record.get("MSRP", 0)),
-            new_record.get("Other Notes", "")
-        )
+        new_record["Quantity"] = "1"
 
-        # Handle image ordering
+        # Taxable
+        new_record["IsTaxable"] = "TRUE"
+
+        # Initialize Image fields
+        for i in range(1, 11):
+            new_record[f"Image_{i}"] = ''
+
+        # Handle image URLs
         if record_id in uploaded_image_urls:
-            gui_callback(f"Found uploaded images for record ID: {record_id}")
-            gui_callback(f"Uploaded image URLs: {uploaded_image_urls[record_id]}")
-
-            # Sort the uploaded images by image number
-            sorted_images = sorted(uploaded_image_urls[record_id], key=lambda x: x[1])
-
-            for i in range(1, 11):
-                new_record[f'Image_{i}'] = ''  # Initialize all image fields as empty
-
+            images = uploaded_image_urls[record_id]
+            sorted_images = sorted(images, key=lambda x: x[1])
             for url, image_number in sorted_images:
-                if image_number <= 10:  # Ensure we only use up to 10 images
+                if 1 <= image_number <= 10:
                     new_record[f'Image_{image_number}'] = url
                     gui_callback(f"Assigned Image_{image_number}: {url}")
         else:
             gui_callback(f"No uploaded images found for record ID: {record_id}")
-            # Add empty image fields
-            for i in range(1, 11):
-                new_record[f'Image_{i}'] = ''
-                gui_callback(f"No Image_{i} assigned")
+            # No images; fields remain empty
+
+        # Additional fields
+        new_record["YouTubeID"] = ""  # Provide value if available
+        new_record["PdfAttachments"] = ""  # Provide value if available
+        new_record["Bold"] = "No"
+        new_record["Badge"] = ""  # Provide value if available
+        new_record["Highlight"] = "No"
+        new_record["ShippingOptions"] = "Local Pickup Only"  # Adjust as needed
+        new_record["Duration"] = ""  # Provide value if required
+        new_record["StartDTTM"] = ""  # Provide value if required
+        new_record["EndDTTM"] = ""  # Provide value if required
+        new_record["AutoRelist"] = "No"
+        new_record["GoodTilCanceled"] = "No"
+        new_record["Working Condition"] = fields.get("Working Condition", "")
+        upc = str(fields.get("UPC", ""))
+        new_record["UPC"] = upc if upc.isdigit() else ""
+        new_record["Truck"] = fields.get("Shipment", "")
+        new_record["Source"] = "AMZ FC"
+        new_record["Size"] = fields.get("Size", "")
+        new_record["Photo Taker"] = fields.get("Clerk", "")
+        new_record["Packaging"] = ""  # Provide value if available
+        new_record["Other Notes"] = fields.get("Notes", "")
+        new_record["MSRP"] = fields.get("MSRP", "0.00")
+        new_record["Lot Number"] = new_record["LotNumber"]  # Duplicate field as per CSV
+        new_record["Location"] = fields.get("Location", "")
+        new_record["Item Condition"] = fields.get("Condition", "")
+        new_record["ID"] = record_id
+        new_record["Amazon ID"] = fields.get("B00 ASIN", "")
 
         gui_callback(f"Final new_record: {new_record}")
-        new_record['Success'] = True
-        return new_record
+        return {'Success': True, 'Data': new_record}
 
     except Exception as e:
-        lot_number = airtable_record.get('fields', {}).get('Lot Number', 'Unknown')
+        lot_number = fields.get('Lot Number', 'Unknown')
         error_message = f"Error processing Lot Number {lot_number}: {str(e)}"
         gui_callback(f"Error: {error_message}")
         gui_callback(f"Traceback: {traceback.format_exc()}")
-        return {'Lot Number': lot_number, 'Failure Message': error_message, 'Success': False}
-
+        return {'Success': False, 'LotNumber': lot_number, 'Failure Message': error_message}
 
 def get_event(event_id: str) -> Event:
     try:
@@ -750,19 +736,38 @@ class AuctionFormatter:
                 )
 
     async def process_record(self, record, uploaded_image_urls, processed_records, failed_records):
-        result = process_single_record(
-            record, uploaded_image_urls, self.auction_id, self.selected_warehouse, self.starting_price, self.gui_callback
-        )
-        if result.get('Success', False):
-            processed_records.append(result)
-        else:
-            failed_records.append(result)
+        try:
+            result = process_single_record(
+                record, uploaded_image_urls, self.auction_id, self.selected_warehouse, self.starting_price, self.gui_callback
+            )
+            if result.get('Success', False):
+                processed_records.append(result['Data'])
+            else:
+                failed_records.append(result)
+        except Exception as e:
+            self.gui_callback(f"Error processing record {record['id']}: {str(e)}")
+            failed_records.append({'RecordID': record['id'], 'Error': str(e)})
 
     def generate_csv_content(self, processed_records):
         df = pd.DataFrame(processed_records)
-        # Reorder columns as needed
+
+        expected_columns = [
+            'EventID', 'LotNumber', 'Seller', 'ConsignorNumber', 'Category', 'Region',
+            'ListingType', 'Currency', 'Title', 'Subtitle', 'Description', 'Price',
+            'Quantity', 'IsTaxable', 'Image_1', 'Image_2', 'Image_3', 'Image_4',
+            'Image_5', 'Image_6', 'Image_7', 'Image_8', 'Image_9', 'Image_10',
+            'YouTubeID', 'PdfAttachments', 'Bold', 'Badge', 'Highlight', 'ShippingOptions',
+            'Duration', 'StartDTTM', 'EndDTTM', 'AutoRelist', 'GoodTilCanceled',
+            'Working Condition', 'UPC', 'Truck', 'Source', 'Size', 'Photo Taker',
+            'Packaging', 'Other Notes', 'MSRP', 'Lot Number', 'Location', 'Item Condition',
+            'ID', 'Amazon ID'
+        ]
+
+        df = df.reindex(columns=expected_columns)
+        df = df.fillna('')  # Replace NaN with empty strings
         csv_content = df.to_csv(index=False)
         return csv_content
+
 
     async def save_formatted_data(self, csv_content):
         await sync_to_async(AuctionFormattedData.objects.create)(
