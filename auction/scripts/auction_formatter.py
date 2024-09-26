@@ -133,13 +133,20 @@ async def upload_file_via_ftp_async(file_name: str, file_content: bytes, gui_cal
         try:
             gui_callback(f"Connecting to FTP server at {server}:{port}")
             async with aioftp.Client.context(server, port=port, user=username, password=password) as client:
-                await client.change_directory('/')
+                # Construct the full remote path
                 remote_path_full = os.path.join(remote_file_path, file_name)
 
                 gui_callback(f"Uploading file {file_name} to {remote_path_full}")
-                await client.upload_stream(BytesIO(file_content), remote_path_full)
+
+                # Ensure the remote directory exists
+                remote_dir = os.path.dirname(remote_path_full)
+                await client.make_directory(remote_dir, exist_ok=True)
+
+                # Upload the file to the specified remote path
+                await client.upload_stream(BytesIO(file_content), path=remote_path_full)
                 gui_callback(f"File {file_name} uploaded successfully")
 
+            # Construct the accessible URL
             formatted_url = remote_path_full.replace("/public_html", "", 1).lstrip('/')
             return f"https://{formatted_url}"
 
