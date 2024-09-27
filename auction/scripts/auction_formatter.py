@@ -141,13 +141,13 @@ async def upload_file_via_ftp_async(
 
                 gui_callback(f"Uploading file {file_name} to {remote_path_full}")
 
-                # Ensure the remote directory exists using ensure_dir
+                # Ensure the remote directory exists
                 remote_dir = os.path.dirname(remote_path_full)
-                await client.ensure_dir(remote_dir)
+                await ensure_directory_exists(client, remote_dir)
 
                 # Upload the file to the specified remote path
                 await client.upload_stream(
-                    BytesIO(file_content), path=remote_path_full
+                    BytesIO(file_content), remote_path_full
                 )
                 gui_callback(f"File {file_name} uploaded successfully")
 
@@ -166,6 +166,28 @@ async def upload_file_via_ftp_async(
 
     gui_callback("Failed to upload after maximum retries.")
     return None
+
+async def ensure_directory_exists(client, path, gui_callback):
+    """Recursively ensure that a directory exists on the FTP server."""
+    # Normalize the path
+    path = os.path.normpath(path)
+    # If path is root, nothing to do
+    if path in ('', '/'):
+        return
+    try:
+        # Try to get directory listing
+        await client.stat(path)
+    except aioftp.StatusCodeError as e:
+        if e.code == '550':
+            # Directory does not exist, create parent directories first
+            parent_dir = os.path.dirname(path)
+            if parent_dir != path:
+                await ensure_directory_exists(client, parent_dir, gui_callback)
+            gui_callback(f"Creating directory {path}")
+            await client.make_directory(path)
+        else:
+            # Some other error occurred
+            raise
 
 async def get_cached_airtable_records(BASE: str, TABLE: str, VIEW: str, gui_callback, airtable_token: str) -> List[Dict]:
     # Caching is omitted as Redis is not used in this refactoring
