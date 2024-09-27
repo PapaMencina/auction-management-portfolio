@@ -143,7 +143,7 @@ async def upload_file_via_ftp_async(
 
                 # Ensure the remote directory exists
                 remote_dir = os.path.dirname(remote_path_full)
-                await ensure_directory_exists(client, remote_dir)
+                await ensure_directory_exists(client, remote_dir, gui_callback)
 
                 # Upload the file to the specified remote path
                 await client.upload_stream(
