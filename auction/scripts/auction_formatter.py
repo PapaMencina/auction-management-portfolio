@@ -9,7 +9,7 @@ import tempfile
 from asyncio import Semaphore
 from collections import defaultdict
 from typing import List, Dict, Tuple
-from io import BytesIO
+from io import BytesIO, StringIO
 
 # Django imports
 from django.core.wsgi import get_wsgi_application
@@ -352,6 +352,10 @@ def process_single_record(airtable_record: Dict, uploaded_image_urls: Dict[str, 
         ]
         new_record["Description"] = ''.join(part for part in description_parts if part)
 
+        # Add pickup information
+        pickup_info = "<br><b>Pickup Information:</b> This item is available for LOCAL PICKUP ONLY. No shipping available."
+        new_record["Description"] += pickup_info
+
         # Price and Quantity
         new_record["Price"] = starting_price
         new_record["Quantity"] = "1"
@@ -378,15 +382,16 @@ def process_single_record(airtable_record: Dict, uploaded_image_urls: Dict[str, 
         # Additional fields
         new_record["YouTubeID"] = ""  # Provide value if available
         new_record["PdfAttachments"] = ""  # Provide value if available
-        new_record["Bold"] = "No"
+        new_record["Bold"] = "false"
         new_record["Badge"] = ""  # Provide value if available
-        new_record["Highlight"] = "No"
-        new_record["ShippingOptions"] = "Local Pickup Only"  # Adjust as needed
+        new_record["Highlight"] = "false"
+        new_record["ShippingOptions"] = ""  # Leave it empty
+        new_record["PickupDetails"] = "Local Pickup ONLY"
         new_record["Duration"] = ""  # Provide value if required
         new_record["StartDTTM"] = ""  # Provide value if required
         new_record["EndDTTM"] = ""  # Provide value if required
-        new_record["AutoRelist"] = "No"
-        new_record["GoodTilCanceled"] = "No"
+        new_record["AutoRelist"] = "0"  # Changed from "No" to "0"
+        new_record["GoodTilCanceled"] = "false"
         new_record["Working Condition"] = fields.get("Working Condition", "")
         upc = str(fields.get("UPC", ""))
         new_record["UPC"] = upc if upc.isdigit() else ""
@@ -412,6 +417,7 @@ def process_single_record(airtable_record: Dict, uploaded_image_urls: Dict[str, 
         gui_callback(f"Error: {error_message}")
         gui_callback(f"Traceback: {traceback.format_exc()}")
         return {'Success': False, 'LotNumber': lot_number, 'Failure Message': error_message}
+
 
 def get_event(event_id: str) -> Event:
     try:
@@ -731,13 +737,14 @@ class AuctionFormatter:
 
             # Generate CSV content
             csv_content = self.generate_csv_content(processed_records)
-            self.final_csv_content = csv_content
+            cleaned_csv_content = self.clean_csv_content(csv_content)
+            self.final_csv_content = cleaned_csv_content
 
             # Save formatted data to the database
-            await self.save_formatted_data(csv_content)
+            await self.save_formatted_data(cleaned_csv_content)
 
             # Upload CSV to website using Playwright
-            await self.upload_csv_to_website_playwright(csv_content)
+            await self.upload_csv_to_website_playwright(cleaned_csv_content)
 
             RedisTaskStatus.set_status(self.task_id, "COMPLETED", "Auction formatting process completed successfully")
 
@@ -799,17 +806,44 @@ class AuctionFormatter:
             'Quantity', 'IsTaxable', 'Image_1', 'Image_2', 'Image_3', 'Image_4',
             'Image_5', 'Image_6', 'Image_7', 'Image_8', 'Image_9', 'Image_10',
             'YouTubeID', 'PdfAttachments', 'Bold', 'Badge', 'Highlight', 'ShippingOptions',
-            'Duration', 'StartDTTM', 'EndDTTM', 'AutoRelist', 'GoodTilCanceled',
+            'PickupDetails', 'Duration', 'StartDTTM', 'EndDTTM', 'AutoRelist', 'GoodTilCanceled',
             'Working Condition', 'UPC', 'Truck', 'Source', 'Size', 'Photo Taker',
             'Packaging', 'Other Notes', 'MSRP', 'Lot Number', 'Location', 'Item Condition',
             'ID', 'Amazon ID'
         ]
 
         df = df.reindex(columns=expected_columns)
+        
+        # Ensure correct formatting for specific fields
+        df['ShippingOptions'] = ""  # Empty string for ShippingOptions
+        df['PickupDetails'] = "Local Pickup ONLY"
+        df['AutoRelist'] = df['AutoRelist'].fillna("0")
+        df['GoodTilCanceled'] = df['GoodTilCanceled'].fillna("false")
+        df['Bold'] = df['Bold'].fillna("false")
+        df['Highlight'] = df['Highlight'].fillna("false")
+        
+        # Convert boolean fields to lowercase
+        boolean_fields = ['IsTaxable', 'GoodTilCanceled', 'Bold', 'Highlight']
+        for field in boolean_fields:
+            df[field] = df[field].astype(str).str.lower()
+
         df = df.fillna('')  # Replace NaN with empty strings
         csv_content = df.to_csv(index=False)
         return csv_content
-
+    
+    def clean_csv_content(self, csv_content):
+        df = pd.read_csv(StringIO(csv_content))
+        
+        # Ensure 'Price' is a valid decimal
+        df['Price'] = pd.to_numeric(df['Price'], errors='coerce').fillna(0).round(2).astype(str)
+        
+        # Ensure 'Quantity' is an integer
+        df['Quantity'] = pd.to_numeric(df['Quantity'], errors='coerce').fillna(1).astype(int).astype(str)
+        
+        # Ensure 'Category' is an integer
+        df['Category'] = pd.to_numeric(df['Category'], errors='coerce').fillna(162733).astype(int).astype(str)
+        
+        return df.to_csv(index=False)
 
     async def save_formatted_data(self, csv_content):
         await sync_to_async(AuctionFormattedData.objects.create)(
