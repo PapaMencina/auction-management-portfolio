@@ -10,7 +10,6 @@ import cachetools
 import csv
 
 from typing import Optional
-from asyncio_pool import AioPool
 from asyncio import Semaphore
 from collections import defaultdict
 from typing import List, Dict, Tuple
@@ -26,7 +25,6 @@ import aiohttp
 import aioftp
 import pandas as pd
 from aioftp import StatusCodeError, Client
-from aioftp.client import AioPool
 from PIL import Image, ExifTags
 from playwright.async_api import async_playwright
 
@@ -47,21 +45,31 @@ config_manager.load_config(config_path)
 
 class FTPPool:
     def __init__(self, max_connections=5):
-        self.pool = AioPool(max_connections)
-        self.semaphore = asyncio.Semaphore(max_connections)
+        self.max_connections = max_connections
+        self.semaphore = Semaphore(max_connections)
+        self.connections = []
 
-    async def get_client(self):
+    async def get_connection(self):
         async with self.semaphore:
-            return await self.pool.spawn(self._create_client)
+            if not self.connections:
+                return await self._create_connection()
+            return self.connections.pop()
 
-    async def _create_client(self):
+    async def release_connection(self, connection):
+        self.connections.append(connection)
+
+    async def _create_connection(self):
         server = config_manager.get_global_var('ftp_server')
         username = config_manager.get_global_var('ftp_username')
         password = config_manager.get_global_var('ftp_password')
-        return await Client.context(server, user=username, password=password)
+        return await aioftp.Client.context(server, user=username, password=password)
 
-# Create the FTP pool
-ftp_pool = FTPPool(max_connections=5)
+    async def close_all(self):
+        while self.connections:
+            connection = self.connections.pop()
+            await connection.quit()
+
+ftp_pool = FTPPool(max_connections=10)  # Adjust based on SiteGround's limit
 
 def get_image_orientation(img: Image.Image) -> int:
     try:
