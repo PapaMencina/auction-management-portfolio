@@ -6,6 +6,9 @@ import json
 import random
 import asyncio
 import tempfile
+import cachetools
+import csv
+from typing import Optional
 from asyncio import Semaphore
 from collections import defaultdict
 from typing import List, Dict, Tuple
@@ -20,6 +23,7 @@ from asgiref.sync import sync_to_async
 import aiohttp
 import aioftp
 import pandas as pd
+from aioftp import StatusCodeError
 from PIL import Image, ExifTags
 from playwright.async_api import async_playwright
 
@@ -116,42 +120,34 @@ async def process_image_async(image_data: bytes, gui_callback, width_threshold: 
 
 
 async def upload_file_via_ftp_async(
-    file_name: str, file_content: bytes, gui_callback, max_retries: int = 3
-) -> str:
+    file_name: str, 
+    file_content: bytes, 
+    gui_callback, 
+    should_stop: asyncio.Event, 
+    max_retries: int = 3
+) -> Optional[str]:
     remote_file_path = config_manager.get_global_var('ftp_remote_path')
     server = config_manager.get_global_var('ftp_server')
-    port = config_manager.get_global_var('ftp_port')
     username = config_manager.get_global_var('ftp_username')
     password = config_manager.get_global_var('ftp_password')
 
-    # Ensure port is an integer and default to 21 if not specified
-    port = int(port) if port else 21
-
     retries = 0
-    while retries < max_retries:
+    while retries < max_retries and not should_stop.is_set():
         try:
-            gui_callback(f"Connecting to FTP server at {server}:{port}")
-            async with aioftp.Client.context(
-                server, port=port, user=username, password=password
-            ) as client:
-                # Construct the full remote path
-                remote_path_full = os.path.normpath(
-                    os.path.join(remote_file_path, file_name)
-                )
-
+            async with aioftp.Client.context(server, user=username, password=password) as client:
+                await client.change_directory('/')
+                
+                remote_path_full = os.path.join(remote_file_path, file_name)
                 gui_callback(f"Uploading file {file_name} to {remote_path_full}")
 
                 # Ensure the remote directory exists
-                remote_dir = os.path.dirname(remote_path_full)
-                await ensure_directory_exists(client, remote_dir, gui_callback)
+                await ensure_directory_exists(client, os.path.dirname(remote_path_full), gui_callback)
 
-                # Upload the file to the specified remote path
-                await client.upload_stream(
-                    BytesIO(file_content), remote_path_full
-                )
+                # Upload the file
+                async with client.upload_stream(remote_path_full) as stream:
+                    await stream.write(file_content)
                 gui_callback(f"File {file_name} uploaded successfully")
 
-            # Construct the accessible URL
             formatted_url = remote_path_full.replace("/public_html", "", 1).lstrip('/')
             return f"https://{formatted_url}"
 
@@ -160,40 +156,33 @@ async def upload_file_via_ftp_async(
             retries += 1
             await asyncio.sleep(5)
         except Exception as e:
-            gui_callback(f"FTP upload error: {e}. Retrying in 5 seconds...")
+            gui_callback(f"FTP upload error: {e}")
             retries += 1
-            await asyncio.sleep(5)
+            if retries < max_retries:
+                gui_callback(f"Retrying in 5 seconds... (Attempt {retries + 1}/{max_retries})")
+                await asyncio.sleep(5)
+            else:
+                break
 
     gui_callback("Failed to upload after maximum retries.")
     return None
 
 async def ensure_directory_exists(client, path, gui_callback):
-    """Recursively ensure that a directory exists on the FTP server."""
-    # Normalize the path
-    path = os.path.normpath(path)
-    # If path is root, nothing to do
-    if path in ('', '/'):
-        return
     try:
-        # Try to get directory listing
-        await client.stat(path)
+        await client.make_directory(path)
+        gui_callback(f"Created directory {path}")
     except aioftp.StatusCodeError as e:
-        if e.code == '550':
-            # Directory does not exist, create parent directories first
-            parent_dir = os.path.dirname(path)
-            if parent_dir != path:
-                await ensure_directory_exists(client, parent_dir, gui_callback)
-            gui_callback(f"Creating directory {path}")
-            await client.make_directory(path)
+        if "Directory already exists" in str(e):
+            gui_callback(f"Directory {path} already exists")
         else:
-            # Some other error occurred
-            raise
+            gui_callback(f"Error creating directory {path}: {e}")
+    except Exception as e:
+        gui_callback(f"Unexpected error creating directory {path}: {e}")
 
+@cachetools.cached(cache=cachetools.TTLCache(maxsize=100, ttl=3600))
 async def get_cached_airtable_records(BASE: str, TABLE: str, VIEW: str, gui_callback, airtable_token: str) -> List[Dict]:
-    # Caching is omitted as Redis is not used in this refactoring
     records = await get_airtable_records_list(BASE, TABLE, VIEW, gui_callback, airtable_token)
     return records
-
 
 async def get_airtable_records_list(BASE: str, TABLE: str, VIEW: str, gui_callback, airtable_token: str) -> List[Dict]:
     gui_callback("Getting Airtable Records...")
@@ -532,108 +521,108 @@ class AuctionFormatter:
             return False
 
     async def upload_csv_to_website(self, page, csv_content):
-        temp_file_path = None
-        try:
-            # Check if we're already logged in
-            if "Account/LogOn" in page.url:
-                self.gui_callback("Not logged in. Proceeding with login...")
-                username, password = self.get_maule_login_credentials()
-                login_success = await self.login_to_website(page, username, password)
-                if not login_success:
-                    self.gui_callback("Error: Failed to log in. Aborting CSV upload.")
+            temp_file_path = None
+            try:
+                # Check if we're already logged in
+                if "Account/LogOn" in page.url:
+                    self.gui_callback("Not logged in. Proceeding with login...")
+                    username, password = self.get_maule_login_credentials()
+                    login_success = await self.login_to_website(page, username, password)
+                    if not login_success:
+                        self.gui_callback("Error: Failed to log in. Aborting CSV upload.")
+                        return False
+                else:
+                    self.gui_callback("Already logged in. Proceeding with CSV upload...")
+
+                self.gui_callback("Navigating to ImportCSV URL...")
+                await page.goto(self.import_csv_url)
+                await page.wait_for_load_state('networkidle', timeout=60000)
+
+                self.gui_callback("Waiting for form to load...")
+                try:
+                    await page.wait_for_selector("#CsvImportForm", state="visible", timeout=60000)
+                except Exception as e:
+                    self.gui_callback(f"Error: Form not found. {str(e)}")
+                    await self.save_screenshot(page, 'form_not_found')
                     return False
-            else:
-                self.gui_callback("Already logged in. Proceeding with CSV upload...")
 
-            self.gui_callback("Navigating to ImportCSV URL...")
-            await page.goto(self.import_csv_url)
-            await page.wait_for_load_state('networkidle', timeout=60000)
-
-            self.gui_callback("Waiting for form to load...")
-            try:
-                await page.wait_for_selector("#CsvImportForm", state="visible", timeout=60000)
-            except Exception as e:
-                self.gui_callback(f"Error: Form not found. {str(e)}")
-                await self.save_screenshot(page, 'form_not_found')
-                return False
-
-            self.gui_callback("Unchecking 'Validate Data ONLY' checkbox...")
-            try:
-                await page.evaluate("""
-                () => {
-                    var checkbox = document.querySelector('input[name="validate"]');
-                    var toggle = document.querySelector('.fs-checkbox-toggle');
-                    if (checkbox && toggle) {
-                        checkbox.checked = false;
-                        toggle.classList.remove('fs-checkbox-checked');
-                        toggle.classList.add('fs-checkbox-unchecked');
+                self.gui_callback("Unchecking 'Validate Data ONLY' checkbox...")
+                try:
+                    await page.evaluate("""
+                    () => {
+                        var checkbox = document.querySelector('input[name="validate"]');
+                        var toggle = document.querySelector('.fs-checkbox-toggle');
+                        if (checkbox && toggle) {
+                            checkbox.checked = false;
+                            toggle.classList.remove('fs-checkbox-checked');
+                            toggle.classList.add('fs-checkbox-unchecked');
+                        }
                     }
-                }
-                """)
-            except Exception as e:
-                self.gui_callback(f"Error: Failed to uncheck 'Validate Data ONLY'. {str(e)}")
-                await self.save_screenshot(page, 'validate_checkbox_error')
+                    """)
+                except Exception as e:
+                    self.gui_callback(f"Error: Failed to uncheck 'Validate Data ONLY'. {str(e)}")
+                    await self.save_screenshot(page, 'validate_checkbox_error')
 
-            self.gui_callback("Updating report email address...")
-            try:
-                await page.fill("#Text1", self.notification_email)
-            except Exception as e:
-                self.gui_callback(f"Error: Failed to update email address. {str(e)}")
-                await self.save_screenshot(page, 'email_update_error')
+                self.gui_callback("Updating report email address...")
+                try:
+                    await page.fill("#Text1", self.notification_email)
+                except Exception as e:
+                    self.gui_callback(f"Error: Failed to update email address. {str(e)}")
+                    await self.save_screenshot(page, 'email_update_error')
 
-            self.gui_callback("Preparing CSV file for upload...")
-            temp_file = tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.csv')
-            temp_file.write(csv_content)
-            temp_file_path = temp_file.name
-            temp_file.close()
+                self.gui_callback("Preparing CSV file for upload...")
+                temp_file = tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.csv')
+                temp_file.write(csv_content)
+                temp_file_path = temp_file.name
+                temp_file.close()
 
-            self.gui_callback("Selecting CSV file...")
-            try:
-                await page.set_input_files("#file", temp_file_path)
-            except Exception as e:
-                self.gui_callback(f"Error: Failed to select CSV file. {str(e)}")
-                await self.save_screenshot(page, 'file_selection_error')
-                return False
-
-            self.gui_callback("Clicking 'Upload CSV' button...")
-            try:
-                upload_button = await page.wait_for_selector("input.btn.btn-info.btn-sm[type='submit'][value='Upload CSV']", state="visible", timeout=20000)
-                if upload_button:
-                    await upload_button.click()
-                else:
-                    self.gui_callback("Error: Upload button not found")
-                    await self.save_screenshot(page, 'upload_button_not_found')
+                self.gui_callback("Selecting CSV file...")
+                try:
+                    await page.set_input_files("#file", temp_file_path)
+                except Exception as e:
+                    self.gui_callback(f"Error: Failed to select CSV file. {str(e)}")
+                    await self.save_screenshot(page, 'file_selection_error')
                     return False
-            except Exception as e:
-                self.gui_callback(f"Error: Failed to click upload button. {str(e)}")
-                await self.save_screenshot(page, 'upload_click_error')
-                return False
 
-            self.gui_callback("Waiting for upload to complete...")
-            try:
-                await page.wait_for_selector(".alert-success", state="visible", timeout=120000)
-                success_message = await page.inner_text(".alert-success")
-                self.gui_callback(f"Upload result: {success_message}")
-
-                if "CSV listing import has started" in success_message:
-                    self.gui_callback("CSV upload initiated successfully!")
-                    return True
-                else:
-                    self.gui_callback("CSV upload failed.")
+                self.gui_callback("Clicking 'Upload CSV' button...")
+                try:
+                    upload_button = await page.wait_for_selector("input.btn.btn-info.btn-sm[type='submit'][value='Upload CSV']", state="visible", timeout=20000)
+                    if upload_button:
+                        await upload_button.click()
+                    else:
+                        self.gui_callback("Error: Upload button not found")
+                        await self.save_screenshot(page, 'upload_button_not_found')
+                        return False
+                except Exception as e:
+                    self.gui_callback(f"Error: Failed to click upload button. {str(e)}")
+                    await self.save_screenshot(page, 'upload_click_error')
                     return False
+
+                self.gui_callback("Waiting for upload to complete...")
+                try:
+                    await page.wait_for_selector(".alert-success", state="visible", timeout=120000)
+                    success_message = await page.inner_text(".alert-success")
+                    self.gui_callback(f"Upload result: {success_message}")
+
+                    if "CSV listing import has started" in success_message:
+                        self.gui_callback("CSV upload initiated successfully!")
+                        return True
+                    else:
+                        self.gui_callback("CSV upload failed.")
+                        return False
+                except Exception as e:
+                    self.gui_callback(f"Error: Upload completion not detected. {str(e)}")
+                    await self.save_screenshot(page, 'upload_completion_error')
+                    return False
+
             except Exception as e:
-                self.gui_callback(f"Error: Upload completion not detected. {str(e)}")
-                await self.save_screenshot(page, 'upload_completion_error')
+                self.gui_callback(f"Unexpected error during CSV upload: {str(e)}")
+                await self.save_screenshot(page, 'unexpected_upload_error')
                 return False
 
-        except Exception as e:
-            self.gui_callback(f"Unexpected error during CSV upload: {str(e)}")
-            await self.save_screenshot(page, 'unexpected_upload_error')
-            return False
-
-        finally:
-            if temp_file_path and os.path.exists(temp_file_path):
-                os.unlink(temp_file_path)
+            finally:
+                if temp_file_path and os.path.exists(temp_file_path):
+                    os.unlink(temp_file_path)
 
     async def run_auction_formatter(self):
         try:
@@ -652,93 +641,54 @@ class AuctionFormatter:
             if self.should_stop.is_set():
                 return
 
-            # Define a semaphore to limit concurrency
-            semaphore = Semaphore(5)  # Adjust this number based on testing and memory usage
+            # Increase concurrency
+            semaphore = Semaphore(20)  # Increased from 5 to 20
 
-            # Collect image URLs for downloading and processing
-            download_tasks = []
-            for record in airtable_records:
-                if self.should_stop.is_set():
-                    break
-
-                product_id = str(record["fields"].get("Lot Number", ""))
-                record_id = record['id']
-                for count in range(1, 11):
-                    image_info = record["fields"].get(f"Image {count}")
-                    if image_info:
-                        url = image_info[0].get("url")
-                        if url:
-                            download_tasks.append((record_id, url, f"{product_id}_{count}", count))
-
-            # Download and process images with limited concurrency
-            self.gui_callback("Downloading and processing images with limited concurrency...")
-            image_data_dict = defaultdict(list)
-
-            async def limited_download_and_process_image(record_id, url, image_number):
-                async with semaphore:
-                    await self.download_and_process_image(record_id, url, image_number, image_data_dict)
-
-            download_process_tasks = []
-            for record_id, url, file_name, image_number in download_tasks:
-                if self.should_stop.is_set():
-                    break
-                download_process_tasks.append(limited_download_and_process_image(record_id, url, image_number))
-
-            await asyncio.gather(*download_process_tasks)
-
-            if self.should_stop.is_set():
-                return
-
-            # Upload images and get URLs with limited concurrency
-            self.gui_callback("Uploading images with limited concurrency...")
-            uploaded_image_urls = defaultdict(list)
-
-            async def limited_upload_image(record_id, image_data, image_number):
-                async with semaphore:
-                    await self.upload_image_and_get_url(record_id, image_data, image_number, uploaded_image_urls)
-
-            upload_tasks = []
-            for record_id, images in image_data_dict.items():
-                for image_data, image_number in images:
-                    if self.should_stop.is_set():
-                        break
-                    upload_tasks.append(limited_upload_image(record_id, image_data, image_number))
-
-            await asyncio.gather(*upload_tasks)
-
-            if self.should_stop.is_set():
-                return
-
-            # Clear image_data_dict to free memory
-            image_data_dict.clear()
-
-            # Save images to database
-            await self.save_images_to_database(uploaded_image_urls)
-
-            # Process records with limited concurrency
-            self.gui_callback("Processing records with limited concurrency...")
+            # Initialize processed and failed records
             processed_records = []
             failed_records = []
 
-            async def limited_process_record(record):
-                async with semaphore:
-                    await self.process_record(record, uploaded_image_urls, processed_records, failed_records)
-
-            process_tasks = []
-            for record in airtable_records:
+            # Process in larger batches
+            batch_size = 100
+            for i in range(0, len(airtable_records), batch_size):
                 if self.should_stop.is_set():
                     break
-                process_tasks.append(limited_process_record(record))
 
-            await asyncio.gather(*process_tasks)
+                batch = airtable_records[i:i+batch_size]
+                
+                # Process images
+                image_tasks = []
+                for record in batch:
+                    record_id = record['id']
+                    for count in range(1, 11):
+                        image_info = record["fields"].get(f"Image {count}")
+                        if image_info:
+                            url = image_info[0].get("url")
+                            if url:
+                                image_tasks.append(self.process_single_image(semaphore, record_id, url, count))
+                
+                image_results = await asyncio.gather(*image_tasks)
+                
+                # Process records
+                record_tasks = []
+                for record in batch:
+                    record_tasks.append(self.process_single_record_async(semaphore, record, image_results))
+                
+                batch_results = await asyncio.gather(*record_tasks)
+                
+                # Extend results
+                processed_records.extend([r['Data'] for r in batch_results if r.get('Success', False)])
+                failed_records.extend([r for r in batch_results if not r.get('Success', False)])
 
-            if self.should_stop.is_set():
-                return
-
-            # Generate CSV content
-            csv_content = self.generate_csv_content(processed_records)
-            cleaned_csv_content = self.clean_csv_content(csv_content)
-            self.final_csv_content = cleaned_csv_content
+            # Generate and clean CSV content
+            try:
+                RedisTaskStatus.set_status(self.task_id, "IN_PROGRESS", "Generating CSV content")
+                csv_content = self.generate_csv_content(processed_records)
+                cleaned_csv_content = self.clean_csv_content(csv_content)
+                self.final_csv_content = cleaned_csv_content
+            except Exception as e:
+                RedisTaskStatus.set_status(self.task_id, "ERROR", f"Error generating CSV: {str(e)}")
+                raise
 
             # Save formatted data to the database
             await self.save_formatted_data(cleaned_csv_content)
@@ -754,6 +704,34 @@ class AuctionFormatter:
             self.gui_callback(f"Traceback: {traceback.format_exc()}")
         finally:
             await sync_to_async(self.callback)()
+
+    async def process_single_image(self, semaphore, record_id, url, image_number):
+        async with semaphore:
+            image_data = await download_image_async(url, self.gui_callback)
+            if image_data:
+                processed_image_data = await process_image_async(image_data, self.gui_callback)
+                if processed_image_data:
+                    file_name = f"{record_id}_{image_number}.jpg"
+                    uploaded_url = await upload_file_via_ftp_async(
+                        file_name, 
+                        processed_image_data, 
+                        self.gui_callback,
+                        self.should_stop  # Pass the should_stop event here
+                    )
+                    if uploaded_url:
+                        return (record_id, uploaded_url, image_number)
+        return None
+
+    async def process_single_record_async(self, semaphore, record, image_results):
+        async with semaphore:
+            uploaded_image_urls = defaultdict(list)
+            for result in image_results:
+                if result and result[0] == record['id']:
+                    uploaded_image_urls[result[0]].append((result[1], result[2]))
+            
+            return process_single_record(
+                record, uploaded_image_urls, self.auction_id, self.selected_warehouse, self.starting_price, self.gui_callback
+            )
 
     async def download_and_process_image(self, record_id, url, image_number, image_data_dict):
         image_data = await download_image_async(url, self.gui_callback)
@@ -775,14 +753,16 @@ class AuctionFormatter:
             uploaded_image_urls[record_id].append((url, image_number))
 
     async def save_images_to_database(self, uploaded_image_urls):
+        image_metadata = []
         for record_id, urls in uploaded_image_urls.items():
             for url, image_number in urls:
-                await sync_to_async(ImageMetadata.objects.create)(
+                image_metadata.append(ImageMetadata(
                     event=self.event,
                     filename=f"{record_id}_{image_number}.jpg",
                     is_primary=(image_number == 1),
                     image=url
-                )
+                ))
+        await sync_to_async(ImageMetadata.objects.bulk_create)(image_metadata)
 
     async def process_record(self, record, uploaded_image_urls, processed_records, failed_records):
         try:
@@ -798,8 +778,6 @@ class AuctionFormatter:
             failed_records.append({'RecordID': record['id'], 'Error': str(e)})
 
     def generate_csv_content(self, processed_records):
-        df = pd.DataFrame(processed_records)
-
         expected_columns = [
             'EventID', 'LotNumber', 'Seller', 'ConsignorNumber', 'Category', 'Region',
             'ListingType', 'Currency', 'Title', 'Subtitle', 'Description', 'Price',
@@ -811,25 +789,29 @@ class AuctionFormatter:
             'Packaging', 'Other Notes', 'MSRP', 'Lot Number', 'Location', 'Item Condition',
             'ID', 'Amazon ID'
         ]
-
-        df = df.reindex(columns=expected_columns)
         
-        # Ensure correct formatting for specific fields
-        df['ShippingOptions'] = ""  # Empty string for ShippingOptions
-        df['PickupDetails'] = "Local Pickup ONLY"
-        df['AutoRelist'] = df['AutoRelist'].fillna("0")
-        df['GoodTilCanceled'] = df['GoodTilCanceled'].fillna("false")
-        df['Bold'] = df['Bold'].fillna("false")
-        df['Highlight'] = df['Highlight'].fillna("false")
+        output = StringIO()
+        writer = csv.DictWriter(output, fieldnames=expected_columns)
+        writer.writeheader()
         
-        # Convert boolean fields to lowercase
-        boolean_fields = ['IsTaxable', 'GoodTilCanceled', 'Bold', 'Highlight']
-        for field in boolean_fields:
-            df[field] = df[field].astype(str).str.lower()
-
-        df = df.fillna('')  # Replace NaN with empty strings
-        csv_content = df.to_csv(index=False)
-        return csv_content
+        for record in processed_records:
+            # Ensure correct formatting for specific fields
+            record['ShippingOptions'] = ""
+            record['PickupDetails'] = "Local Pickup ONLY"
+            record['AutoRelist'] = record.get('AutoRelist', "0")
+            record['GoodTilCanceled'] = record.get('GoodTilCanceled', "false").lower()
+            record['Bold'] = record.get('Bold', "false").lower()
+            record['Highlight'] = record.get('Highlight', "false").lower()
+            record['IsTaxable'] = record.get('IsTaxable', "true").lower()
+            
+            # Fill missing values with empty strings
+            for column in expected_columns:
+                if column not in record:
+                    record[column] = ''
+            
+            writer.writerow(record)
+        
+        return output.getvalue()
     
     def clean_csv_content(self, csv_content):
         df = pd.read_csv(StringIO(csv_content))
