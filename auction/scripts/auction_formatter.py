@@ -23,7 +23,8 @@ from asgiref.sync import sync_to_async
 import aiohttp
 import aioftp
 import pandas as pd
-from aioftp import StatusCodeError
+from aioftp import StatusCodeError, Client
+from aioftp.client import AioPool
 from PIL import Image, ExifTags
 from playwright.async_api import async_playwright
 
@@ -42,6 +43,23 @@ config_path = os.path.join(
 )
 config_manager.load_config(config_path)
 
+class FTPPool:
+    def __init__(self, max_connections=5):
+        self.pool = AioPool(max_connections)
+        self.semaphore = asyncio.Semaphore(max_connections)
+
+    async def get_client(self):
+        async with self.semaphore:
+            return await self.pool.spawn(self._create_client)
+
+    async def _create_client(self):
+        server = config_manager.get_global_var('ftp_server')
+        username = config_manager.get_global_var('ftp_username')
+        password = config_manager.get_global_var('ftp_password')
+        return await Client.context(server, user=username, password=password)
+
+# Create the FTP pool
+ftp_pool = FTPPool(max_connections=5)
 
 def get_image_orientation(img: Image.Image) -> int:
     try:
@@ -127,14 +145,10 @@ async def upload_file_via_ftp_async(
     max_retries: int = 3
 ) -> Optional[str]:
     remote_file_path = config_manager.get_global_var('ftp_remote_path')
-    server = config_manager.get_global_var('ftp_server')
-    username = config_manager.get_global_var('ftp_username')
-    password = config_manager.get_global_var('ftp_password')
-
     retries = 0
     while retries < max_retries and not should_stop.is_set():
         try:
-            async with aioftp.Client.context(server, user=username, password=password) as client:
+            async with await ftp_pool.get_client() as client:
                 await client.change_directory('/')
                 
                 remote_path_full = os.path.join(remote_file_path, file_name)
@@ -151,10 +165,6 @@ async def upload_file_via_ftp_async(
             formatted_url = remote_path_full.replace("/public_html", "", 1).lstrip('/')
             return f"https://{formatted_url}"
 
-        except aioftp.StatusCodeError as e:
-            gui_callback(f"Temporary FTP error: {e}. Retrying in 5 seconds...")
-            retries += 1
-            await asyncio.sleep(5)
         except Exception as e:
             gui_callback(f"FTP upload error: {e}")
             retries += 1
