@@ -1,0 +1,17 @@
+Metadata-Version: 2.0
+Name: aiopool
+Version: 0.0.2a1
+Summary: Subprocesses for asyncio
+Home-page: https://github.com/chemiron/aiopool.git
+Author: Aliaksandr Nasukovich
+Author-email: chemiron34@gmail.com
+License: MIT
+Platform: UNKNOWN
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 3.4
+
+A library for running separated subprocesses with asyncio.
+
+
