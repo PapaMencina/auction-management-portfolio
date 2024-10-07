@@ -652,7 +652,7 @@ class AuctionFormatter:
                 return
 
             # Increase concurrency
-            semaphore = Semaphore(20)  # Increased from 5 to 20
+            semaphore = Semaphore(10)  # Increased from 5 to 20
 
             # Initialize processed and failed records
             processed_records = []
