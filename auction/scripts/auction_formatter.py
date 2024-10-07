@@ -8,8 +8,9 @@ import asyncio
 import tempfile
 import cachetools
 import csv
-import aiopool
+
 from typing import Optional
+from asyncio_pool import AioPool
 from asyncio import Semaphore
 from collections import defaultdict
 from typing import List, Dict, Tuple
