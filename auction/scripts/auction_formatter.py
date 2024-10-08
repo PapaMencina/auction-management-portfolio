@@ -201,8 +201,7 @@ async def ensure_directory_exists(client, path, gui_callback):
 
 @cachetools.cached(cache=cachetools.TTLCache(maxsize=100, ttl=3600))
 async def get_cached_airtable_records(BASE: str, TABLE: str, VIEW: str, gui_callback, airtable_token: str) -> List[Dict]:
-    records = await get_airtable_records_list(BASE, TABLE, VIEW, gui_callback, airtable_token)
-    return records
+    return await get_airtable_records_list(BASE, TABLE, VIEW, gui_callback, airtable_token)
 
 async def get_airtable_records_list(BASE: str, TABLE: str, VIEW: str, gui_callback, airtable_token: str) -> List[Dict]:
     gui_callback("Getting Airtable Records...")
@@ -876,5 +875,9 @@ def auction_formatter_main(auction_id, selected_warehouse, starting_price, gui_c
     config_manager.set_active_warehouse(selected_warehouse)
     event = get_event(auction_id)
     formatter = AuctionFormatter(event, gui_callback, should_stop, callback, selected_warehouse, starting_price, task_id)
-    asyncio.run(formatter.run_auction_formatter())
+    try:
+        asyncio.run(formatter.run_auction_formatter())
+    except Exception as e:
+        gui_callback(f"Error in auction_formatter_main: {str(e)}")
+        gui_callback(f"Traceback: {traceback.format_exc()}")
     return formatter
