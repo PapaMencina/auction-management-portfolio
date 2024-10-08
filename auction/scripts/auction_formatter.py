@@ -46,10 +46,10 @@ config_manager.load_config(config_path)
 class FTPPool:
     def __init__(self, max_connections=5):
         self.max_connections = max_connections
-        self.semaphore = Semaphore(max_connections)
+        self.semaphore = asyncio.Semaphore(max_connections)
         self.connections = []
 
-    async def get_client(self):  # Change this method name from get_connection to get_client
+    async def get_client(self):
         async with self.semaphore:
             if not self.connections:
                 return await self._create_connection()
@@ -62,14 +62,14 @@ class FTPPool:
         server = config_manager.get_global_var('ftp_server')
         username = config_manager.get_global_var('ftp_username')
         password = config_manager.get_global_var('ftp_password')
-        return await aioftp.Client.context(server, user=username, password=password)
+        return aioftp.Client(server, user=username, password=password)
 
     async def close_all(self):
         while self.connections:
             connection = self.connections.pop()
             await connection.quit()
 
-ftp_pool = FTPPool(max_connections=10)  # Adjust based on SiteGround's limit
+ftp_pool = FTPPool(max_connections=10)
 
 def get_image_orientation(img: Image.Image) -> int:
     try:
@@ -158,17 +158,18 @@ async def upload_file_via_ftp_async(
     retries = 0
     while retries < max_retries and not should_stop.is_set():
         try:
-            async with await ftp_pool.get_client() as client:  # Use get_client instead of get_connection
-                await client.change_directory('/')
+            client = await ftp_pool.get_client()
+            async with client as ftp:
+                await ftp.change_directory('/')
                 
                 remote_path_full = os.path.join(remote_file_path, file_name)
                 gui_callback(f"Uploading file {file_name} to {remote_path_full}")
 
                 # Ensure the remote directory exists
-                await ensure_directory_exists(client, os.path.dirname(remote_path_full), gui_callback)
+                await ensure_directory_exists(ftp, os.path.dirname(remote_path_full), gui_callback)
 
                 # Upload the file
-                async with client.upload_stream(remote_path_full) as stream:
+                async with ftp.upload_stream(remote_path_full) as stream:
                     await stream.write(file_content)
                 gui_callback(f"File {file_name} uploaded successfully")
 
