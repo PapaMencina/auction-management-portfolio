@@ -69,7 +69,7 @@ class FTPPool:
         # This method is now a no-op since connections are closed automatically
         pass
 
-ftp_pool = FTPPool(max_connections=3)  # Limit to 3 connections
+ftp_pool = FTPPool(max_connections=5)  # Limit to 5 connections
 
 class RateLimiter:
     def __init__(self, rate_limit, time_period):
@@ -648,7 +648,7 @@ class AuctionFormatter:
     async def run_auction_formatter(self):
         try:
             global ftp_pool
-            ftp_pool = FTPPool(max_connections=3)  # Initialize FTP pool
+            ftp_pool = FTPPool(max_connections=5)  # Initialize FTP pool
             RedisTaskStatus.set_status(self.task_id, "STARTED", f"Starting auction formatting for event {self.auction_id}")
 
             RedisTaskStatus.set_status(self.task_id, "IN_PROGRESS", "Fetching Airtable records")
