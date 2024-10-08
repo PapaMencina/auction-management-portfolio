@@ -7,13 +7,16 @@ import random
 import asyncio
 import tempfile
 import cachetools
+import tenacity
 import csv
 
 from typing import Optional
+from tenacity import retry, stop_after_attempt, wait_exponential
 from asyncio import Semaphore
 from collections import defaultdict
 from typing import List, Dict, Tuple
 from io import BytesIO, StringIO
+from contextlib import asynccontextmanager
 
 # Django imports
 from django.core.wsgi import get_wsgi_application
@@ -47,29 +50,44 @@ class FTPPool:
     def __init__(self, max_connections=5):
         self.max_connections = max_connections
         self.semaphore = asyncio.Semaphore(max_connections)
-        self.connections = []
+        self.server = config_manager.get_global_var('ftp_server')
+        self.username = config_manager.get_global_var('ftp_username')
+        self.password = config_manager.get_global_var('ftp_password')
 
+    @asynccontextmanager
     async def get_client(self):
         async with self.semaphore:
-            if not self.connections:
-                return await self._create_connection()
-            return self.connections.pop()
-
-    async def release_connection(self, connection):
-        self.connections.append(connection)
-
-    async def _create_connection(self):
-        server = config_manager.get_global_var('ftp_server')
-        username = config_manager.get_global_var('ftp_username')
-        password = config_manager.get_global_var('ftp_password')
-        return aioftp.Client(host=server, user=username, password=password)
-
+            client = aioftp.Client()
+            try:
+                await client.connect(self.server)
+                await client.login(self.username, self.password)
+                yield client
+            finally:
+                await client.quit()
+    
     async def close_all(self):
-        while self.connections:
-            connection = self.connections.pop()
-            await connection.quit()
+        # This method is now a no-op since connections are closed automatically
+        pass
 
-ftp_pool = FTPPool(max_connections=10)
+ftp_pool = FTPPool(max_connections=3)  # Limit to 3 connections
+
+class RateLimiter:
+    def __init__(self, rate_limit, time_period):
+        self.rate_limit = rate_limit
+        self.time_period = time_period
+        self.semaphore = Semaphore(rate_limit)
+        self.task_queue = asyncio.Queue()
+
+    async def acquire(self):
+        await self.semaphore.acquire()
+        self.task_queue.put_nowait(asyncio.create_task(self.release_after_delay()))
+
+    async def release_after_delay(self):
+        await asyncio.sleep(self.time_period)
+        self.semaphore.release()
+        await self.task_queue.get()
+
+rate_limiter = RateLimiter(rate_limit=5, time_period=1)  # 5 requests per second
 
 def get_image_orientation(img: Image.Image) -> int:
     try:
@@ -146,53 +164,30 @@ async def process_image_async(image_data: bytes, gui_callback, width_threshold: 
         gui_callback(f"Error processing image: {e}")
         return None
 
+@retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=1, min=4, max=10))
+async def upload_file_with_retry(client, remote_path, file_content):
+    async with client.upload_stream(remote_path) as stream:
+        await stream.write(file_content)
 
-async def upload_file_via_ftp_async(
-    file_name: str, 
-    file_content: bytes, 
-    gui_callback, 
-    should_stop: asyncio.Event, 
-    max_retries: int = 3
-) -> Optional[str]:
+async def upload_file_via_ftp_async(file_name, file_content, gui_callback, should_stop, max_retries=3):
+    await rate_limiter.acquire()
     remote_file_path = config_manager.get_global_var('ftp_remote_path')
-    retries = 0
-    while retries < max_retries and not should_stop.is_set():
-        try:
-            client = await ftp_pool.get_client()
-            try:
-                await client.connect()
-                await client.login()
-                
-                remote_path_full = os.path.join(remote_file_path, file_name)
-                gui_callback(f"Uploading file {file_name} to {remote_path_full}")
+    full_path = os.path.join(remote_file_path, file_name)
+    
+    try:
+        async with ftp_pool.get_client() as client:
+            gui_callback(f"Uploading file {file_name} to {remote_file_path}")
+            await ensure_directory_exists(client, os.path.dirname(remote_file_path), gui_callback)
+            
+            gui_callback(f"Starting file upload...")
+            await upload_file_with_retry(client, full_path, file_content)
 
-                # Ensure the remote directory exists
-                await ensure_directory_exists(client, os.path.dirname(remote_path_full), gui_callback)
-
-                # Upload the file
-                stream = await client.upload_stream(remote_path_full)
-                await stream.write(file_content)
-                await stream.close()
-
-                gui_callback(f"File {file_name} uploaded successfully")
-
-                formatted_url = remote_path_full.replace("/public_html", "", 1).lstrip('/')
-                return f"https://{formatted_url}"
-            finally:
-                await client.quit()
-                await ftp_pool.release_connection(client)
-
-        except Exception as e:
-            gui_callback(f"FTP upload error: {e}")
-            retries += 1
-            if retries < max_retries:
-                gui_callback(f"Retrying in 5 seconds... (Attempt {retries + 1}/{max_retries})")
-                await asyncio.sleep(5)
-            else:
-                break
-
-    gui_callback("Failed to upload after maximum retries.")
-    return None
+            gui_callback(f"File {file_name} uploaded successfully")
+            formatted_url = remote_file_path.replace("/public_html", "", 1).lstrip('/')
+            return f"https://{formatted_url}/{file_name}"
+    except Exception as e:
+        gui_callback(f"FTP upload error: {str(e)}")
+        return None
 
 async def ensure_directory_exists(client, path, gui_callback):
     try:
@@ -653,7 +648,7 @@ class AuctionFormatter:
     async def run_auction_formatter(self):
         try:
             global ftp_pool
-            ftp_pool = FTPPool(max_connections=10)  # Initialize FTP pool
+            ftp_pool = FTPPool(max_connections=3)  # Initialize FTP pool
             RedisTaskStatus.set_status(self.task_id, "STARTED", f"Starting auction formatting for event {self.auction_id}")
 
             RedisTaskStatus.set_status(self.task_id, "IN_PROGRESS", "Fetching Airtable records")
@@ -745,7 +740,7 @@ class AuctionFormatter:
                         file_name, 
                         processed_image_data, 
                         self.gui_callback,
-                        self.should_stop  # Pass the should_stop event here
+                        self.should_stop
                     )
                     if uploaded_url:
                         return (record_id, uploaded_url, image_number)
