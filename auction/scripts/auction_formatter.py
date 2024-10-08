@@ -49,7 +49,7 @@ class FTPPool:
         self.semaphore = Semaphore(max_connections)
         self.connections = []
 
-    async def get_connection(self):
+    async def get_client(self):  # Change this method name from get_connection to get_client
         async with self.semaphore:
             if not self.connections:
                 return await self._create_connection()
@@ -158,7 +158,7 @@ async def upload_file_via_ftp_async(
     retries = 0
     while retries < max_retries and not should_stop.is_set():
         try:
-            async with await ftp_pool.get_client() as client:
+            async with await ftp_pool.get_client() as client:  # Use get_client instead of get_connection
                 await client.change_directory('/')
                 
                 remote_path_full = os.path.join(remote_file_path, file_name)
@@ -645,6 +645,8 @@ class AuctionFormatter:
 
     async def run_auction_formatter(self):
         try:
+            global ftp_pool
+            ftp_pool = FTPPool(max_connections=10)  # Initialize FTP pool
             RedisTaskStatus.set_status(self.task_id, "STARTED", f"Starting auction formatting for event {self.auction_id}")
 
             RedisTaskStatus.set_status(self.task_id, "IN_PROGRESS", "Fetching Airtable records")
@@ -722,6 +724,7 @@ class AuctionFormatter:
             self.gui_callback(f"Error in auction formatting process: {str(e)}")
             self.gui_callback(f"Traceback: {traceback.format_exc()}")
         finally:
+            await ftp_pool.close_all()
             await sync_to_async(self.callback)()
 
     async def process_single_image(self, semaphore, record_id, url, image_number):
