@@ -62,7 +62,7 @@ class FTPPool:
         server = config_manager.get_global_var('ftp_server')
         username = config_manager.get_global_var('ftp_username')
         password = config_manager.get_global_var('ftp_password')
-        return aioftp.Client(server, user=username, password=password)
+        return aioftp.Client(host=server, user=username, password=password)
 
     async def close_all(self):
         while self.connections:
@@ -159,22 +159,28 @@ async def upload_file_via_ftp_async(
     while retries < max_retries and not should_stop.is_set():
         try:
             client = await ftp_pool.get_client()
-            async with client as ftp:
-                await ftp.change_directory('/')
+            try:
+                await client.connect()
+                await client.login()
                 
                 remote_path_full = os.path.join(remote_file_path, file_name)
                 gui_callback(f"Uploading file {file_name} to {remote_path_full}")
 
                 # Ensure the remote directory exists
-                await ensure_directory_exists(ftp, os.path.dirname(remote_path_full), gui_callback)
+                await ensure_directory_exists(client, os.path.dirname(remote_path_full), gui_callback)
 
                 # Upload the file
-                async with ftp.upload_stream(remote_path_full) as stream:
-                    await stream.write(file_content)
+                stream = await client.upload_stream(remote_path_full)
+                await stream.write(file_content)
+                await stream.close()
+
                 gui_callback(f"File {file_name} uploaded successfully")
 
-            formatted_url = remote_path_full.replace("/public_html", "", 1).lstrip('/')
-            return f"https://{formatted_url}"
+                formatted_url = remote_path_full.replace("/public_html", "", 1).lstrip('/')
+                return f"https://{formatted_url}"
+            finally:
+                await client.quit()
+                await ftp_pool.release_connection(client)
 
         except Exception as e:
             gui_callback(f"FTP upload error: {e}")
