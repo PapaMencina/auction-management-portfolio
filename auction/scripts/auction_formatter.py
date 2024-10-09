@@ -21,7 +21,7 @@ from contextlib import asynccontextmanager
 # Django imports
 from django.core.wsgi import get_wsgi_application
 from django.conf import settings
-from asgiref.sync import sync_to_async
+from asgiref.sync import sync_to_async, async_to_sync
 
 # Third-party imports
 import aiohttp
@@ -664,8 +664,8 @@ class AuctionFormatter:
             if self.should_stop.is_set():
                 return
 
-            # Increase concurrency
-            semaphore = Semaphore(10)  # Increased from 5 to 20
+            # Create Semaphore inside this method
+            semaphore = asyncio.Semaphore(10)
 
             # Initialize processed and failed records
             processed_records = []
@@ -880,9 +880,18 @@ def auction_formatter_main(auction_id, selected_warehouse, starting_price, gui_c
     config_manager.set_active_warehouse(selected_warehouse)
     event = get_event(auction_id)
     formatter = AuctionFormatter(event, gui_callback, should_stop, callback, selected_warehouse, starting_price, task_id)
+    
+    async def run_formatter():
+        try:
+            await formatter.run_auction_formatter()
+        except Exception as e:
+            gui_callback(f"Error in auction_formatter_main: {str(e)}")
+            gui_callback(f"Traceback: {traceback.format_exc()}")
+
     try:
-        asyncio.run(formatter.run_auction_formatter())
+        async_to_sync(run_formatter)()
     except Exception as e:
-        gui_callback(f"Error in auction_formatter_main: {str(e)}")
+        gui_callback(f"Error executing run_formatter: {str(e)}")
         gui_callback(f"Traceback: {traceback.format_exc()}")
+    
     return formatter
