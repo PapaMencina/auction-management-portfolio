@@ -75,17 +75,17 @@ class RateLimiter:
     def __init__(self, rate_limit, time_period):
         self.rate_limit = rate_limit
         self.time_period = time_period
-        self.semaphore = Semaphore(rate_limit)
-        self.task_queue = asyncio.Queue()
+        self.semaphore = None  # We'll initialize this when we first use it
 
     async def acquire(self):
+        if self.semaphore is None:
+            self.semaphore = asyncio.Semaphore(self.rate_limit)
         await self.semaphore.acquire()
-        self.task_queue.put_nowait(asyncio.create_task(self.release_after_delay()))
+        asyncio.create_task(self.release_after_delay())
 
     async def release_after_delay(self):
         await asyncio.sleep(self.time_period)
         self.semaphore.release()
-        await self.task_queue.get()
 
 rate_limiter = RateLimiter(rate_limit=5, time_period=1)  # 5 requests per second
 
@@ -888,10 +888,4 @@ def auction_formatter_main(auction_id, selected_warehouse, starting_price, gui_c
             gui_callback(f"Error in auction_formatter_main: {str(e)}")
             gui_callback(f"Traceback: {traceback.format_exc()}")
 
-    try:
-        async_to_sync(run_formatter)()
-    except Exception as e:
-        gui_callback(f"Error executing run_formatter: {str(e)}")
-        gui_callback(f"Traceback: {traceback.format_exc()}")
-    
-    return formatter
+    return run_formatter  # Return the coroutine
