@@ -259,7 +259,7 @@ def auction_formatter_view(request):
     if request.method == 'POST':
         auction_id = request.POST.get('auction_id')
         selected_warehouse = request.POST.get('selected_warehouse')
-        starting_price = request.POST.get('starting_price')  # Get the starting price
+        starting_price = request.POST.get('starting_price')
 
         config_manager.set_active_warehouse(selected_warehouse)
 
@@ -267,15 +267,17 @@ def auction_formatter_view(request):
         task_id = f"auction_formatter_{int(time.time())}"
         RedisTaskStatus.set_status(task_id, "STARTED", f"Starting auction formatter for auction {auction_id}")
 
-        Thread(target=auction_formatter_main, kwargs={
-            'auction_id': auction_id,
-            'selected_warehouse': selected_warehouse,
-            'starting_price': starting_price,  # Pass the starting price
-            'gui_callback': logger.info,
-            'should_stop': should_stop,
-            'callback': lambda: None,
-            'task_id': task_id
-        }).start()
+        formatter_coroutine = auction_formatter_main(
+            auction_id=auction_id,
+            selected_warehouse=selected_warehouse,
+            starting_price=starting_price,
+            gui_callback=logger.info,
+            should_stop=should_stop,
+            callback=lambda: None,
+            task_id=task_id
+        )
+
+        asyncio.run(formatter_coroutine())
 
         return JsonResponse({'message': 'Auction formatter process started', 'task_id': task_id})
 

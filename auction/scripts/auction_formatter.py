@@ -592,7 +592,7 @@ class AuctionFormatter:
                     await self.save_screenshot(page, 'email_update_error')
 
                 self.gui_callback("Preparing CSV file for upload...")
-                temp_file = tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.csv')
+                temp_file = tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.csv', encoding='utf-8')
                 temp_file.write(csv_content)
                 temp_file_path = temp_file.name
                 temp_file.close()
@@ -828,10 +828,12 @@ class AuctionFormatter:
             record['Highlight'] = record.get('Highlight', "false").lower()
             record['IsTaxable'] = record.get('IsTaxable', "true").lower()
             
-            # Fill missing values with empty strings
+            # Fill missing values with empty strings and ensure all values are strings
             for column in expected_columns:
                 if column not in record:
                     record[column] = ''
+                else:
+                    record[column] = str(record[column])
             
             writer.writerow(record)
         
@@ -887,5 +889,6 @@ def auction_formatter_main(auction_id, selected_warehouse, starting_price, gui_c
         except Exception as e:
             gui_callback(f"Error in auction_formatter_main: {str(e)}")
             gui_callback(f"Traceback: {traceback.format_exc()}")
+            RedisTaskStatus.set_status(task_id, "ERROR", f"Error in auction formatting process: {str(e)}")
 
-    return run_formatter  # Return the coroutine
+    return run_formatter
