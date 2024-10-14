@@ -157,7 +157,11 @@ async def process_image_async(image_data: bytes, gui_callback, width_threshold: 
         if width > width_threshold:
             new_width = width_threshold
             new_height = int(height * (new_width / width))
-            img = img.resize((new_width, new_height), Image.LANCZOS)
+            try:
+                img = img.resize((new_width, new_height), Image.LANCZOS)
+            except Exception as resize_error:
+                gui_callback(f"Error resizing image: {str(resize_error)}")
+                return None
 
         if img.mode == 'RGBA':
             img = img.convert('RGB')
@@ -189,20 +193,24 @@ async def upload_file_via_ftp_async(file_name, file_content, gui_callback, shoul
     remote_file_path = config_manager.get_global_var('ftp_remote_path')
     full_path = os.path.join(remote_file_path, file_name)
     
-    try:
-        async with ftp_pool.get_client() as client:
-            gui_callback(f"Uploading file {file_name} to {remote_file_path}")
-            await ensure_directory_exists(client, os.path.dirname(remote_file_path), gui_callback)
-            
-            gui_callback(f"Starting file upload...")
-            await upload_file_with_retry(client, full_path, file_content)
+    for attempt in range(max_retries):
+        try:
+            async with ftp_pool.get_client() as client:
+                gui_callback(f"Uploading file {file_name} to {remote_file_path}")
+                await ensure_directory_exists(client, os.path.dirname(remote_file_path), gui_callback)
+                
+                gui_callback(f"Starting file upload...")
+                await upload_file_with_retry(client, full_path, file_content)
 
-            gui_callback(f"File {file_name} uploaded successfully")
-            formatted_url = remote_file_path.replace("/public_html", "", 1).lstrip('/')
-            return f"https://{formatted_url}/{file_name}"
-    except Exception as e:
-        gui_callback(f"FTP upload error: {str(e)}")
-        return None
+                gui_callback(f"File {file_name} uploaded successfully")
+                formatted_url = remote_file_path.replace("/public_html", "", 1).lstrip('/')
+                return f"https://{formatted_url}/{file_name}"
+        except Exception as e:
+            gui_callback(f"FTP upload error (attempt {attempt + 1}/{max_retries}): {str(e)}")
+            if attempt == max_retries - 1:
+                return None
+            await asyncio.sleep(2 ** attempt)  # Exponential backoff
+    return None
 
 async def ensure_directory_exists(client, path, gui_callback):
     try:
@@ -662,11 +670,50 @@ class AuctionFormatter:
 
     async def run_auction_formatter(self):
         try:
-            global ftp_pool
-            ftp_pool = FTPPool(max_connections=5)  # Initialize FTP pool
-            RedisTaskStatus.set_status(self.task_id, "STARTED", f"Starting auction formatting for event {self.auction_id}")
+            async with asyncio.timeout(1800):  # 30 minutes timeout
+                global ftp_pool
+                ftp_pool = FTPPool(max_connections=5)  # Initialize FTP pool
+                
+                RedisTaskStatus.set_status(self.task_id, "STARTED", f"Starting auction formatting for event {self.auction_id}")
 
-            RedisTaskStatus.set_status(self.task_id, "IN_PROGRESS", "Fetching Airtable records")
+                # Fetch Airtable records
+                airtable_records = await self.fetch_airtable_records()
+                if not airtable_records:
+                    return
+
+                # Process records and images
+                processed_records, failed_records = await self.process_records_and_images(airtable_records)
+
+                # Generate and save CSV content
+                cleaned_csv_content = await self.generate_and_clean_csv(processed_records)
+                if not cleaned_csv_content:
+                    return
+
+                # Save formatted data to the database
+                await self.save_formatted_data(cleaned_csv_content)
+
+                # Upload CSV to website
+                upload_success = await self.upload_csv_to_website_playwright(cleaned_csv_content)
+                if upload_success:
+                    RedisTaskStatus.set_status(self.task_id, "COMPLETED", "Auction formatting process completed successfully")
+                else:
+                    RedisTaskStatus.set_status(self.task_id, "ERROR", "Failed to upload CSV to website")
+
+        except asyncio.TimeoutError:
+            RedisTaskStatus.set_status(self.task_id, "ERROR", "Auction formatting process timed out")
+            self.gui_callback("Auction formatting process timed out after 30 minutes")
+        except Exception as e:
+            RedisTaskStatus.set_status(self.task_id, "ERROR", f"Error in auction formatting process: {str(e)}")
+            self.gui_callback(f"Error in auction formatting process: {str(e)}")
+            self.gui_callback(f"Traceback: {traceback.format_exc()}")
+        finally:
+            if 'ftp_pool' in globals():
+                await ftp_pool.close_all()
+            await sync_to_async(self.callback)()
+
+    async def fetch_airtable_records(self):
+        RedisTaskStatus.set_status(self.task_id, "IN_PROGRESS", "Fetching Airtable records")
+        try:
             airtable_records = await get_cached_airtable_records(
                 config_manager.get_warehouse_var('airtable_inventory_base_id'),
                 config_manager.get_warehouse_var('airtable_inventory_table_id'),
@@ -675,95 +722,76 @@ class AuctionFormatter:
                 config_manager.get_warehouse_var('airtable_api_key')
             )
             RedisTaskStatus.set_status(self.task_id, "IN_PROGRESS", f"Retrieved {len(airtable_records)} records from Airtable")
-
-            if self.should_stop.is_set():
-                return
-
-            # Create Semaphore inside this method
-            semaphore = asyncio.Semaphore(10)
-
-            # Initialize processed and failed records
-            processed_records = []
-            failed_records = []
-
-            # Process in larger batches
-            batch_size = 100
-            for i in range(0, len(airtable_records), batch_size):
-                if self.should_stop.is_set():
-                    break
-
-                batch = airtable_records[i:i+batch_size]
-                
-                # Process images
-                image_tasks = []
-                for record in batch:
-                    record_id = record['id']
-                    for count in range(1, 11):
-                        image_info = record["fields"].get(f"Image {count}")
-                        if image_info:
-                            url = image_info[0].get("url")
-                            if url:
-                                image_tasks.append(self.process_single_image(semaphore, record_id, url, count))
-                
-                image_results = await asyncio.gather(*image_tasks)
-                
-                # Process records
-                record_tasks = []
-                for record in batch:
-                    record_tasks.append(self.process_single_record_async(semaphore, record, image_results))
-                
-                batch_results = await asyncio.gather(*record_tasks)
-                
-                # Extend results
-                processed_records.extend([r['Data'] for r in batch_results if r.get('Success', False)])
-                failed_records.extend([r for r in batch_results if not r.get('Success', False)])
-
-            # Generate and clean CSV content
-            try:
-                RedisTaskStatus.set_status(self.task_id, "IN_PROGRESS", "Generating CSV content")
-                csv_content = self.generate_csv_content(processed_records)
-                cleaned_csv_content = self.clean_csv_content(csv_content)
-                self.final_csv_content = cleaned_csv_content
-            except Exception as e:
-                RedisTaskStatus.set_status(self.task_id, "ERROR", f"Error generating CSV: {str(e)}")
-                raise
-
-            # Save formatted data to the database
-            await self.save_formatted_data(cleaned_csv_content)
-
-            # Upload CSV to website using Playwright
-            await self.upload_csv_to_website_playwright(cleaned_csv_content)
-
-            RedisTaskStatus.set_status(self.task_id, "COMPLETED", "Auction formatting process completed successfully")
-
+            return airtable_records
         except Exception as e:
-            RedisTaskStatus.set_status(self.task_id, "ERROR", f"Error in auction formatting process: {str(e)}")
-            self.gui_callback(f"Error in auction formatting process: {str(e)}")
-            self.gui_callback(f"Traceback: {traceback.format_exc()}")
-        finally:
-            await ftp_pool.close_all()
-            await sync_to_async(self.callback)()
+            RedisTaskStatus.set_status(self.task_id, "ERROR", f"Failed to fetch Airtable records: {str(e)}")
+            self.gui_callback(f"Error fetching Airtable records: {str(e)}")
+            return None
+
+    async def process_records_and_images(self, airtable_records):
+        processed_records = []
+        failed_records = []
+        semaphore = asyncio.Semaphore(10)
+        batch_size = 100
+
+        for i in range(0, len(airtable_records), batch_size):
+            if self.should_stop.is_set():
+                break
+
+            batch = airtable_records[i:i+batch_size]
+            
+            image_tasks = [self.process_single_image(semaphore, record['id'], image_info[0].get("url"), count)
+                        for record in batch
+                        for count, image_info in enumerate(record["fields"].get(f"Image {i}", []) for i in range(1, 11))
+                        if image_info]
+            
+            image_results = await asyncio.gather(*image_tasks)
+            
+            record_tasks = [self.process_single_record_async(semaphore, record, image_results) for record in batch]
+            batch_results = await asyncio.gather(*record_tasks)
+            
+            processed_records.extend([r['Data'] for r in batch_results if r.get('Success', False)])
+            failed_records.extend([r for r in batch_results if not r.get('Success', False)])
+
+        return processed_records, failed_records
+
+    async def generate_and_clean_csv(self, processed_records):
+        RedisTaskStatus.set_status(self.task_id, "IN_PROGRESS", "Generating CSV content")
+        try:
+            csv_content = self.generate_csv_content(processed_records)
+            cleaned_csv_content = self.clean_csv_content(csv_content)
+            self.final_csv_content = cleaned_csv_content
+            return cleaned_csv_content
+        except Exception as e:
+            RedisTaskStatus.set_status(self.task_id, "ERROR", f"Error generating CSV: {str(e)}")
+            self.gui_callback(f"Error generating CSV: {str(e)}")
+            return None
 
     async def process_single_image(self, semaphore, record_id, url, image_number):
         async with semaphore:
-            image_data = await download_image_async(url, self.gui_callback)
-            if image_data:
-                processed_image_data = await process_image_async(image_data, self.gui_callback)
-                if processed_image_data:
-                    file_name = f"{record_id}_{image_number}.jpg"
-                    uploaded_url = await upload_file_via_ftp_async(
-                        file_name, 
-                        processed_image_data, 
-                        self.gui_callback,
-                        self.should_stop
-                    )
-                    if uploaded_url:
-                        return (record_id, uploaded_url, image_number)
+            try:
+                image_data = await download_image_async(url, self.gui_callback)
+                if image_data:
+                    processed_image_data = await process_image_async(image_data, self.gui_callback)
+                    if processed_image_data:
+                        file_name = f"{record_id}_{image_number}.jpg"
+                        uploaded_url = await upload_file_via_ftp_async(
+                            file_name, 
+                            processed_image_data, 
+                            self.gui_callback,
+                            self.should_stop
+                        )
+                        if uploaded_url:
+                            return (record_id, uploaded_url, image_number)
+                        else:
+                            self.gui_callback(f"Failed to upload image for record {record_id}, image number {image_number}")
+                    else:
+                        self.gui_callback(f"Failed to process image for record {record_id}, image number {image_number}")
                 else:
-                    self.gui_callback(f"Failed to process image for record {record_id}, image number {image_number}")
-            else:
-                self.gui_callback(f"Failed to download image for record {record_id}, image number {image_number}")
-        return None
+                    self.gui_callback(f"Failed to download image for record {record_id}, image number {image_number}")
+            except Exception as e:
+                self.gui_callback(f"Error processing image for record {record_id}, image number {image_number}: {str(e)}")
+            return None
 
     async def process_single_record_async(self, semaphore, record, image_results):
         async with semaphore:
