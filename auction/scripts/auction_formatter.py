@@ -130,9 +130,19 @@ async def download_image_async(url: str, gui_callback) -> bytes:
         return None
 
 
-async def process_image_async(image_data: bytes, gui_callback, width_threshold: int = 1024, dpi_threshold: int = 72) -> bytes:
+async def process_image_async(image_data: bytes, gui_callback, width_threshold: int = 1024, dpi_threshold: int = 72) -> Optional[bytes]:
     try:
+        if not image_data:
+            gui_callback("Error: Empty image data")
+            return None
+
         img = Image.open(BytesIO(image_data))
+
+        # Verify that the image was opened successfully
+        if not img:
+            gui_callback("Error: Failed to open image")
+            return None
+
         orientation = get_image_orientation(img)
 
         if orientation == 6:
@@ -147,7 +157,7 @@ async def process_image_async(image_data: bytes, gui_callback, width_threshold: 
         if width > width_threshold:
             new_width = width_threshold
             new_height = int(height * (new_width / width))
-            img = img.resize((new_width, new_height))
+            img = img.resize((new_width, new_height), Image.LANCZOS)
 
         if img.mode == 'RGBA':
             img = img.convert('RGB')
@@ -160,9 +170,14 @@ async def process_image_async(image_data: bytes, gui_callback, width_threshold: 
         img.save(output, format='JPEG')
         return output.getvalue()
 
+    except (IOError, OSError) as e:
+        gui_callback(f"Error opening or processing image: {str(e)}")
+    except Image.DecompressionBombError:
+        gui_callback("Error: Image is too large to process")
     except Exception as e:
-        gui_callback(f"Error processing image: {e}")
-        return None
+        gui_callback(f"Unexpected error processing image: {str(e)}")
+    
+    return None
 
 @retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=1, min=4, max=10))
 async def upload_file_with_retry(client, remote_path, file_content):
@@ -744,6 +759,10 @@ class AuctionFormatter:
                     )
                     if uploaded_url:
                         return (record_id, uploaded_url, image_number)
+                else:
+                    self.gui_callback(f"Failed to process image for record {record_id}, image number {image_number}")
+            else:
+                self.gui_callback(f"Failed to download image for record {record_id}, image number {image_number}")
         return None
 
     async def process_single_record_async(self, semaphore, record, image_results):
