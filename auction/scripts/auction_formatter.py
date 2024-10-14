@@ -670,40 +670,36 @@ class AuctionFormatter:
 
     async def run_auction_formatter(self):
         try:
-            async def formatter_process():
-                global ftp_pool
-                ftp_pool = FTPPool(max_connections=5)  # Initialize FTP pool
-                
-                RedisTaskStatus.set_status(self.task_id, "STARTED", f"Starting auction formatting for event {self.auction_id}")
+            RedisTaskStatus.set_status(self.task_id, "STARTED", f"Starting auction formatting for event {self.auction_id}")
 
-                # Fetch Airtable records
-                airtable_records = await self.fetch_airtable_records()
-                if not airtable_records:
-                    return
+            global ftp_pool
+            ftp_pool = FTPPool(max_connections=5)  # Initialize FTP pool
 
-                # Process records and images
-                processed_records, failed_records = await self.process_records_and_images(airtable_records)
+            # Fetch Airtable records
+            airtable_records = await self.fetch_airtable_records()
+            if not airtable_records:
+                RedisTaskStatus.set_status(self.task_id, "ERROR", "Failed to fetch Airtable records")
+                return
 
-                # Generate and save CSV content
-                cleaned_csv_content = await self.generate_and_clean_csv(processed_records)
-                if not cleaned_csv_content:
-                    return
+            # Process records and images
+            processed_records, failed_records = await self.process_records_and_images(airtable_records)
 
-                # Save formatted data to the database
-                await self.save_formatted_data(cleaned_csv_content)
+            # Generate and save CSV content
+            cleaned_csv_content = await self.generate_and_clean_csv(processed_records)
+            if not cleaned_csv_content:
+                RedisTaskStatus.set_status(self.task_id, "ERROR", "Failed to generate CSV content")
+                return
 
-                # Upload CSV to website
-                upload_success = await self.upload_csv_to_website_playwright(cleaned_csv_content)
-                if upload_success:
-                    RedisTaskStatus.set_status(self.task_id, "COMPLETED", "Auction formatting process completed successfully")
-                else:
-                    RedisTaskStatus.set_status(self.task_id, "ERROR", "Failed to upload CSV to website")
+            # Save formatted data to the database
+            await self.save_formatted_data(cleaned_csv_content)
 
-            await asyncio.wait_for(formatter_process(), timeout=1800)  # 30 minutes timeout
+            # Upload CSV to website
+            upload_success = await self.upload_csv_to_website_playwright(cleaned_csv_content)
+            if upload_success:
+                RedisTaskStatus.set_status(self.task_id, "COMPLETED", "Auction formatting process completed successfully")
+            else:
+                RedisTaskStatus.set_status(self.task_id, "ERROR", "Failed to upload CSV to website")
 
-        except asyncio.TimeoutError:
-            RedisTaskStatus.set_status(self.task_id, "ERROR", "Auction formatting process timed out")
-            self.gui_callback("Auction formatting process timed out after 30 minutes")
         except Exception as e:
             RedisTaskStatus.set_status(self.task_id, "ERROR", f"Error in auction formatting process: {str(e)}")
             self.gui_callback(f"Error in auction formatting process: {str(e)}")
