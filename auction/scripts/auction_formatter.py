@@ -670,7 +670,7 @@ class AuctionFormatter:
 
     async def run_auction_formatter(self):
         try:
-            async with asyncio.timeout(1800):  # 30 minutes timeout
+            async def formatter_process():
                 global ftp_pool
                 ftp_pool = FTPPool(max_connections=5)  # Initialize FTP pool
                 
@@ -698,6 +698,8 @@ class AuctionFormatter:
                     RedisTaskStatus.set_status(self.task_id, "COMPLETED", "Auction formatting process completed successfully")
                 else:
                     RedisTaskStatus.set_status(self.task_id, "ERROR", "Failed to upload CSV to website")
+
+            await asyncio.wait_for(formatter_process(), timeout=1800)  # 30 minutes timeout
 
         except asyncio.TimeoutError:
             RedisTaskStatus.set_status(self.task_id, "ERROR", "Auction formatting process timed out")
