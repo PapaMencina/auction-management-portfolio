@@ -25,6 +25,8 @@ from auction.scripts.auction_formatter import auction_formatter_main
 # from auction.scripts.upload_to_hibid import upload_to_hibid_main
 from auction.models import Event
 from auction.utils.redis_utils import RedisTaskStatus
+from celery.result import AsyncResult
+from .tasks import run_auction_formatter_task
 import time
 
 logger = logging.getLogger(__name__)
@@ -263,29 +265,35 @@ def auction_formatter_view(request):
 
         config_manager.set_active_warehouse(selected_warehouse)
 
-        should_stop = threading.Event()
-        task_id = f"auction_formatter_{int(time.time())}"
-        RedisTaskStatus.set_status(task_id, "STARTED", f"Starting auction formatter for auction {auction_id}")
-
-        formatter_coroutine = auction_formatter_main(
-            auction_id=auction_id,
-            selected_warehouse=selected_warehouse,
-            starting_price=starting_price,
-            gui_callback=logger.info,
-            should_stop=should_stop,
-            callback=lambda: None,
-            task_id=task_id
-        )
-
-        asyncio.run(formatter_coroutine())
-
-        return JsonResponse({'message': 'Auction formatter process started', 'task_id': task_id})
+        task = run_auction_formatter_task.delay(auction_id, selected_warehouse, starting_price)
+        
+        return JsonResponse({'message': 'Auction formatter process started', 'task_id': task.id})
 
     context = {
         'warehouses': warehouses,
         'auctions': json.dumps(auctions, cls=DjangoJSONEncoder),
     }
     return render(request, 'auction/auction_formatter.html', context)
+
+@login_required
+def get_task_status(request, task_id):
+    task = AsyncResult(task_id)
+    if task.state == 'PENDING':
+        response = {
+            'state': task.state,
+            'status': 'Pending...'
+        }
+    elif task.state != 'FAILURE':
+        response = {
+            'state': task.state,
+            'status': task.info.get('status', '')
+        }
+    else:
+        response = {
+            'state': task.state,
+            'status': str(task.info),
+        }
+    return JsonResponse(response)
 
 @login_required
 @require_http_methods(["GET", "POST"])
@@ -338,12 +346,24 @@ def upload_to_hibid_view(request):
 def check_task_status(request, task_id):
     logger.info(f"Checking status for task: {task_id}")
     try:
-        status_data = RedisTaskStatus.get_status(task_id)
+        task = AsyncResult(task_id)
+        if task.state == 'PENDING':
+            status_data = {
+                'state': task.state,
+                'status': 'Pending...'
+            }
+        elif task.state != 'FAILURE':
+            status_data = {
+                'state': task.state,
+                'status': task.info.get('status', '')
+            }
+        else:
+            status_data = {
+                'state': task.state,
+                'status': str(task.info),
+            }
         logger.info(f"Status data for task {task_id}: {status_data}")
-        if status_data:
-            return JsonResponse(status_data)
-        logger.warning(f"Task not found: {task_id}")
-        return JsonResponse({'error': 'Task not found'}, status=404)
+        return JsonResponse(status_data)
     except Exception as e:
         logger.error(f"Error checking task status: {str(e)}")
         logger.exception("Full traceback:")

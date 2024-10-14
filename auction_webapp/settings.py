@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 import dj_database_url
 import redis
+import django_redis
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -66,6 +67,19 @@ if 'localhost' in REDIS_URL:
 else:
     REDIS_CONN = redis.from_url(REDIS_URL, ssl_cert_reqs=None)
 
+# Celery Settings
+CELERY_BROKER_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379')
+CELERY_RESULT_BACKEND = os.environ.get('REDIS_URL', 'redis://localhost:6379')
+
+# Add these new settings
+CELERY_ACCEPT_CONTENT = ['application/json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = 'America/Los_Angeles'
+
+# Optional: Configure Celery to use Redis for task results
+CELERY_RESULT_BACKEND = CELERY_BROKER_URL
+
 # Application definition
 
 INSTALLED_APPS = [
@@ -76,6 +90,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'auction',
+    'django_celery_results',
 ]
 
 MIDDLEWARE = [

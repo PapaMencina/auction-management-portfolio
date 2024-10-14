@@ -129,7 +129,6 @@ async def download_image_async(url: str, gui_callback) -> bytes:
         gui_callback(f"Error while downloading {url}: {str(e)}")
         return None
 
-
 async def process_image_async(image_data: bytes, gui_callback, width_threshold: int = 1024, dpi_threshold: int = 72) -> Optional[bytes]:
     try:
         if not image_data:
@@ -668,46 +667,55 @@ class AuctionFormatter:
                 if temp_file_path and os.path.exists(temp_file_path):
                     os.unlink(temp_file_path)
 
-    async def run_auction_formatter(self):
-        try:
-            RedisTaskStatus.set_status(self.task_id, "STARTED", f"Starting auction formatting for event {self.auction_id}")
+    def run_auction_formatter(self):
+        async def async_run():
+            try:
+                self.gui_callback(f"Starting auction formatting for event {self.auction_id}")
 
-            global ftp_pool
-            ftp_pool = FTPPool(max_connections=5)  # Initialize FTP pool
+                global ftp_pool
+                ftp_pool = FTPPool(max_connections=5)  # Initialize FTP pool
 
-            # Fetch Airtable records
-            airtable_records = await self.fetch_airtable_records()
-            if not airtable_records:
-                RedisTaskStatus.set_status(self.task_id, "ERROR", "Failed to fetch Airtable records")
-                return
+                # Fetch Airtable records
+                airtable_records = await self.fetch_airtable_records()
+                if not airtable_records:
+                    self.gui_callback("Failed to fetch Airtable records")
+                    return
 
-            # Process records and images
-            processed_records, failed_records = await self.process_records_and_images(airtable_records)
+                # Process records and images
+                self.gui_callback("Processing records and images")
+                processed_records, failed_records = await self.process_records_and_images(airtable_records)
 
-            # Generate and save CSV content
-            cleaned_csv_content = await self.generate_and_clean_csv(processed_records)
-            if not cleaned_csv_content:
-                RedisTaskStatus.set_status(self.task_id, "ERROR", "Failed to generate CSV content")
-                return
+                # Generate and save CSV content
+                self.gui_callback("Generating CSV content")
+                cleaned_csv_content = await self.generate_and_clean_csv(processed_records)
+                if not cleaned_csv_content:
+                    self.gui_callback("Failed to generate CSV content")
+                    return
 
-            # Save formatted data to the database
-            await self.save_formatted_data(cleaned_csv_content)
+                # Save formatted data to the database
+                self.gui_callback("Saving formatted data to database")
+                await self.save_formatted_data(cleaned_csv_content)
 
-            # Upload CSV to website
-            upload_success = await self.upload_csv_to_website_playwright(cleaned_csv_content)
-            if upload_success:
-                RedisTaskStatus.set_status(self.task_id, "COMPLETED", "Auction formatting process completed successfully")
-            else:
-                RedisTaskStatus.set_status(self.task_id, "ERROR", "Failed to upload CSV to website")
+                # Upload CSV to website
+                self.gui_callback("Uploading CSV to website")
+                upload_success = await self.upload_csv_to_website_playwright(cleaned_csv_content)
+                if upload_success:
+                    self.gui_callback("Auction formatting process completed successfully")
+                else:
+                    self.gui_callback("Failed to upload CSV to website")
 
-        except Exception as e:
-            RedisTaskStatus.set_status(self.task_id, "ERROR", f"Error in auction formatting process: {str(e)}")
-            self.gui_callback(f"Error in auction formatting process: {str(e)}")
-            self.gui_callback(f"Traceback: {traceback.format_exc()}")
-        finally:
-            if 'ftp_pool' in globals():
-                await ftp_pool.close_all()
-            await sync_to_async(self.callback)()
+            except Exception as e:
+                error_message = f"Error in auction formatting process: {str(e)}"
+                self.gui_callback(error_message)
+                self.gui_callback(f"Traceback: {traceback.format_exc()}")
+                raise  # Re-raise the exception to mark the task as failed
+
+            finally:
+                if 'ftp_pool' in globals():
+                    await ftp_pool.close_all()
+                await sync_to_async(self.callback)()
+
+        return asyncio.run(async_run())
 
     async def fetch_airtable_records(self):
         RedisTaskStatus.set_status(self.task_id, "IN_PROGRESS", "Fetching Airtable records")
