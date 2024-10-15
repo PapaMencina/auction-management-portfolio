@@ -16,6 +16,7 @@ import dj_database_url
 import redis
 import django_redis
 from dotenv import load_dotenv
+import ssl as ssl_lib
 
 load_dotenv()
 
@@ -41,52 +42,47 @@ ALLOWED_HOSTS = ['auction-management-system-877a79758b85.herokuapp.com', 'localh
 
 PLAYWRIGHT_BROWSERS = os.environ.get('PLAYWRIGHT_BROWSERS', 'chromium').split(',')
 
-# Existing Redis cache configuration
-if 'REDIS_URL' in os.environ:
-    CACHES = {
-        "default": {
-            "BACKEND": "django_redis.cache.RedisCache",
-            "LOCATION": os.environ.get('REDIS_URL'),
-            "OPTIONS": {
-                "CLIENT_CLASS": "django_redis.client.DefaultClient",
-            }
-        }
-    }
-else:
-    # Use local memory cache for development
-    CACHES = {
-        'default': {
-            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
-            'LOCATION': 'unique-snowflake',
-        }
-    }
-
 REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379')
-if 'localhost' in REDIS_URL:
-    REDIS_CONN = redis.from_url(REDIS_URL)
-else:
-    REDIS_CONN = redis.from_url(REDIS_URL, ssl_cert_reqs=None)
 
 # Celery Settings
-CELERY_BROKER_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379')
-CELERY_RESULT_BACKEND = os.environ.get('REDIS_URL', 'redis://localhost:6379')
+CELERY_BROKER_URL = REDIS_URL
+CELERY_RESULT_BACKEND = REDIS_URL
 
-# Add these new settings
 CELERY_ACCEPT_CONTENT = ['application/json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = 'America/Los_Angeles'
 
-# Optional: Configure Celery to use Redis for task results
-CELERY_RESULT_BACKEND = CELERY_BROKER_URL
-
-if CELERY_BROKER_URL.startswith('rediss://'):
-    CELERY_BROKER_USE_SSL = {
-        'ssl_cert_reqs': None
-    }
+if REDIS_URL.startswith('rediss://'):
     CELERY_REDIS_BACKEND_USE_SSL = {
-        'ssl_cert_reqs': None
+        'ssl_cert_reqs': ssl_lib.CERT_NONE
     }
+    CELERY_BROKER_USE_SSL = {
+        'ssl_cert_reqs': ssl_lib.CERT_NONE
+    }
+    BROKER_USE_SSL = {
+        'ssl_cert_reqs': ssl_lib.CERT_NONE
+    }
+
+# Redis cache configuration
+CACHES = {
+    "default": {
+        "BACKEND": "django_redis.cache.RedisCache",
+        "LOCATION": REDIS_URL,
+        "OPTIONS": {
+            "CLIENT_CLASS": "django_redis.client.DefaultClient",
+        }
+    }
+}
+
+if REDIS_URL.startswith('rediss://'):
+    CACHES["default"]["OPTIONS"]["CONNECTION_POOL_KWARGS"] = {"ssl_cert_reqs": ssl_lib.CERT_NONE}
+
+# Redis connection
+if 'localhost' in REDIS_URL:
+    REDIS_CONN = redis.from_url(REDIS_URL)
+else:
+    REDIS_CONN = redis.from_url(REDIS_URL, ssl_cert_reqs=None)
 
 # Application definition
 

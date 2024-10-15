@@ -18,6 +18,8 @@ from threading import Thread, Event
 from datetime import datetime
 from django.utils import timezone
 from auction.utils import config_manager
+from celery.backends.redis import RedisBackend
+from auction_webapp.celery import app
 from auction.scripts.create_auction import create_auction_main
 from auction.scripts.void_unpaid_on_bid import void_unpaid_main
 from auction.scripts.remove_duplicates_in_airtable import remove_duplicates_main
@@ -346,24 +348,29 @@ def upload_to_hibid_view(request):
 def check_task_status(request, task_id):
     logger.info(f"Checking status for task: {task_id}")
     try:
-        task = AsyncResult(task_id)
+        backend = RedisBackend(app=app, url=settings.REDIS_URL)
+        if settings.REDIS_URL.startswith('rediss://'):
+            backend.redis.connection_pool.connection_kwargs['ssl_cert_reqs'] = None
+        
+        task = AsyncResult(task_id, backend=backend)
+        
         if task.state == 'PENDING':
-            status_data = {
+            response = {
                 'state': task.state,
                 'status': 'Pending...'
             }
         elif task.state != 'FAILURE':
-            status_data = {
+            response = {
                 'state': task.state,
                 'status': task.info.get('status', '')
             }
         else:
-            status_data = {
+            response = {
                 'state': task.state,
                 'status': str(task.info),
             }
-        logger.info(f"Status data for task {task_id}: {status_data}")
-        return JsonResponse(status_data)
+        logger.info(f"Status data for task {task_id}: {response}")
+        return JsonResponse(response)
     except Exception as e:
         logger.error(f"Error checking task status: {str(e)}")
         logger.exception("Full traceback:")
