@@ -80,6 +80,14 @@ CELERY_TIMEZONE = 'America/Los_Angeles'
 # Optional: Configure Celery to use Redis for task results
 CELERY_RESULT_BACKEND = CELERY_BROKER_URL
 
+if CELERY_BROKER_URL.startswith('rediss://'):
+    CELERY_BROKER_USE_SSL = {
+        'ssl_cert_reqs': None
+    }
+    CELERY_REDIS_BACKEND_USE_SSL = {
+        'ssl_cert_reqs': None
+    }
+
 # Application definition
 
 INSTALLED_APPS = [
