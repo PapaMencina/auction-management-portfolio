@@ -1,5 +1,5 @@
-# auction_webapp/celery.py
 import os
+import asyncio
 from celery import Celery
 from django.conf import settings
 
@@ -22,6 +22,9 @@ if settings.REDIS_URL.startswith('rediss://'):
     app.conf.redis_backend_use_ssl = {
         'ssl_cert_reqs': None,
     }
+
+# Set the default event loop policy to use
+asyncio.set_event_loop_policy(asyncio.DefaultEventLoopPolicy())
 
 @app.task(bind=True, ignore_result=True)
 def debug_task(self):

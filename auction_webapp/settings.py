@@ -33,16 +33,16 @@ print(f"Django BASE_DIR: {BASE_DIR}")
 SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'django-insecure-8x1zg3y9w2m0v7l4k6j5h8f2d1s3a7p0q9e4r6t5y8u2i1o3p6')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.environ.get('DJANGO_DEBUG', 'False') != 'False'
+DEBUG = os.environ.get('DJANGO_DEBUG', 'True') == 'True'
 
-ALLOWED_HOSTS = ['auction-management-system-877a79758b85.herokuapp.com', 'localhost', '127.0.0.1']
+ALLOWED_HOSTS = ['auction-management-system-877a79758b85.herokuapp.com', 'localhost', '127.0.0.1', '0.0.0.0']
 
 # Playwright settings
 # PLAYWRIGHT_BROWSERS_PATH = os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "/app/.cache/ms-playwright")
 
 PLAYWRIGHT_BROWSERS = os.environ.get('PLAYWRIGHT_BROWSERS', 'chromium').split(',')
 
-REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379')
+REDIS_URL = os.environ.get('REDIS_URL', 'redis://127.0.0.1:6379/0')
 
 # Celery Settings
 CELERY_BROKER_URL = REDIS_URL
@@ -79,10 +79,7 @@ if REDIS_URL.startswith('rediss://'):
     CACHES["default"]["OPTIONS"]["CONNECTION_POOL_KWARGS"] = {"ssl_cert_reqs": ssl_lib.CERT_NONE}
 
 # Redis connection
-if 'localhost' in REDIS_URL:
-    REDIS_CONN = redis.from_url(REDIS_URL)
-else:
-    REDIS_CONN = redis.from_url(REDIS_URL, ssl_cert_reqs=None)
+REDIS_CONN = redis.Redis.from_url(REDIS_URL)
 
 # Application definition
 
@@ -253,3 +250,9 @@ MEDIA_ROOT = BASE_DIR / 'media'
 # Add these lines for HiBid-related settings
 DEFAULT_HIBID_IMAGE_PATH = BASE_DIR / 'auction' / 'resources' / 'hibid_stock' / 'default_image.jpg'
 LOGO_702_PATH = BASE_DIR / 'auction' / 'resources' / 'bid_stock_photo' / '702_logo.png'
+
+# Database configuration for async operations
+DATABASES['default']['CONN_MAX_AGE'] = 0
+
+# Celery configuration
+CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True

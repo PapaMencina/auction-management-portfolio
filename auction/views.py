@@ -13,6 +13,7 @@ import json
 import traceback
 import os
 import asyncio
+from auction.tasks import create_auction_task
 from auction.models import HiBidUpload
 from threading import Thread, Event
 from datetime import datetime
@@ -20,7 +21,8 @@ from django.utils import timezone
 from auction.utils import config_manager
 from celery.backends.redis import RedisBackend
 from auction_webapp.celery import app
-from auction.scripts.create_auction import create_auction_main
+from auction.scripts.create_auction import format_date, get_image, create_auction, save_event_to_database
+from auction.scripts.create_auction import create_auction_task
 from auction.scripts.void_unpaid_on_bid import void_unpaid_main
 from auction.scripts.remove_duplicates_in_airtable import remove_duplicates_main
 from auction.scripts.auction_formatter import auction_formatter_main
@@ -28,7 +30,7 @@ from auction.scripts.auction_formatter import auction_formatter_main
 from auction.models import Event
 from auction.utils.redis_utils import RedisTaskStatus
 from celery.result import AsyncResult
-from .tasks import run_auction_formatter_task
+from .tasks import run_auction_formatter_task, create_auction_task
 import time
 
 logger = logging.getLogger(__name__)
@@ -148,24 +150,10 @@ def create_auction_view(request):
             if not all([auction_title, ending_date, selected_warehouse]):
                 return JsonResponse({'error': 'Missing required fields'}, status=400)
 
-            config_manager.set_active_warehouse(selected_warehouse)
+            task = create_auction_task.delay(auction_title, ending_date, selected_warehouse)
 
-            task_id = f"create_auction_{int(time.time())}"
-            RedisTaskStatus.set_status(task_id, "STARTED", f"Starting auction creation for {auction_title}")
-
-            def run_async_task():
-                asyncio.run(create_auction_main(
-                    auction_title,
-                    ending_date,
-                    selected_warehouse,
-                    task_id
-                ))
-
-            thread = Thread(target=run_async_task)
-            thread.start()
-
-            logger.info(f"Auction creation thread started for {auction_title}")
-            return JsonResponse({'message': 'Auction creation process started', 'task_id': task_id})
+            logger.info(f"Auction creation task started for {auction_title}")
+            return JsonResponse({'message': 'Auction creation process started', 'task_id': task.id})
         except ValueError as e:
             logger.error(f"Invalid date format: {str(e)}")
             return JsonResponse({'error': 'Invalid date format'}, status=400)
@@ -346,33 +334,21 @@ def upload_to_hibid_view(request):
 
 @login_required
 def check_task_status(request, task_id):
-    logger.info(f"Checking status for task: {task_id}")
-    try:
-        backend = RedisBackend(app=app, url=settings.REDIS_URL)
-        if settings.REDIS_URL.startswith('rediss://'):
-            backend.redis.connection_pool.connection_kwargs['ssl_cert_reqs'] = None
-        
-        task = AsyncResult(task_id, backend=backend)
-        
-        if task.state == 'PENDING':
-            response = {
-                'state': task.state,
-                'status': 'Pending...'
-            }
-        elif task.state != 'FAILURE':
-            response = {
-                'state': task.state,
-                'status': task.info.get('status', '')
-            }
-        else:
-            response = {
-                'state': task.state,
-                'status': str(task.info),
-            }
-        logger.info(f"Status data for task {task_id}: {response}")
-        return JsonResponse(response)
-    except Exception as e:
-        logger.error(f"Error checking task status: {str(e)}")
-        logger.exception("Full traceback:")
-        return JsonResponse({'error': 'Internal server error'}, status=500)
+    task = AsyncResult(task_id)
+    if task.state == 'PENDING':
+        response = {
+            'state': task.state,
+            'status': 'Task is waiting for execution'
+        }
+    elif task.state != 'FAILURE':
+        response = {
+            'state': task.state,
+            'status': task.info.get('status', '')
+        }
+    else:
+        response = {
+            'state': task.state,
+            'status': str(task.info),
+        }
+    return JsonResponse(response)
     
