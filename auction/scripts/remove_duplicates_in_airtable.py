@@ -44,13 +44,21 @@ def remove_duplicates_task(self, auction_number, target_msrp, warehouse_name):
     logger.info(f"Starting remove duplicates process for auction {auction_number}")
     self.update_state(state="STARTED", meta={'status': f"Starting remove duplicates process for auction {auction_number}"})
     
-    valid_auctions = get_valid_auctions(warehouse_name)
-    if auction_number not in valid_auctions:
-        logger.warning(f"Auction {auction_number} is not a valid auction for {warehouse_name}. Aborting process.")
-        self.update_state(state="FAILURE", meta={'status': f"Auction {auction_number} is not valid for {warehouse_name}"})
-        return
+    try:
+        valid_auctions = get_valid_auctions(warehouse_name)
+        if auction_number not in valid_auctions:
+            logger.warning(f"Auction {auction_number} is not a valid auction for {warehouse_name}. Aborting process.")
+            self.update_state(state="FAILURE", meta={'status': f"Auction {auction_number} is not valid for {warehouse_name}"})
+            return
 
-    run_remove_dups(self, auction_number, target_msrp, warehouse_name)
+        run_remove_dups(self, auction_number, target_msrp, warehouse_name)
+        
+    except Exception as e:
+        error_message = f"An error occurred in remove_duplicates_task: {str(e)}"
+        logger.error(error_message)
+        logger.exception("Full traceback:")
+        self.update_state(state="FAILURE", meta={'status': error_message})
+        raise
 
 def update_record_if_needed(record, auction_number, table):
     """Updates the record if it needs an update based on its auction listing status."""
@@ -112,52 +120,58 @@ def update_records_in_airtable(self, auction_number, target_msrp, table, view_na
                     update_count += 1
                     total_msrp_reached += record['fields'].get('MSRP', 0)
             
-            if i % (total_groups // 10) == 0:
-                progress = int((i / total_groups) * 100)
-                logger.info(f"Processed {i}/{total_groups} groups ({progress}%)")
-                self.update_state(state="PROGRESS", meta={'status': f"Processed {progress}% of groups"})
+            if i % (total_groups // 10) == 0 or i == total_groups - 1:
+                progress = int((i + 1) / total_groups * 100)
+                logger.info(f"Processed {i + 1}/{total_groups} groups ({progress}%)")
+                self.update_state(state="PROGRESS", meta={
+                    'status': f"Processed {progress}% of groups",
+                    'current': i + 1,
+                    'total': total_groups,
+                    'update_count': update_count,
+                    'total_msrp_reached': total_msrp_reached
+                })
 
-        logger.info(f"Auction {auction_number} has been added to {update_count} items with total MSRP of ${total_msrp_reached:.2f}")
-        self.update_state(state="SUCCESS", meta={'status': f"Added auction {auction_number} to {update_count} items. Total MSRP: ${total_msrp_reached:.2f}"})
+        final_message = f"Added auction {auction_number} to {update_count} items. Total MSRP: ${total_msrp_reached:.2f}"
+        logger.info(final_message)
+        self.update_state(state="SUCCESS", meta={'status': final_message})
+        
     except Exception as e:
-        logger.error(f"Error occurred: {e}")
+        error_message = f"Error occurred in update_records_in_airtable: {str(e)}"
+        logger.error(error_message)
         logger.exception("Full traceback:")
-        self.update_state(state="FAILURE", meta={'status': f"An error occurred: {str(e)}"})
+        self.update_state(state="FAILURE", meta={'status': error_message})
+        raise
 
 def run_remove_dups(self, auction_number, target_msrp, warehouse_name):
     logger.info(f"Running remove_dups for auction {auction_number} in {warehouse_name}")
     self.update_state(state="PROGRESS", meta={'status': f"Initializing remove_dups for auction {auction_number}"})
     
-    config_manager.set_active_warehouse(warehouse_name)
-
-    AIRTABLE_TOKEN = config_manager.get_warehouse_var('airtable_api_key')
-    AIRTABLE_INVENTORY_BASE_ID = config_manager.get_warehouse_var('airtable_inventory_base_id')
-    AIRTABLE_INVENTORY_TABLE_ID = config_manager.get_warehouse_var('airtable_inventory_table_id')
-    AIRTABLE_REMOVE_DUPS_VIEW = config_manager.get_warehouse_var('airtable_remove_dups_view')
-
-    if not all([AIRTABLE_TOKEN, AIRTABLE_INVENTORY_BASE_ID, AIRTABLE_INVENTORY_TABLE_ID, AIRTABLE_REMOVE_DUPS_VIEW]):
-        logger.error("Missing Airtable configuration. Please check your config.json file.")
-        self.update_state(state="FAILURE", meta={'status': "Missing Airtable configuration"})
-        return
-
-    logger.info("Airtable configuration loaded successfully")
-    self.update_state(state="PROGRESS", meta={'status': "Airtable configuration loaded"})
-
     try:
+        config_manager.set_active_warehouse(warehouse_name)
+
+        AIRTABLE_TOKEN = config_manager.get_warehouse_var('airtable_api_key')
+        AIRTABLE_INVENTORY_BASE_ID = config_manager.get_warehouse_var('airtable_inventory_base_id')
+        AIRTABLE_INVENTORY_TABLE_ID = config_manager.get_warehouse_var('airtable_inventory_table_id')
+        AIRTABLE_REMOVE_DUPS_VIEW = config_manager.get_warehouse_var('airtable_remove_dups_view')
+
+        if not all([AIRTABLE_TOKEN, AIRTABLE_INVENTORY_BASE_ID, AIRTABLE_INVENTORY_TABLE_ID, AIRTABLE_REMOVE_DUPS_VIEW]):
+            raise ValueError("Missing Airtable configuration. Please check your config.json file.")
+
+        logger.info("Airtable configuration loaded successfully")
+        self.update_state(state="PROGRESS", meta={'status': "Airtable configuration loaded"})
+
         table = Table(AIRTABLE_TOKEN, AIRTABLE_INVENTORY_BASE_ID, AIRTABLE_INVENTORY_TABLE_ID)
         logger.info("Airtable Table initialized successfully")
         self.update_state(state="PROGRESS", meta={'status': "Airtable Table initialized"})
-    except Exception as e:
-        logger.error(f"Failed to initialize Airtable: {str(e)}")
-        self.update_state(state="FAILURE", meta={'status': f"Failed to initialize Airtable: {str(e)}"})
-        return
 
-    try:
         update_records_in_airtable(self, auction_number, target_msrp, table, AIRTABLE_REMOVE_DUPS_VIEW)
+        
+        logger.info("Remove duplicates process completed successfully.")
+        self.update_state(state="SUCCESS", meta={'status': "Remove duplicates process completed successfully"})
+        
     except Exception as e:
-        logger.error(f"An error occurred during the update process: {str(e)}")
+        error_message = f"An error occurred during the remove duplicates process: {str(e)}"
+        logger.error(error_message)
         logger.exception("Full traceback:")
-        self.update_state(state="FAILURE", meta={'status': f"Error during update process: {str(e)}"})
-    finally:
-        logger.info("Remove duplicates process completed.")
-        self.update_state(state="SUCCESS", meta={'status': "Remove duplicates process completed"})
+        self.update_state(state="FAILURE", meta={'status': error_message})
+        raise

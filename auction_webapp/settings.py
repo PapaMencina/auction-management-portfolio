@@ -33,7 +33,7 @@ print(f"Django BASE_DIR: {BASE_DIR}")
 SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'django-insecure-8x1zg3y9w2m0v7l4k6j5h8f2d1s3a7p0q9e4r6t5y8u2i1o3p6')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.environ.get('DJANGO_DEBUG', 'True') == 'True'
+DEBUG = os.environ.get('DJANGO_DEBUG', 'False') == 'True'
 
 ALLOWED_HOSTS = ['auction-management-system-877a79758b85.herokuapp.com', 'localhost', '127.0.0.1', '0.0.0.0']
 
@@ -71,6 +71,7 @@ CACHES = {
         "LOCATION": REDIS_URL,
         "OPTIONS": {
             "CLIENT_CLASS": "django_redis.client.DefaultClient",
+            "CONNECTION_POOL_KWARGS": {"max_connections": 50},  # Increased pool size
         }
     }
 }
@@ -140,6 +141,10 @@ if 'DATABASE_URL' in os.environ:
             ssl_require=True
         )
     }
+    # Add PostgreSQL-specific options
+    DATABASES['default']['OPTIONS'] = {
+        'MAX_CONNS': 20,  # Adjust this based on your database plan and expected load
+    }
 else:
     # Local development database
     DATABASES = {
@@ -148,6 +153,9 @@ else:
             'NAME': BASE_DIR / 'db.sqlite3',
         }
     }
+
+# Set CONN_MAX_AGE to 0 for both environments
+DATABASES['default']['CONN_MAX_AGE'] = 0
 
 # Password validation
 # https://docs.djangoproject.com/en/5.0/ref/settings/#auth-password-validators
@@ -250,9 +258,6 @@ MEDIA_ROOT = BASE_DIR / 'media'
 # Add these lines for HiBid-related settings
 DEFAULT_HIBID_IMAGE_PATH = BASE_DIR / 'auction' / 'resources' / 'hibid_stock' / 'default_image.jpg'
 LOGO_702_PATH = BASE_DIR / 'auction' / 'resources' / 'bid_stock_photo' / '702_logo.png'
-
-# Database configuration for async operations
-DATABASES['default']['CONN_MAX_AGE'] = 0
 
 # Celery configuration
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True

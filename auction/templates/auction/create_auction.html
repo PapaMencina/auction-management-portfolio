@@ -50,36 +50,37 @@
     }
 
     function pollTaskStatus(taskId) {
-        const intervalId = setInterval(async () => {
-            try {
-                const response = await fetch(`/auction/check-task-status/${taskId}/`);
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                const data = await response.json();
-                
-                console.log('Task status data:', data);
-                
-                updateUI(data.state, data.status, data.details);
-                
-                if (data.state === 'SUCCESS' || data.state === 'FAILURE') {
+        const intervalId = setInterval(() => {
+            fetch(`/auction/check-task-status/${taskId}/`)
+                .then(response => response.json())
+                .then(data => {
+                    console.log('Task status data:', data);
+                    updateUI(data.state, data.message, data.result);
+                    if (data.state === 'SUCCESS') {
+                        clearInterval(intervalId);
+                        hideSpinner();
+                        enableSubmitButton();
+                        displayResults(data.result);
+                    } else if (data.state === 'FAILURE') {
+                        clearInterval(intervalId);
+                        hideSpinner();
+                        enableSubmitButton();
+                        displayError(data.result);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error polling task status:', error);
+                    updateUI('ERROR', 'Failed to check task status', error.message);
                     clearInterval(intervalId);
                     hideSpinner();
                     enableSubmitButton();
-                }
-            } catch (error) {
-                console.error('Error polling task status:', error);
-                updateUI('ERROR', 'Failed to check task status', error.message);
-                clearInterval(intervalId);
-                hideSpinner();
-                enableSubmitButton();
-            }
+                });
         }, 5000);
     }
 
-    function updateUI(state, status, details) {
+    function updateUI(state, message, details) {
         const statusMessage = document.getElementById('status-message');
-        let displayMessage = `Status: ${state} - ${status}`;
+        let displayMessage = `Status: ${state} - ${message}`;
         if (details) {
             displayMessage += `<br>Details: ${details}`;
         }
@@ -90,6 +91,24 @@
             state === 'FAILURE' ? 'text-red-600' : 
             'text-gray-600'
         );
+    }
+
+    function displayResults(result) {
+        const resultsDiv = document.createElement('div');
+        resultsDiv.innerHTML = `
+            <h3 class="text-lg font-semibold mt-4">Auction Creation Completed</h3>
+            <p>${result}</p>
+        `;
+        document.getElementById('status-message').appendChild(resultsDiv);
+    }
+
+    function displayError(message) {
+        const errorDiv = document.createElement('div');
+        errorDiv.innerHTML = `
+            <h3 class="text-lg font-semibold mt-4 text-red-600">Error Occurred</h3>
+            <p>${message}</p>
+        `;
+        document.getElementById('status-message').appendChild(errorDiv);
     }
 
     function showSpinner() {
@@ -112,23 +131,29 @@
         submitButton.classList.remove('opacity-50', 'cursor-not-allowed');
     }
 
+    function clearPreviousResults() {
+        const statusMessage = document.getElementById('status-message');
+        statusMessage.innerHTML = '';
+    }
+
     document.addEventListener('DOMContentLoaded', function() {
         const form = document.getElementById('create-auction-form');
         const submitButton = document.getElementById('submit-button');
-        const statusMessage = document.getElementById('status-message');
 
         form.addEventListener('submit', function(e) {
             e.preventDefault();
-            const auctionId = document.getElementById('auction_title').value;
+            const auctionTitle = document.getElementById('auction_title').value;
             
-            if (submitButton.dataset.processingAuctionId === auctionId) {
+            if (submitButton.dataset.processingAuctionId === auctionTitle) {
                 updateUI('WARNING', 'This auction is already being processed', 'Please wait for it to complete.');
                 return;
             }
 
+            clearPreviousResults();
+
             const formData = new FormData(form);
             disableSubmitButton();
-            submitButton.dataset.processingAuctionId = auctionId;
+            submitButton.dataset.processingAuctionId = auctionTitle;
             showSpinner();
             
             updateUI('PROCESSING', 'Creating auction...', '');

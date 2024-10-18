@@ -144,27 +144,30 @@ def create_auction_view(request):
     if request.method == 'POST':
         try:
             auction_title = request.POST.get('auction_title')
-            ending_date = request.POST.get('ending_date')  # Keep as string
+            ending_date = request.POST.get('ending_date')
             selected_warehouse = request.POST.get('selected_warehouse')
 
             if not all([auction_title, ending_date, selected_warehouse]):
                 return JsonResponse({'error': 'Missing required fields'}, status=400)
 
-            # Parse the date here to validate it
             try:
+                # Validate the date format
                 datetime.strptime(ending_date, '%Y-%m-%d')
             except ValueError:
                 return JsonResponse({'error': 'Invalid date format. Use YYYY-MM-DD.'}, status=400)
 
-            # Pass the date as a string to the Celery task
+            # Start the Celery task
             task = create_auction_task.delay(auction_title, ending_date, selected_warehouse)
 
             logger.info(f"Auction creation task started for {auction_title}")
-            return JsonResponse({'message': 'Auction creation process started', 'task_id': task.id})
+            return JsonResponse({
+                'message': 'Auction creation process started',
+                'task_id': task.id
+            })
         except Exception as e:
             logger.error(f"Error starting auction creation task: {str(e)}")
             logger.error(traceback.format_exc())
-            return JsonResponse({'error': 'Failed to start auction creation task', 'details': str(e)}, status=500)
+            return JsonResponse({'error': str(e)}, status=500)
 
     warehouses = list(warehouse_data.keys())
     return render(request, 'auction/create_auction.html', {
@@ -191,6 +194,9 @@ def void_unpaid_view(request):
             event_id = data.get('auction_id')
             upload_choice = int(data.get('upload_choice'))
 
+            if not all([warehouse, event_id, upload_choice is not None]):
+                return JsonResponse({'error': 'Missing required fields'}, status=400)
+
             today = timezone.now().date()
             event = Event.objects.filter(
                 event_id=event_id,
@@ -201,15 +207,19 @@ def void_unpaid_view(request):
             if not event:
                 return JsonResponse({'error': 'Invalid Auction ID or auction has not ended yet.'}, status=400)
 
-            task_id = void_unpaid_main(event_id, upload_choice, warehouse)
+            task = void_unpaid_main.delay(event_id, upload_choice, warehouse)
 
-            return JsonResponse({'message': 'Void unpaid process started', 'task_id': task_id})
+            logger.info(f"Void unpaid task started for event {event_id}")
+            return JsonResponse({
+                'message': 'Void unpaid process started',
+                'task_id': task.id
+            })
 
         except json.JSONDecodeError:
             return JsonResponse({'error': 'Invalid JSON data'}, status=400)
         except Exception as e:
             logger.exception("Unexpected error in void_unpaid_view")
-            return JsonResponse({'error': f'An unexpected error occurred: {str(e)}'}, status=500)
+            return JsonResponse({'error': str(e)}, status=500)
 
 @login_required
 def remove_duplicates_view(request):
@@ -238,13 +248,31 @@ def auction_formatter_view(request):
     auctions = get_auction_numbers(request)
 
     if request.method == 'POST':
-        auction_id = request.POST.get('auction_id')
-        selected_warehouse = request.POST.get('selected_warehouse')
-        starting_price = request.POST.get('starting_price')
+        try:
+            auction_id = request.POST.get('auction_id')
+            selected_warehouse = request.POST.get('selected_warehouse')
+            starting_price = request.POST.get('starting_price')
 
-        task = auction_formatter_task.delay(auction_id, selected_warehouse, starting_price)
-        
-        return JsonResponse({'message': 'Auction formatter process started', 'task_id': task.id})
+            if not all([auction_id, selected_warehouse, starting_price]):
+                return JsonResponse({'error': 'Missing required fields'}, status=400)
+
+            try:
+                starting_price = float(starting_price)
+                if starting_price <= 0:
+                    raise ValueError("Starting price must be greater than 0")
+            except ValueError as e:
+                return JsonResponse({'error': f'Invalid starting price: {str(e)}'}, status=400)
+
+            task = auction_formatter_task.delay(auction_id, selected_warehouse, starting_price)
+            
+            logger.info(f"Auction formatter task started for auction {auction_id}")
+            return JsonResponse({
+                'message': 'Auction formatter process started',
+                'task_id': task.id
+            })
+        except Exception as e:
+            logger.exception(f"Error starting auction formatter task for auction {auction_id}")
+            return JsonResponse({'error': str(e)}, status=500)
 
     context = {
         'warehouses': warehouses,
@@ -324,26 +352,28 @@ def check_task_status(request, task_id):
     task = AsyncResult(task_id)
     response = {
         'state': task.state,
-        'status': '',
-        'details': ''
+        'status': task.state,  # We'll use this for consistency with the frontend
+        'message': '',
+        'result': None
     }
     
     if task.state == 'PENDING':
-        response['status'] = 'Task is waiting for execution'
+        response['message'] = 'Task is waiting for execution'
     elif task.state == 'STARTED':
-        response['status'] = 'Task has been started'
+        response['message'] = 'Task has been started'
     elif task.state == 'SUCCESS':
-        response['status'] = 'Task completed successfully'
-        response['details'] = str(task.result)
+        response['message'] = 'Task completed successfully'
+        response['result'] = str(task.result)
     elif task.state == 'FAILURE':
-        response['status'] = 'Task failed'
-        response['details'] = str(task.result)
+        response['message'] = 'Task failed'
+        response['result'] = str(task.result)
     else:
-        response['status'] = 'Task is in progress'
+        response['message'] = 'Task is in progress'
         if isinstance(task.info, dict):
-            response['details'] = task.info.get('status', '')
+            response['message'] = task.info.get('status', '')
+            response['result'] = task.info.get('result', '')
         else:
-            response['details'] = str(task.info)
-    
+            response['message'] = str(task.info)
+
     return JsonResponse(response)
     

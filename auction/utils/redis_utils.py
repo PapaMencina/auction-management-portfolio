@@ -7,15 +7,17 @@ logger = logging.getLogger(__name__)
 
 class RedisTaskStatus:
     @staticmethod
-    def set_status(task_id, status, message):
+    def set_status(task_id, status, message, progress=None):
         try:
-            data = json.dumps({
+            data = {
                 'status': status,
                 'message': message,
                 'timestamp': int(time.time())
-            })
-            settings.REDIS_CONN.setex(f"task:{task_id}", 86400, data)  # Expire after 24 hours
-            logger.info(f"Successfully set status for task {task_id}: {status}")
+            }
+            if progress is not None:
+                data['progress'] = progress
+            settings.REDIS_CONN.setex(f"task:{task_id}", 86400, json.dumps(data))  # Expire after 24 hours
+            logger.info(f"Successfully set status for task {task_id}: {status}, progress: {progress}")
         except Exception as e:
             logger.error(f"Error setting Redis status for task {task_id}: {e}")
             logger.exception("Full traceback:")

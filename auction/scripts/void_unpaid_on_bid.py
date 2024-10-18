@@ -8,7 +8,7 @@ import requests
 import json
 import logging
 import traceback
-from celery import shared_task
+from celery import shared_task, current_task
 from io import StringIO
 from playwright.sync_api import sync_playwright, expect
 from datetime import datetime
@@ -81,15 +81,36 @@ async def export_csv(page, event_id):
         return None
 
 def void_unpaid_main(event_id, upload_choice, warehouse, task_id):
-    logger.info(f"Starting void_unpaid_main for event_id: {event_id}, upload_choice: {upload_choice}, warehouse: {warehouse}")
-    config_manager.load_config(config_path)
-    config_manager.set_active_warehouse(warehouse)
-    
-    RedisTaskStatus.set_status(task_id, "STARTED", f"Starting void unpaid process for event {event_id}")
-    
-    asyncio.run(start_playwright_process(event_id, upload_choice, task_id))
-    logger.info("Finished void_unpaid_main")
-    return task_id
+    try:
+        logger.info(f"Starting void_unpaid_main for event_id: {event_id}, upload_choice: {upload_choice}, warehouse: {warehouse}")
+        current_task.update_state(state="STARTED", meta={'status': f"Starting void unpaid process for event {event_id}"})
+
+        config_manager.load_config(config_path)
+        config_manager.set_active_warehouse(warehouse)
+        current_task.update_state(state="PROGRESS", meta={'status': f"Configured for warehouse: {warehouse}"})
+
+        RedisTaskStatus.set_status(task_id, "STARTED", f"Starting void unpaid process for event {event_id}")
+
+        try:
+            asyncio.run(start_playwright_process(event_id, upload_choice, task_id))
+        except Exception as e:
+            logger.error(f"Error in start_playwright_process: {str(e)}")
+            current_task.update_state(state="FAILURE", meta={'status': f"Error in void unpaid process: {str(e)}"})
+            RedisTaskStatus.set_status(task_id, "ERROR", f"Error in void unpaid process: {str(e)}")
+            raise
+
+        logger.info("Finished void_unpaid_main successfully")
+        current_task.update_state(state="SUCCESS", meta={'status': f"Void unpaid process completed for event {event_id}"})
+        RedisTaskStatus.set_status(task_id, "COMPLETED", f"Void unpaid process completed for event {event_id}")
+
+        return task_id
+
+    except Exception as e:
+        error_message = f"Unexpected error in void_unpaid_main: {str(e)}"
+        logger.error(error_message)
+        current_task.update_state(state="FAILURE", meta={'status': error_message})
+        RedisTaskStatus.set_status(task_id, "ERROR", error_message)
+        raise
 
 async def login(page, username, password):
     """Logs in to the auction site using provided credentials."""
@@ -161,81 +182,74 @@ async def start_playwright_process(event_id, upload_choice, task_id):
             context = await browser.new_context()
             page = await context.new_page()
             
+            current_task.update_state(state="PROGRESS", meta={'status': "Logging in to the auction site"})
             RedisTaskStatus.set_status(task_id, "IN_PROGRESS", "Logging in to the auction site")
-            # Login process
+            
             await page.goto(login_url)
             username = config_manager.get_warehouse_var("bid_username")
             password = config_manager.get_warehouse_var("bid_password")
             if username is None or password is None:
-                logger.error("Failed to retrieve login credentials from config.")
-                RedisTaskStatus.set_status(task_id, "ERROR", "Failed to retrieve login credentials")
-                return
+                raise ValueError("Failed to retrieve login credentials from config.")
+            
             login_success = await login(page, username, password)
             if not login_success:
-                logger.error("Login failed. Aborting process.")
-                RedisTaskStatus.set_status(task_id, "ERROR", "Login failed")
-                return
+                raise Exception("Login failed. Aborting process.")
 
+            current_task.update_state(state="PROGRESS", meta={'status': "Navigating to report page"})
             RedisTaskStatus.set_status(task_id, "IN_PROGRESS", "Navigating to report page")
-            # Navigate to report page
             await page.goto(report_url)
             try:
                 await page.wait_for_selector("#ReportResults", state="visible", timeout=30000)
             except:
-                logger.error(f"Timeout waiting for report page. Current URL: {page.url}")
                 if "Account/LogOn" in page.url:
-                    logger.info("Redirected to login page. Session might have expired. Attempting to log in again...")
+                    current_task.update_state(state="PROGRESS", meta={'status': "Re-attempting login"})
                     RedisTaskStatus.set_status(task_id, "IN_PROGRESS", "Re-attempting login")
                     login_success = await login(page, username, password)
                     if not login_success:
-                        logger.error("Login failed. Aborting process.")
-                        RedisTaskStatus.set_status(task_id, "ERROR", "Login failed on re-attempt")
-                        return
+                        raise Exception("Login failed on re-attempt. Aborting process.")
                     await page.goto(report_url)
-                    try:
-                        await page.wait_for_selector("#ReportResults", state="visible", timeout=30000)
-                    except:
-                        logger.error(f"Failed to load report page after re-login. Current URL: {page.url}")
-                        RedisTaskStatus.set_status(task_id, "ERROR", "Failed to load report page after re-login")
-                        return
+                    await page.wait_for_selector("#ReportResults", state="visible", timeout=30000)
+                else:
+                    raise Exception(f"Failed to load report page. Current URL: {page.url}")
 
             if not await check_login_status(page):
-                logger.error("Not logged in on report page. Aborting process.")
-                RedisTaskStatus.set_status(task_id, "ERROR", "Not logged in on report page")
-                return
+                raise Exception("Not logged in on report page. Aborting process.")
 
-            # Export CSV first
-            logger.info("Exporting CSV...")
+            current_task.update_state(state="PROGRESS", meta={'status': "Exporting CSV"})
             RedisTaskStatus.set_status(task_id, "IN_PROGRESS", "Exporting CSV")
             csv_content = await export_csv(page, event_id)
 
             if csv_content:
-                logger.info("CSV exported successfully. Uploading to Airtable...")
+                current_task.update_state(state="PROGRESS", meta={'status': "Uploading to Airtable"})
                 RedisTaskStatus.set_status(task_id, "IN_PROGRESS", "Uploading to Airtable")
                 await send_to_airtable(upload_choice, csv_content)
             else:
-                logger.error("CSV content not set due to an error. Skipping Upload to Airtable.")
-                RedisTaskStatus.set_status(task_id, "ERROR", "Failed to export CSV")
-                return  # Stop the process if CSV export fails
+                raise Exception("CSV content not set due to an error. Skipping Upload to Airtable.")
 
-            # Now void the transactions
-            logger.info("Starting to void unpaid transactions...")
+            current_task.update_state(state="PROGRESS", meta={'status': "Voiding unpaid transactions"})
             RedisTaskStatus.set_status(task_id, "IN_PROGRESS", "Voiding unpaid transactions")
             await void_unpaid_transactions(page, report_url, task_id)
 
     except Exception as e:
-        logger.exception(f"An error occurred in start_playwright_process: {str(e)}")
-        RedisTaskStatus.set_status(task_id, "ERROR", f"An error occurred: {str(e)}")
+        error_message = f"An error occurred in start_playwright_process: {str(e)}"
+        logger.exception(error_message)
+        current_task.update_state(state="FAILURE", meta={'status': error_message})
+        RedisTaskStatus.set_status(task_id, "ERROR", error_message)
+        raise
     finally:
         logger.info("Closing browser")
         if 'browser' in locals():
             await browser.close()
         if csv_content:
-            logger.info(f"Process completed. CSV data saved to database for event {event_id}.")
-            RedisTaskStatus.set_status(task_id, "COMPLETED", f"Process completed for event {event_id}")
+            success_message = f"Process completed. CSV data saved to database for event {event_id}."
+            logger.info(success_message)
+            current_task.update_state(state="SUCCESS", meta={'status': success_message})
+            RedisTaskStatus.set_status(task_id, "COMPLETED", success_message)
         else:
-            logger.info("Process completed, but CSV data was not saved.")
-            RedisTaskStatus.set_status(task_id, "COMPLETED", "Process completed, but CSV data was not saved")
+            warning_message = "Process completed, but CSV data was not saved."
+            logger.warning(warning_message)
+            current_task.update_state(state="SUCCESS", meta={'status': warning_message})
+            RedisTaskStatus.set_status(task_id, "COMPLETED", warning_message)
 
 async def upload_to_airtable(records_batches, headers, csv_filepath):
     all_batches_successful = True

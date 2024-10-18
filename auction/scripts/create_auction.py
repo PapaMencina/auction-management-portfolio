@@ -469,36 +469,38 @@ class SharedEvents:
 
 async def create_auction_main(auction_title, ending_date, selected_warehouse, task_id):
     try:
-        current_task.update_state(state="STARTED", meta={'status': f"Starting auction creation for {auction_title}"})
+        current_task.update_state(state="STARTED", meta={'status': f"Initiating auction creation for '{auction_title}'"})
         
         logger.info(f"Starting create_auction_main for auction: {auction_title}, warehouse: {selected_warehouse}")
 
         config_manager.set_active_warehouse(selected_warehouse)
-        current_task.update_state(state='PROGRESS', meta={'status': "Warehouse configuration set"})
+        current_task.update_state(state='PROGRESS', meta={'status': f"Warehouse configuration set to {selected_warehouse}"})
 
         month_formatted_date, bid_formatted_ending_date = format_date(ending_date)
-        current_task.update_state(state='PROGRESS', meta={'status': f"Date formatting completed: {month_formatted_date}, {bid_formatted_ending_date}"})
+        current_task.update_state(state='PROGRESS', meta={'status': f"Auction dates formatted: {month_formatted_date}, ending on {bid_formatted_ending_date}"})
 
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True)
             context = await browser.new_context()
             page = await context.new_page()
 
-            current_task.update_state(state='PROGRESS', meta={'status': "Browser launched"})
+            current_task.update_state(state='PROGRESS', meta={'status': "Browser launched for auction creation"})
 
             formatted_start_date = datetime.now().strftime('%m/%d/%Y')
-            current_task.update_state(state='PROGRESS', meta={'status': f"Getting auction image for date: {month_formatted_date}"})
+            current_task.update_state(state='PROGRESS', meta={'status': f"Retrieving auction image for {month_formatted_date}"})
 
             event_image = await get_image(page, month_formatted_date, selected_warehouse)
             if not event_image:
                 raise Exception("Failed to download the event image")
 
-            current_task.update_state(state='PROGRESS', meta={'status': f"Image downloaded: {event_image}"})
+            current_task.update_state(state='PROGRESS', meta={'status': "Auction image downloaded successfully"})
 
             event_id = await create_auction(page, auction_title, event_image, formatted_start_date, 
                                             bid_formatted_ending_date, selected_warehouse)
             if not event_id:
                 raise Exception("Failed to obtain event ID")
+
+            current_task.update_state(state='PROGRESS', meta={'status': f"Auction created with ID: {event_id}"})
 
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         event_data = {
@@ -512,14 +514,18 @@ async def create_auction_main(auction_title, ending_date, selected_warehouse, ta
         save_success = await save_event_to_database(event_data)
         if not save_success:
             logger.error("Failed to save event to database")
+            raise Exception("Failed to save event to database")
         else:
             logger.info(f"Event {event_id} created and saved successfully")
         
+        current_task.update_state(state='SUCCESS', meta={'status': f"Auction '{auction_title}' (ID: {event_id}) created successfully"})
         return event_id
 
     except Exception as e:
-        logger.error(f"Error in create_auction_main: {str(e)}")
+        error_message = f"Error in create_auction_main: {str(e)}"
+        logger.error(error_message)
         logger.error(traceback.format_exc())
+        current_task.update_state(state='FAILURE', meta={'status': error_message})
         raise
 
 if __name__ == "__main__":

@@ -79,31 +79,57 @@ function pollTaskStatus(taskId) {
         fetch(`/auction/check-task-status/${taskId}/`)
             .then(response => response.json())
             .then(data => {
-                if (data.error) {
-                    throw new Error(data.error);
-                }
-                updateUI(data.status, data.message);
-                if (data.status === 'COMPLETED' || data.status === 'ERROR') {
+                console.log('Task status data:', data);
+                updateUI(data.state, data.message);
+                if (data.state === 'SUCCESS') {
                     clearInterval(intervalId);
                     hideSpinner();
                     enableSubmitButton();
+                    displayResults(data.result);
+                } else if (data.state === 'FAILURE') {
+                    clearInterval(intervalId);
+                    hideSpinner();
+                    enableSubmitButton();
+                    displayError(data.result);
                 }
             })
             .catch(error => {
-                console.error('Error:', error);
-                updateUI('ERROR', `Error checking task status: ${error.message}`);
+                console.error('Error polling task status:', error);
+                updateUI('ERROR', `Failed to check task status: ${error.message}`);
                 clearInterval(intervalId);
                 hideSpinner();
                 enableSubmitButton();
             });
-    }, 5000); // Poll every 5 seconds
+    }, 5000);
 }
 
-function updateUI(status, message) {
+function updateUI(state, message) {
     const statusMessage = document.getElementById('status-message');
-    statusMessage.textContent = `Status: ${status} - ${message}`;
+    statusMessage.textContent = `Status: ${state} - ${message}`;
     statusMessage.classList.remove('text-gray-600', 'text-green-600', 'text-red-600');
-    statusMessage.classList.add(status === 'COMPLETED' ? 'text-green-600' : status === 'ERROR' ? 'text-red-600' : 'text-gray-600');
+    statusMessage.classList.add(
+        state === 'SUCCESS' ? 'text-green-600' : 
+        state === 'FAILURE' ? 'text-red-600' : 
+        'text-gray-600'
+    );
+}
+
+function displayResults(result) {
+    const resultsDiv = document.createElement('div');
+    resultsDiv.innerHTML = `
+        <h3 class="text-lg font-semibold mt-4">Void Unpaid Process Completed</h3>
+        <p>${result}</p>
+    `;
+    document.getElementById('status-message').appendChild(resultsDiv);
+}
+
+function displayError(message) {
+    const errorDiv = document.createElement('div');
+    errorDiv.innerHTML = `
+        <h3 class="text-lg font-semibold mt-4 text-red-600">Error Occurred</h3>
+        <p>${message}</p>
+    `;
+    document.getElementById('status-message').appendChild(errorDiv);
 }
 
 function showSpinner() {
@@ -126,6 +152,11 @@ function enableSubmitButton() {
     submitButton.classList.remove('opacity-50', 'cursor-not-allowed');
 }
 
+function clearPreviousResults() {
+    const statusMessage = document.getElementById('status-message');
+    statusMessage.innerHTML = '';
+}
+
 document.addEventListener('DOMContentLoaded', function() {
     const form = document.getElementById('void-unpaid-form');
     const submitButton = document.getElementById('submit-button');
@@ -140,6 +171,8 @@ document.addEventListener('DOMContentLoaded', function() {
             updateUI('WARNING', 'This auction is already being processed. Please wait for it to complete.');
             return;
         }
+
+        clearPreviousResults();
 
         const formData = new FormData(this);
         disableSubmitButton();
@@ -158,20 +191,23 @@ document.addEventListener('DOMContentLoaded', function() {
         })
         .then(response => response.json())
         .then(data => {
+            console.log('Response data:', data);
             if (data.error) {
                 throw new Error(data.error);
             }
             updateUI('STARTED', data.message || 'Void unpaid process started');
             if (data.task_id) {
+                console.log('Starting polling for task:', data.task_id);
                 pollTaskStatus(data.task_id);
             } else {
+                console.warn('No task_id received from server');
                 hideSpinner();
                 enableSubmitButton();
             }
         })
         .catch(error => {
             console.error('Error:', error);
-            updateUI('ERROR', 'An error occurred: ' + error.message);
+            updateUI('ERROR', `Error starting void unpaid process: ${error.message}`);
             hideSpinner();
             enableSubmitButton();
         });

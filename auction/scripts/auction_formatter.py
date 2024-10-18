@@ -21,8 +21,10 @@ from contextlib import asynccontextmanager
 # Django imports
 from django.core.wsgi import get_wsgi_application
 from django.conf import settings
+from django.db import transaction
 from asgiref.sync import sync_to_async, async_to_sync
 from celery import shared_task
+from celery.utils.log import get_task_logger
 
 # Third-party imports
 import aiohttp
@@ -36,6 +38,8 @@ from playwright.async_api import async_playwright
 from auction.models import Event, ImageMetadata, AuctionFormattedData
 from auction.utils import config_manager
 from auction.utils.redis_utils import RedisTaskStatus
+
+logger = get_task_logger(__name__)
 
 # Set up Django environment
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "auction_webapp.settings")
@@ -70,7 +74,7 @@ class FTPPool:
         # This method is now a no-op since connections are closed automatically
         pass
 
-ftp_pool = FTPPool(max_connections=5)  # Limit to 5 connections
+ftp_pool = FTPPool(max_connections=6)  # Limit to 6 connections
 
 class RateLimiter:
     def __init__(self, rate_limit, time_period):
@@ -241,7 +245,7 @@ async def get_airtable_records_list(BASE: str, TABLE: str, VIEW: str, gui_callba
     async with aiohttp.ClientSession() as session:
         while True:
             try:
-                url = f"https://api.airtable.com/v0/{BASE}/{TABLE}?view={VIEW}"
+                url = f"https://api.airtable.com/v0/{BASE}/{TABLE}?view={VIEW}&pageSize=100"  # Increased page size
                 if offset:
                     url += f"&offset={offset}"
 
@@ -263,7 +267,6 @@ async def get_airtable_records_list(BASE: str, TABLE: str, VIEW: str, gui_callba
 
     gui_callback(f"Retrieved a total of {len(response_list)} records from Airtable")
     return response_list
-
 
 def text_shortener(input_text: str, str_len: int) -> str:
     if len(input_text) > str_len:
@@ -432,6 +435,11 @@ def process_single_record(airtable_record: Dict, uploaded_image_urls: Dict[str, 
                 if 1 <= image_number <= 10:
                     new_record[f'Image_{image_number}'] = url
                     gui_callback(f"Assigned Image_{image_number}: {url}")
+            
+            # Check if Image_1 is present
+            if not new_record['Image_1']:
+                gui_callback(f"Warning: Image_1 is missing for record ID: {record_id}")
+                # You might want to add additional error handling or reporting here
         else:
             gui_callback(f"No uploaded images found for record ID: {record_id}")
 
@@ -472,6 +480,12 @@ class AuctionFormatter:
         self.selected_warehouse = selected_warehouse
         self.starting_price = starting_price
         self.task_id = task_id
+        self.rate_limiter = RateLimiter(rate_limit=10, time_period=1)
+        self.main_semaphore = asyncio.Semaphore(12)
+        self.image_semaphore = asyncio.Semaphore(4)
+        self.ftp_pool = FTPPool(max_connections=8)
+        self.total_steps = 6  # Total number of main steps in the process
+        self.current_step = 0
 
         config_manager.set_active_warehouse(selected_warehouse)
 
@@ -479,6 +493,14 @@ class AuctionFormatter:
         self.website_login_url = config_manager.get_global_var('website_login_url')
         self.import_csv_url = config_manager.get_global_var('import_csv_url')
         self.notification_email = config_manager.get_global_var('notification_email')
+    
+    def update_progress(self, message, sub_progress=None):
+        self.current_step += 1
+        progress = (self.current_step / self.total_steps) * 100
+        if sub_progress:
+            progress = ((self.current_step - 1) / self.total_steps * 100) + (sub_progress / self.total_steps)
+        self.gui_callback(message, progress)
+        RedisTaskStatus.set_status(self.task_id, "IN_PROGRESS", message, progress)
 
     def should_continue(self, message):
         if self.should_stop.is_set():
@@ -610,9 +632,13 @@ class AuctionFormatter:
 
                 self.gui_callback("Preparing CSV file for upload...")
                 temp_file = tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.csv', encoding='utf-8')
+                self.gui_callback(f"CSV content length before writing to file: {len(csv_content)}")
                 temp_file.write(csv_content)
                 temp_file_path = temp_file.name
                 temp_file.close()
+                with open(temp_file_path, 'r', encoding='utf-8') as f:
+                    file_content = f.read()
+                self.gui_callback(f"CSV file content length after writing: {len(file_content)}")
 
                 self.gui_callback("Selecting CSV file...")
                 try:
@@ -621,6 +647,8 @@ class AuctionFormatter:
                     self.gui_callback(f"Error: Failed to select CSV file. {str(e)}")
                     await self.save_screenshot(page, 'file_selection_error')
                     return False
+                
+                self.gui_callback(f"CSV file selected for upload: {temp_file_path}")
 
                 self.gui_callback("Clicking 'Upload CSV' button...")
                 try:
@@ -664,52 +692,43 @@ class AuctionFormatter:
 
     async def run_auction_formatter(self):
         try:
-            self.gui_callback(f"Starting auction formatting for event {self.auction_id}")
+            self.update_progress("Starting auction formatting")
 
             global ftp_pool
-            ftp_pool = FTPPool(max_connections=5)  # Initialize FTP pool
+            ftp_pool = FTPPool(max_connections=6)
+            self.update_progress("FTP pool initialized")
 
-            # Fetch Airtable records
             airtable_records = await self.fetch_airtable_records()
             if not airtable_records:
-                self.gui_callback("Failed to fetch Airtable records")
+                self.update_progress("Failed to fetch Airtable records")
                 return
 
-            # Process records and images
-            self.gui_callback("Processing records and images")
             processed_records, failed_records = await self.process_records_and_images(airtable_records)
+            self.update_progress("Records and images processed")
 
-            # Generate and save CSV content
-            self.gui_callback("Generating CSV content")
             cleaned_csv_content = await self.generate_and_clean_csv(processed_records)
             if not cleaned_csv_content:
-                self.gui_callback("Failed to generate CSV content")
+                self.update_progress("Failed to generate CSV content")
                 return
 
-            # Validate CSV content
-            self.gui_callback("Validating CSV content")
             validation_result = self.validate_csv_content(cleaned_csv_content)
             if not validation_result['valid']:
-                self.gui_callback(f"CSV validation failed: {validation_result['message']}")
+                self.update_progress(f"CSV validation failed: {validation_result['message']}")
                 return
 
-            # Save formatted data to the database
-            self.gui_callback("Saving formatted data to database")
             await self.save_formatted_data(cleaned_csv_content)
+            self.update_progress("Formatted data saved to database")
 
-            # Upload CSV to website
-            self.gui_callback("Uploading CSV to website")
             upload_success = await self.upload_csv_to_website_playwright(cleaned_csv_content)
             if upload_success:
-                self.gui_callback("Auction formatting process completed successfully")
+                self.update_progress("Auction formatting process completed successfully")
             else:
-                self.gui_callback("Failed to upload CSV to website")
+                self.update_progress("Failed to upload CSV to website")
 
         except Exception as e:
             error_message = f"Error in auction formatting process: {str(e)}"
-            self.gui_callback(error_message)
-            self.gui_callback(f"Traceback: {traceback.format_exc()}")
-            raise  # Re-raise the exception to mark the task as failed
+            self.update_progress(error_message)
+            raise
 
         finally:
             if 'ftp_pool' in globals():
@@ -758,9 +777,10 @@ class AuctionFormatter:
             return None
 
     async def process_records_and_images(self, airtable_records):
+        self.gui_callback(f"Starting to process {len(airtable_records)} records")
         processed_records = []
         failed_records = []
-        semaphore = asyncio.Semaphore(10)
+        semaphore = asyncio.Semaphore(12)
         batch_size = 100
         total_records = len(airtable_records)
 
@@ -772,63 +792,94 @@ class AuctionFormatter:
             
             self.gui_callback(f"Processing records {i+1} to {min(i+batch_size, total_records)} out of {total_records}")
             
-            image_tasks = [self.process_single_image(semaphore, record['id'], image_info[0].get("url"), count + 1)
-                        for record in batch
-                        for count, image_info in enumerate(record["fields"].get(f"Image {j}", []) for j in range(1, 11))
-                        if image_info]
+            image_tasks = []
+            for record in batch:
+                record_images = []
+                for j in range(1, 11):
+                    image_info = record["fields"].get(f"Image {j}", [])
+                    if image_info:
+                        record_images.append((j, image_info[0].get("url")))
+                # Sort images to ensure "image_1" is processed first
+                record_images.sort(key=lambda x: x[0])
+                for j, url in record_images:
+                    image_tasks.append(self.process_single_image(semaphore, record['id'], url, j))
             
             image_results = await asyncio.gather(*image_tasks)
+            self.gui_callback(f"Processed {len(image_results)} images for this batch")
             
             record_tasks = [self.process_single_record_async(semaphore, record, image_results) for record in batch]
             batch_results = await asyncio.gather(*record_tasks)
             
-            processed_records.extend([r['Data'] for r in batch_results if r.get('Success', False)])
-            failed_records.extend([r for r in batch_results if not r.get('Success', False)])
+            successful_records = [r for r in batch_results if r.get('Success', False)]
+            failed_batch_records = [r for r in batch_results if not r.get('Success', False)]
+            
+            processed_records.extend(successful_records)
+            failed_records.extend(failed_batch_records)
 
             progress = min((i + batch_size) / total_records * 100, 100)
             self.gui_callback(f"Processed {progress:.1f}% of records")
 
+        self.gui_callback(f"Total processed records: {len(processed_records)}")
+        self.gui_callback(f"Total failed records: {len(failed_records)}")
+        
+        if not processed_records:
+            error_message = "Error: No records were successfully processed."
+            self.gui_callback(error_message)
+            self.gui_callback("Dumping the first 5 failed records for debugging:")
+            for i, failed in enumerate(failed_records[:5]):
+                self.gui_callback(f"Failed record {i + 1}: {failed}")
+            raise ValueError(error_message)
+        
         return processed_records, failed_records
 
     async def generate_and_clean_csv(self, processed_records):
         RedisTaskStatus.set_status(self.task_id, "IN_PROGRESS", "Generating CSV content")
         try:
+            if not processed_records:
+                raise ValueError("No processed records to generate CSV.")
+            
             csv_content = self.generate_csv_content(processed_records)
+            if not csv_content.strip():
+                raise ValueError("Generated CSV content is empty.")
+            
             cleaned_csv_content = self.clean_csv_content(csv_content)
+            if not cleaned_csv_content.strip():
+                raise ValueError("Cleaned CSV content is empty.")
+            
             self.final_csv_content = cleaned_csv_content
+            self.gui_callback(f"CSV content generated successfully. Length: {len(cleaned_csv_content)}")
             return cleaned_csv_content
         except Exception as e:
-            RedisTaskStatus.set_status(self.task_id, "ERROR", f"Error generating CSV: {str(e)}")
-            self.gui_callback(f"Error generating CSV: {str(e)}")
-            return None
+            error_message = f"Error generating CSV: {str(e)}"
+            RedisTaskStatus.set_status(self.task_id, "ERROR", error_message)
+            self.gui_callback(error_message)
+            raise
 
     async def process_single_image(self, semaphore, record_id, url, image_number):
         async with semaphore:
-            try:
-                self.gui_callback(f"Processing image {image_number} for record {record_id}")
-                image_data = await download_image_async(url, self.gui_callback)
-                if image_data:
-                    processed_image_data = await process_image_async(image_data, self.gui_callback)
-                    if processed_image_data:
-                        file_name = f"{record_id}_{image_number}.jpg"
-                        uploaded_url = await upload_file_via_ftp_async(
-                            file_name, 
-                            processed_image_data, 
-                            self.gui_callback,
-                            self.should_stop
-                        )
-                        if uploaded_url:
-                            self.gui_callback(f"Uploaded image {image_number} for record {record_id}")
-                            return (record_id, uploaded_url, image_number)
-                        else:
-                            self.gui_callback(f"Failed to upload image {image_number} for record {record_id}")
-                    else:
-                        self.gui_callback(f"Failed to process image {image_number} for record {record_id}")
-                else:
-                    self.gui_callback(f"Failed to download image {image_number} for record {record_id}")
-            except Exception as e:
-                self.gui_callback(f"Error processing image {image_number} for record {record_id}: {str(e)}")
-            return None
+            image_semaphore = asyncio.Semaphore(4)
+            async with image_semaphore:
+                for attempt in range(3):
+                    try:
+                        self.gui_callback(f"Processing image {image_number} for record {record_id} (Attempt {attempt + 1})")
+                        image_data = await download_image_async(url, self.gui_callback)
+                        if image_data:
+                            processed_image_data = await process_image_async(image_data, self.gui_callback)
+                            if processed_image_data:
+                                file_name = f"{record_id}_{image_number}.jpg"
+                                uploaded_url = await upload_file_via_ftp_async(
+                                    file_name, 
+                                    processed_image_data, 
+                                    self.gui_callback,
+                                    self.should_stop
+                                )
+                                if uploaded_url:
+                                    self.gui_callback(f"Uploaded image {image_number} for record {record_id}")
+                                    return (record_id, uploaded_url, image_number)
+                        await asyncio.sleep(1)  # Short delay between attempts
+                    except Exception as e:
+                        self.gui_callback(f"Error processing image {image_number} for record {record_id} (Attempt {attempt + 1}): {str(e)}")
+                return None
 
     async def process_single_record_async(self, semaphore, record, image_results):
         async with semaphore:
@@ -902,27 +953,28 @@ class AuctionFormatter:
         writer = csv.DictWriter(output, fieldnames=expected_columns)
         writer.writeheader()
         
+        default_values = {
+            'EventID': self.auction_id,
+            'Seller': '702Auctions',
+            'ListingType': 'Auction',
+            'Currency': 'USD',
+            'Price': self.starting_price,
+            'Quantity': '1',
+            'IsTaxable': 'true',
+            'Bold': 'false',
+            'Highlight': 'false',
+            'ShippingOptions': '',
+            'AutoRelist': '0',
+            'GoodTilCanceled': 'false'
+        }
+        
         for record in processed_records:
-            new_record = {column: '' for column in expected_columns}  # Initialize all fields with empty strings
+            new_record = {column: str(record.get(column, '')) for column in expected_columns}
+            new_record.update(default_values)
             
-            # Populate fields from the processed record
-            for key, value in record.items():
-                if key in expected_columns:
-                    new_record[key] = str(value)  # Ensure all values are strings
-            
-            # Ensure correct formatting for specific fields
-            new_record['EventID'] = self.auction_id
-            new_record['Seller'] = new_record.get('Seller', '702Auctions')
-            new_record['ListingType'] = 'Auction'
-            new_record['Currency'] = 'USD'
-            new_record['Price'] = self.starting_price
-            new_record['Quantity'] = '1'
-            new_record['IsTaxable'] = 'true'
-            new_record['Bold'] = new_record.get('Bold', 'false').lower()
-            new_record['Highlight'] = new_record.get('Highlight', 'false').lower()
-            new_record['ShippingOptions'] = ''
-            new_record['AutoRelist'] = new_record.get('AutoRelist', '0')
-            new_record['GoodTilCanceled'] = new_record.get('GoodTilCanceled', 'false').lower()
+            # Convert boolean fields to lowercase strings
+            for field in ['Bold', 'Highlight', 'GoodTilCanceled']:
+                new_record[field] = str(new_record[field]).lower()
             
             writer.writerow(new_record)
         
@@ -940,7 +992,10 @@ class AuctionFormatter:
         # Ensure 'Category' is an integer
         df['Category'] = pd.to_numeric(df['Category'], errors='coerce').fillna(162733).astype(int).astype(str)
         
-        return df.to_csv(index=False)
+        # Use a more efficient method to write CSV
+        buffer = StringIO()
+        df.to_csv(buffer, index=False)
+        return buffer.getvalue()
 
     async def save_formatted_data(self, csv_content):
         await sync_to_async(AuctionFormattedData.objects.create)(
@@ -985,22 +1040,44 @@ class AuctionFormatter:
 @shared_task(bind=True)
 def auction_formatter_task(self, auction_id, selected_warehouse, starting_price):
     config_manager.set_active_warehouse(selected_warehouse)
-    event = Event.objects.get(event_id=auction_id)
-    
-    formatter = AuctionFormatter(
-        event=event,
-        gui_callback=lambda message: self.update_state(state='PROGRESS', meta={'status': message}),
-        should_stop=asyncio.Event(),
-        callback=lambda: None,
-        selected_warehouse=selected_warehouse,
-        starting_price=starting_price,
-        task_id=self.request.id
-    )
     
     try:
+        with transaction.atomic():
+            event = Event.objects.get(event_id=auction_id)
+        
+        def progress_callback(message, percentage=None):
+            state = 'PROGRESS'
+            meta = {'status': message}
+            if percentage is not None:
+                meta['progress'] = percentage
+            self.update_state(state=state, meta=meta)
+            logger.info(f"Progress: {message} - {percentage}%")
+        
+        formatter = AuctionFormatter(
+            event=event,
+            gui_callback=progress_callback,
+            should_stop=asyncio.Event(),
+            callback=lambda: None,
+            selected_warehouse=selected_warehouse,
+            starting_price=starting_price,
+            task_id=self.request.id
+        )
+        
         asyncio.run(formatter.run_auction_formatter())
-        return "Auction formatting completed successfully"
+        
+        final_message = "Auction formatting completed successfully"
+        RedisTaskStatus.set_status(self.request.id, "COMPLETED", final_message, 100)
+        logger.info(final_message)
+        return final_message
+
+    except Event.DoesNotExist:
+        error_message = f"Event with ID {auction_id} does not exist"
+        RedisTaskStatus.set_status(self.request.id, "FAILURE", error_message, 100)
+        logger.error(error_message)
+        raise
+
     except Exception as e:
         error_message = f"Error in auction formatting process: {str(e)}"
-        self.update_state(state='FAILURE', meta={'status': error_message})
+        RedisTaskStatus.set_status(self.request.id, "FAILURE", error_message, 100)
+        logger.error(f"{error_message}\n{traceback.format_exc()}")
         raise self.retry(exc=e, max_retries=3)
