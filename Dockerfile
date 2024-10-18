@@ -1,7 +1,6 @@
 # Use the official Playwright Docker image with Python 3.10
 FROM mcr.microsoft.com/playwright/python:v1.39.0-jammy
 
-# Set work directory
 WORKDIR /app
 
 # Copy the requirements file and install dependencies
@@ -14,7 +13,6 @@ RUN playwright install --with-deps
 # Copy the rest of the application code
 COPY . /app/
 
-# Expose the port (Heroku uses the $PORT environment variable)
 EXPOSE $PORT
 
 # Run the application
