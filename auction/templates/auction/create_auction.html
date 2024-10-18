@@ -60,23 +60,16 @@
                 
                 console.log('Task status data:', data);
                 
-                if (data.error) {
-                    console.error('Error checking task status:', data.error);
-                    updateUI('ERROR', data.error);
-                    clearInterval(intervalId);
-                    return;
-                }
+                updateUI(data.state, data.status, data.details);
                 
-                updateUI(data.status, data.message);
-                
-                if (data.status === 'COMPLETED' || data.status === 'ERROR') {
+                if (data.state === 'SUCCESS' || data.state === 'FAILURE') {
                     clearInterval(intervalId);
                     hideSpinner();
                     enableSubmitButton();
                 }
             } catch (error) {
                 console.error('Error polling task status:', error);
-                updateUI('ERROR', 'Failed to check task status');
+                updateUI('ERROR', 'Failed to check task status', error.message);
                 clearInterval(intervalId);
                 hideSpinner();
                 enableSubmitButton();
@@ -84,11 +77,19 @@
         }, 5000);
     }
 
-    function updateUI(status, message) {
+    function updateUI(state, status, details) {
         const statusMessage = document.getElementById('status-message');
-        statusMessage.textContent = `Status: ${status} - ${message}`;
+        let displayMessage = `Status: ${state} - ${status}`;
+        if (details) {
+            displayMessage += `<br>Details: ${details}`;
+        }
+        statusMessage.innerHTML = displayMessage;
         statusMessage.classList.remove('text-gray-600', 'text-green-600', 'text-red-600');
-        statusMessage.classList.add(status === 'COMPLETED' ? 'text-green-600' : status === 'ERROR' ? 'text-red-600' : 'text-gray-600');
+        statusMessage.classList.add(
+            state === 'SUCCESS' ? 'text-green-600' : 
+            state === 'FAILURE' ? 'text-red-600' : 
+            'text-gray-600'
+        );
     }
 
     function showSpinner() {
@@ -121,7 +122,7 @@
             const auctionId = document.getElementById('auction_title').value;
             
             if (submitButton.dataset.processingAuctionId === auctionId) {
-                updateUI('WARNING', 'This auction is already being processed. Please wait for it to complete.');
+                updateUI('WARNING', 'This auction is already being processed', 'Please wait for it to complete.');
                 return;
             }
 
@@ -130,7 +131,7 @@
             submitButton.dataset.processingAuctionId = auctionId;
             showSpinner();
             
-            updateUI('PROCESSING', 'Creating auction...');
+            updateUI('PROCESSING', 'Creating auction...', '');
 
             fetch(form.action, {
                 method: 'POST',
@@ -145,7 +146,7 @@
                 if (data.error) {
                     throw new Error(data.error);
                 }
-                updateUI('STARTED', data.message || 'Auction creation process started successfully.');
+                updateUI('STARTED', 'Auction creation process started successfully', data.message || '');
                 if (data.task_id) {
                     console.log('Starting polling for task:', data.task_id);
                     pollTaskStatus(data.task_id);
@@ -157,7 +158,7 @@
             })
             .catch(error => {
                 console.error('Error:', error);
-                updateUI('ERROR', 'Error starting auction creation: ' + error.message);
+                updateUI('ERROR', 'Error starting auction creation', error.message);
                 hideSpinner();
                 enableSubmitButton();
             });

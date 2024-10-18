@@ -22,6 +22,7 @@ from contextlib import asynccontextmanager
 from django.core.wsgi import get_wsgi_application
 from django.conf import settings
 from asgiref.sync import sync_to_async, async_to_sync
+from celery import shared_task
 
 # Third-party imports
 import aiohttp
@@ -346,110 +347,104 @@ def format_subtitle(auction_count: int, msrp: float, other_notes: str) -> str:
 def process_single_record(airtable_record: Dict, uploaded_image_urls: Dict[str, List[Tuple[str, int]]],
                           auction_id: str, selected_warehouse: str, starting_price: str, gui_callback) -> Dict:
     try:
-        new_record = {}
         record_id = airtable_record.get('id', '')
         gui_callback(f"Processing record ID: {record_id}")
 
-        # Extract fields from Airtable record
         fields = airtable_record.get('fields', {})
 
-        # Basic information
-        new_record["EventID"] = auction_id
-        new_record["LotNumber"] = fields.get("Lot Number", "")
-        new_record["Seller"] = "702Auctions"  # Replace with actual seller name if different
-        new_record["ConsignorNumber"] = ""  # Provide appropriate value or leave empty
-        new_record["Category"] = category_converter(fields.get("Category", ""))
-        new_record["Region"] = "88850842" if selected_warehouse == "Maule Warehouse" else "88850843" if selected_warehouse == "Sunrise Warehouse" else ""
-        new_record["ListingType"] = "Auction"
-        new_record["Currency"] = "USD"
+        new_record = {
+            'EventID': auction_id,
+            'LotNumber': str(fields.get("Lot Number", "")),
+            'Lot Number': str(fields.get("Lot Number", "")),  # Duplicate as in original
+            'Seller': "702Auctions",
+            'ConsignorNumber': "",
+            'Category_not_formatted': fields.get("Category", ""),
+            'Category': category_converter(fields.get("Category", "")),
+            'Region': "88850842" if selected_warehouse == "Maule Warehouse" else "88850843" if selected_warehouse == "Sunrise Warehouse" else "",
+            'ListingType': "Auction",
+            'Currency': "USD",
+            'Title': text_shortener("OFFSITE " + fields.get("Product Name", "") if selected_warehouse == "Sunrise Warehouse" else fields.get("Product Name", ""), 80),
+            'Subtitle': "",  # Will be set later
+            'Description': "",  # Will be set later
+            'Price': starting_price,
+            'Quantity': "1",
+            'IsTaxable': "TRUE",
+            'YouTubeID': "",
+            'PdfAttachments': "",
+            'Bold': "false",
+            'Badge': "",
+            'Highlight': "false",
+            'ShippingOptions': "",
+            'Duration': "",
+            'StartDTTM': "",
+            'EndDTTM': "",
+            'AutoRelist': "0",
+            'GoodTilCanceled': "false",
+            'Working Condition': fields.get("Working Condition", ""),
+            'UPC': "",  # Will be set later with specific logic
+            'Truck': fields.get("Shipment", ""),
+            'Source': "AMZ FC",
+            'Size': fields.get("Size", ""),
+            'Photo Taker': fields.get("Clerk", ""),
+            'Packaging': "",
+            'Other Notes': fields.get("Notes", ""),
+            'MSRP': fields.get("MSRP", "0.00"),
+            'Location': fields.get("Location", ""),
+            'Item Condition': fields.get("Condition", ""),
+            'ID': record_id,
+            'Amazon ID': fields.get("B00 ASIN", ""),
+            'AuctionCount': fields.get("Auction Count", ""),
+            'HibidSearchText': fields.get("Description", ""),
+            'FullTitle': fields.get("Product Name", "")
+        }
 
-        # Title and Subtitle
-        title = fields.get("Product Name", "")
-        if selected_warehouse == "Sunrise Warehouse":
-            title = "OFFSITE " + title
-        new_record["Title"] = text_shortener(title, 80)
-        auction_count = int(fields.get("Auction Count", 0))
-        msrp = float(fields.get("MSRP", 0))
-        other_notes = fields.get("Notes", "")
-        new_record["Subtitle"] = format_subtitle(auction_count, msrp, other_notes)
+        # UPC handling
+        upc = str(fields.get("UPC", ""))
+        new_record["UPC"] = "" if upc.lower() == 'nan' or not upc.isdigit() else upc
+
+        # Subtitle
+        new_record["Subtitle"] = format_subtitle(
+            int(new_record["AuctionCount"]),
+            float(new_record["MSRP"]),
+            new_record["Other Notes"]
+        )
 
         # Description
         description_parts = [
-            format_html_field("Description", fields.get("Product Name", "")),
-            format_html_field("MSRP", fields.get("MSRP", "")),
-            format_html_field("Condition", fields.get("Condition", "")),
-            format_html_field("Notes", fields.get("Notes", "")),
-            format_html_field("Other info", fields.get("Description", "")),
-            format_html_field("Lot Number", new_record["LotNumber"])
+            format_html_field("Description", new_record['FullTitle']),
+            format_html_field("MSRP", new_record['MSRP']),
+            format_html_field("Condition", new_record['Item Condition']),
+            format_html_field("Notes", new_record['Other Notes']),
+            format_html_field("Other info", new_record['HibidSearchText']),
+            format_html_field("Lot Number", new_record['LotNumber'])
         ]
         new_record["Description"] = ''.join(part for part in description_parts if part)
+        new_record["Description"] += "<br><b>Pickup Information:</b> This item is available for LOCAL PICKUP ONLY. No shipping available."
 
-        # Add pickup information
-        pickup_info = "<br><b>Pickup Information:</b> This item is available for LOCAL PICKUP ONLY. No shipping available."
-        new_record["Description"] += pickup_info
-
-        # Price and Quantity
-        new_record["Price"] = starting_price
-        new_record["Quantity"] = "1"
-
-        # Taxable
-        new_record["IsTaxable"] = "TRUE"
-
-        # Initialize Image fields
+        # Handle image URLs
         for i in range(1, 11):
             new_record[f"Image_{i}"] = ''
 
-        # Handle image URLs
         if record_id in uploaded_image_urls:
-            images = uploaded_image_urls[record_id]
-            sorted_images = sorted(images, key=lambda x: x[1])
+            gui_callback(f"Found uploaded images for record ID: {record_id}")
+            sorted_images = sorted(uploaded_image_urls[record_id], key=lambda x: x[1])
             for url, image_number in sorted_images:
                 if 1 <= image_number <= 10:
                     new_record[f'Image_{image_number}'] = url
                     gui_callback(f"Assigned Image_{image_number}: {url}")
         else:
             gui_callback(f"No uploaded images found for record ID: {record_id}")
-            # No images; fields remain empty
-
-        # Additional fields
-        new_record["YouTubeID"] = ""  # Provide value if available
-        new_record["PdfAttachments"] = ""  # Provide value if available
-        new_record["Bold"] = "false"
-        new_record["Badge"] = ""  # Provide value if available
-        new_record["Highlight"] = "false"
-        new_record["ShippingOptions"] = ""  # Leave it empty
-        new_record["PickupDetails"] = "Local Pickup ONLY"
-        new_record["Duration"] = ""  # Provide value if required
-        new_record["StartDTTM"] = ""  # Provide value if required
-        new_record["EndDTTM"] = ""  # Provide value if required
-        new_record["AutoRelist"] = "0"  # Changed from "No" to "0"
-        new_record["GoodTilCanceled"] = "false"
-        new_record["Working Condition"] = fields.get("Working Condition", "")
-        upc = str(fields.get("UPC", ""))
-        new_record["UPC"] = upc if upc.isdigit() else ""
-        new_record["Truck"] = fields.get("Shipment", "")
-        new_record["Source"] = "AMZ FC"
-        new_record["Size"] = fields.get("Size", "")
-        new_record["Photo Taker"] = fields.get("Clerk", "")
-        new_record["Packaging"] = ""  # Provide value if available
-        new_record["Other Notes"] = fields.get("Notes", "")
-        new_record["MSRP"] = fields.get("MSRP", "0.00")
-        new_record["Lot Number"] = new_record["LotNumber"]  # Duplicate field as per CSV
-        new_record["Location"] = fields.get("Location", "")
-        new_record["Item Condition"] = fields.get("Condition", "")
-        new_record["ID"] = record_id
-        new_record["Amazon ID"] = fields.get("B00 ASIN", "")
 
         gui_callback(f"Final new_record: {new_record}")
-        return {'Success': True, 'Data': new_record}
+        new_record['Success'] = True
+        return new_record
 
     except Exception as e:
         lot_number = fields.get('Lot Number', 'Unknown')
         error_message = f"Error processing Lot Number {lot_number}: {str(e)}"
         gui_callback(f"Error: {error_message}")
         gui_callback(f"Traceback: {traceback.format_exc()}")
-        return {'Success': False, 'LotNumber': lot_number, 'Failure Message': error_message}
-
+        return {'Lot Number': lot_number, 'Failure Message': error_message, 'Success': False}
 
 def get_event(event_id: str) -> Event:
     try:
@@ -472,7 +467,7 @@ class AuctionFormatter:
         self.event = event
         self.auction_id = event.event_id
         self.gui_callback = gui_callback
-        self.should_stop = should_stop
+        self.should_stop = should_stop if should_stop is not None else asyncio.Event()
         self.callback = callback
         self.selected_warehouse = selected_warehouse
         self.starting_price = starting_price
@@ -667,55 +662,83 @@ class AuctionFormatter:
                 if temp_file_path and os.path.exists(temp_file_path):
                     os.unlink(temp_file_path)
 
-    def run_auction_formatter(self):
-        async def async_run():
-            try:
-                self.gui_callback(f"Starting auction formatting for event {self.auction_id}")
+    async def run_auction_formatter(self):
+        try:
+            self.gui_callback(f"Starting auction formatting for event {self.auction_id}")
 
-                global ftp_pool
-                ftp_pool = FTPPool(max_connections=5)  # Initialize FTP pool
+            global ftp_pool
+            ftp_pool = FTPPool(max_connections=5)  # Initialize FTP pool
 
-                # Fetch Airtable records
-                airtable_records = await self.fetch_airtable_records()
-                if not airtable_records:
-                    self.gui_callback("Failed to fetch Airtable records")
-                    return
+            # Fetch Airtable records
+            airtable_records = await self.fetch_airtable_records()
+            if not airtable_records:
+                self.gui_callback("Failed to fetch Airtable records")
+                return
 
-                # Process records and images
-                self.gui_callback("Processing records and images")
-                processed_records, failed_records = await self.process_records_and_images(airtable_records)
+            # Process records and images
+            self.gui_callback("Processing records and images")
+            processed_records, failed_records = await self.process_records_and_images(airtable_records)
 
-                # Generate and save CSV content
-                self.gui_callback("Generating CSV content")
-                cleaned_csv_content = await self.generate_and_clean_csv(processed_records)
-                if not cleaned_csv_content:
-                    self.gui_callback("Failed to generate CSV content")
-                    return
+            # Generate and save CSV content
+            self.gui_callback("Generating CSV content")
+            cleaned_csv_content = await self.generate_and_clean_csv(processed_records)
+            if not cleaned_csv_content:
+                self.gui_callback("Failed to generate CSV content")
+                return
 
-                # Save formatted data to the database
-                self.gui_callback("Saving formatted data to database")
-                await self.save_formatted_data(cleaned_csv_content)
+            # Validate CSV content
+            self.gui_callback("Validating CSV content")
+            validation_result = self.validate_csv_content(cleaned_csv_content)
+            if not validation_result['valid']:
+                self.gui_callback(f"CSV validation failed: {validation_result['message']}")
+                return
 
-                # Upload CSV to website
-                self.gui_callback("Uploading CSV to website")
-                upload_success = await self.upload_csv_to_website_playwright(cleaned_csv_content)
-                if upload_success:
-                    self.gui_callback("Auction formatting process completed successfully")
-                else:
-                    self.gui_callback("Failed to upload CSV to website")
+            # Save formatted data to the database
+            self.gui_callback("Saving formatted data to database")
+            await self.save_formatted_data(cleaned_csv_content)
 
-            except Exception as e:
-                error_message = f"Error in auction formatting process: {str(e)}"
-                self.gui_callback(error_message)
-                self.gui_callback(f"Traceback: {traceback.format_exc()}")
-                raise  # Re-raise the exception to mark the task as failed
+            # Upload CSV to website
+            self.gui_callback("Uploading CSV to website")
+            upload_success = await self.upload_csv_to_website_playwright(cleaned_csv_content)
+            if upload_success:
+                self.gui_callback("Auction formatting process completed successfully")
+            else:
+                self.gui_callback("Failed to upload CSV to website")
 
-            finally:
-                if 'ftp_pool' in globals():
-                    await ftp_pool.close_all()
-                await sync_to_async(self.callback)()
+        except Exception as e:
+            error_message = f"Error in auction formatting process: {str(e)}"
+            self.gui_callback(error_message)
+            self.gui_callback(f"Traceback: {traceback.format_exc()}")
+            raise  # Re-raise the exception to mark the task as failed
 
-        return asyncio.run(async_run())
+        finally:
+            if 'ftp_pool' in globals():
+                await ftp_pool.close_all()
+            await sync_to_async(self.callback)()
+
+    def validate_csv_content(self, csv_content):
+        expected_columns = [
+            'EventID', 'LotNumber', 'Seller', 'ConsignorNumber', 'Category', 'Region',
+            'ListingType', 'Currency', 'Title', 'Subtitle', 'Description', 'Price',
+            'Quantity', 'IsTaxable', 'Image_1', 'Image_2', 'Image_3', 'Image_4',
+            'Image_5', 'Image_6', 'Image_7', 'Image_8', 'Image_9', 'Image_10',
+            'YouTubeID', 'PdfAttachments', 'Bold', 'Badge', 'Highlight', 'ShippingOptions',
+            'Duration', 'StartDTTM', 'EndDTTM', 'AutoRelist', 'GoodTilCanceled',
+            'Working Condition', 'UPC', 'Truck', 'Source', 'Size', 'Photo Taker',
+            'Packaging', 'Other Notes', 'MSRP', 'Lot Number', 'Location', 'Item Condition',
+            'ID', 'Amazon ID'
+        ]
+        
+        df = pd.read_csv(StringIO(csv_content))
+        csv_columns = df.columns.tolist()
+        
+        if csv_columns != expected_columns:
+            missing_columns = set(expected_columns) - set(csv_columns)
+            extra_columns = set(csv_columns) - set(expected_columns)
+            message = f"CSV columns do not match expected columns. Missing: {missing_columns}, Extra: {extra_columns}"
+            return {'valid': False, 'message': message}
+        
+        return {'valid': True, 'message': "CSV content is valid"}
 
     async def fetch_airtable_records(self):
         RedisTaskStatus.set_status(self.task_id, "IN_PROGRESS", "Fetching Airtable records")
@@ -739,16 +762,19 @@ class AuctionFormatter:
         failed_records = []
         semaphore = asyncio.Semaphore(10)
         batch_size = 100
+        total_records = len(airtable_records)
 
-        for i in range(0, len(airtable_records), batch_size):
+        for i in range(0, total_records, batch_size):
             if self.should_stop.is_set():
                 break
 
             batch = airtable_records[i:i+batch_size]
             
-            image_tasks = [self.process_single_image(semaphore, record['id'], image_info[0].get("url"), count)
+            self.gui_callback(f"Processing records {i+1} to {min(i+batch_size, total_records)} out of {total_records}")
+            
+            image_tasks = [self.process_single_image(semaphore, record['id'], image_info[0].get("url"), count + 1)
                         for record in batch
-                        for count, image_info in enumerate(record["fields"].get(f"Image {i}", []) for i in range(1, 11))
+                        for count, image_info in enumerate(record["fields"].get(f"Image {j}", []) for j in range(1, 11))
                         if image_info]
             
             image_results = await asyncio.gather(*image_tasks)
@@ -758,6 +784,9 @@ class AuctionFormatter:
             
             processed_records.extend([r['Data'] for r in batch_results if r.get('Success', False)])
             failed_records.extend([r for r in batch_results if not r.get('Success', False)])
+
+            progress = min((i + batch_size) / total_records * 100, 100)
+            self.gui_callback(f"Processed {progress:.1f}% of records")
 
         return processed_records, failed_records
 
@@ -776,6 +805,7 @@ class AuctionFormatter:
     async def process_single_image(self, semaphore, record_id, url, image_number):
         async with semaphore:
             try:
+                self.gui_callback(f"Processing image {image_number} for record {record_id}")
                 image_data = await download_image_async(url, self.gui_callback)
                 if image_data:
                     processed_image_data = await process_image_async(image_data, self.gui_callback)
@@ -788,15 +818,16 @@ class AuctionFormatter:
                             self.should_stop
                         )
                         if uploaded_url:
+                            self.gui_callback(f"Uploaded image {image_number} for record {record_id}")
                             return (record_id, uploaded_url, image_number)
                         else:
-                            self.gui_callback(f"Failed to upload image for record {record_id}, image number {image_number}")
+                            self.gui_callback(f"Failed to upload image {image_number} for record {record_id}")
                     else:
-                        self.gui_callback(f"Failed to process image for record {record_id}, image number {image_number}")
+                        self.gui_callback(f"Failed to process image {image_number} for record {record_id}")
                 else:
-                    self.gui_callback(f"Failed to download image for record {record_id}, image number {image_number}")
+                    self.gui_callback(f"Failed to download image {image_number} for record {record_id}")
             except Exception as e:
-                self.gui_callback(f"Error processing image for record {record_id}, image number {image_number}: {str(e)}")
+                self.gui_callback(f"Error processing image {image_number} for record {record_id}: {str(e)}")
             return None
 
     async def process_single_record_async(self, semaphore, record, image_results):
@@ -861,7 +892,7 @@ class AuctionFormatter:
             'Quantity', 'IsTaxable', 'Image_1', 'Image_2', 'Image_3', 'Image_4',
             'Image_5', 'Image_6', 'Image_7', 'Image_8', 'Image_9', 'Image_10',
             'YouTubeID', 'PdfAttachments', 'Bold', 'Badge', 'Highlight', 'ShippingOptions',
-            'PickupDetails', 'Duration', 'StartDTTM', 'EndDTTM', 'AutoRelist', 'GoodTilCanceled',
+            'Duration', 'StartDTTM', 'EndDTTM', 'AutoRelist', 'GoodTilCanceled',
             'Working Condition', 'UPC', 'Truck', 'Source', 'Size', 'Photo Taker',
             'Packaging', 'Other Notes', 'MSRP', 'Lot Number', 'Location', 'Item Condition',
             'ID', 'Amazon ID'
@@ -872,23 +903,28 @@ class AuctionFormatter:
         writer.writeheader()
         
         for record in processed_records:
+            new_record = {column: '' for column in expected_columns}  # Initialize all fields with empty strings
+            
+            # Populate fields from the processed record
+            for key, value in record.items():
+                if key in expected_columns:
+                    new_record[key] = str(value)  # Ensure all values are strings
+            
             # Ensure correct formatting for specific fields
-            record['ShippingOptions'] = ""
-            record['PickupDetails'] = "Local Pickup ONLY"
-            record['AutoRelist'] = record.get('AutoRelist', "0")
-            record['GoodTilCanceled'] = record.get('GoodTilCanceled', "false").lower()
-            record['Bold'] = record.get('Bold', "false").lower()
-            record['Highlight'] = record.get('Highlight', "false").lower()
-            record['IsTaxable'] = record.get('IsTaxable', "true").lower()
+            new_record['EventID'] = self.auction_id
+            new_record['Seller'] = new_record.get('Seller', '702Auctions')
+            new_record['ListingType'] = 'Auction'
+            new_record['Currency'] = 'USD'
+            new_record['Price'] = self.starting_price
+            new_record['Quantity'] = '1'
+            new_record['IsTaxable'] = 'true'
+            new_record['Bold'] = new_record.get('Bold', 'false').lower()
+            new_record['Highlight'] = new_record.get('Highlight', 'false').lower()
+            new_record['ShippingOptions'] = ''
+            new_record['AutoRelist'] = new_record.get('AutoRelist', '0')
+            new_record['GoodTilCanceled'] = new_record.get('GoodTilCanceled', 'false').lower()
             
-            # Fill missing values with empty strings and ensure all values are strings
-            for column in expected_columns:
-                if column not in record:
-                    record[column] = ''
-                else:
-                    record[column] = str(record[column])
-            
-            writer.writerow(record)
+            writer.writerow(new_record)
         
         return output.getvalue()
     
@@ -931,17 +967,40 @@ class AuctionFormatter:
 
             await browser.close()
 
-def auction_formatter_main(auction_id, selected_warehouse, starting_price, gui_callback, should_stop, callback, task_id=None):
-    config_manager.set_active_warehouse(selected_warehouse)
-    event = get_event(auction_id)
-    formatter = AuctionFormatter(event, gui_callback, should_stop, callback, selected_warehouse, starting_price, task_id)
+# def auction_formatter_main(auction_id, selected_warehouse, starting_price, gui_callback, should_stop, callback, task_id=None):
+#     config_manager.set_active_warehouse(selected_warehouse)
+#     event = get_event(auction_id)
+#     formatter = AuctionFormatter(event, gui_callback, should_stop, callback, selected_warehouse, starting_price, task_id)
     
-    async def run_formatter():
-        try:
-            await formatter.run_auction_formatter()
-        except Exception as e:
-            gui_callback(f"Error in auction_formatter_main: {str(e)}")
-            gui_callback(f"Traceback: {traceback.format_exc()}")
-            RedisTaskStatus.set_status(task_id, "ERROR", f"Error in auction formatting process: {str(e)}")
+#     async def run_formatter():
+#         try:
+#             await formatter.run_auction_formatter()
+#         except Exception as e:
+#             gui_callback(f"Error in auction_formatter_main: {str(e)}")
+#             gui_callback(f"Traceback: {traceback.format_exc()}")
+#             RedisTaskStatus.set_status(task_id, "ERROR", f"Error in auction formatting process: {str(e)}")
 
-    return run_formatter
+#     return run_formatter
+
+@shared_task(bind=True)
+def auction_formatter_task(self, auction_id, selected_warehouse, starting_price):
+    config_manager.set_active_warehouse(selected_warehouse)
+    event = Event.objects.get(event_id=auction_id)
+    
+    formatter = AuctionFormatter(
+        event=event,
+        gui_callback=lambda message: self.update_state(state='PROGRESS', meta={'status': message}),
+        should_stop=asyncio.Event(),
+        callback=lambda: None,
+        selected_warehouse=selected_warehouse,
+        starting_price=starting_price,
+        task_id=self.request.id
+    )
+    
+    try:
+        asyncio.run(formatter.run_auction_formatter())
+        return "Auction formatting completed successfully"
+    except Exception as e:
+        error_message = f"Error in auction formatting process: {str(e)}"
+        self.update_state(state='FAILURE', meta={'status': error_message})
+        raise self.retry(exc=e, max_retries=3)

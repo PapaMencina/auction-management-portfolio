@@ -2,7 +2,6 @@ import os
 from pyairtable import Api
 from pyairtable import Table
 import traceback
-import threading
 import random
 import math
 from auction.utils import config_manager
@@ -13,6 +12,7 @@ import sys
 import logging
 from django.core.wsgi import get_wsgi_application
 import time
+from celery import shared_task
 
 # Set up Django environment
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "auction_webapp.settings")
@@ -38,17 +38,19 @@ def get_valid_auctions(selected_warehouse):
         logger.exception("Full traceback:")
         return []
 
-def remove_duplicates_main(auction_number, target_msrp, warehouse_name, task_id):
+@shared_task(bind=True)
+def remove_duplicates_task(self, auction_number, target_msrp, warehouse_name):
+    task_id = self.request.id
     logger.info(f"Starting remove duplicates process for auction {auction_number}")
-    RedisTaskStatus.set_status(task_id, "STARTED", f"Starting remove duplicates process for auction {auction_number}")
+    self.update_state(state="STARTED", meta={'status': f"Starting remove duplicates process for auction {auction_number}"})
     
     valid_auctions = get_valid_auctions(warehouse_name)
     if auction_number not in valid_auctions:
         logger.warning(f"Auction {auction_number} is not a valid auction for {warehouse_name}. Aborting process.")
-        RedisTaskStatus.set_status(task_id, "ERROR", f"Auction {auction_number} is not valid for {warehouse_name}")
+        self.update_state(state="FAILURE", meta={'status': f"Auction {auction_number} is not valid for {warehouse_name}"})
         return
 
-    run_remove_dups(auction_number, target_msrp, warehouse_name, task_id)
+    run_remove_dups(self, auction_number, target_msrp, warehouse_name)
 
 def update_record_if_needed(record, auction_number, table):
     """Updates the record if it needs an update based on its auction listing status."""
@@ -72,15 +74,15 @@ def get_fields_to_update(record, auction_number):
     print(f"Auction {auction_number} already exists in record")
     return {}
 
-def update_records_in_airtable(auction_number, target_msrp, table, view_name, task_id):
+def update_records_in_airtable(self, auction_number, target_msrp, table, view_name):
     """Main function to update records in Airtable based on the auction number."""
     try:
         logger.info(f"Starting to update records for auction {auction_number}")
-        RedisTaskStatus.set_status(task_id, "IN_PROGRESS", f"Fetching records for auction {auction_number}")
+        self.update_state(state="PROGRESS", meta={'status': f"Fetching records for auction {auction_number}"})
         
         records = table.all(view=view_name, fields=['Product Name', 'Auctions', 'MSRP'])
         logger.info(f"Fetched {len(records)} records from Airtable")
-        RedisTaskStatus.set_status(task_id, "IN_PROGRESS", f"Fetched {len(records)} records from Airtable")
+        self.update_state(state="PROGRESS", meta={'status': f"Fetched {len(records)} records from Airtable"})
 
         groups = {}
         for record in records:
@@ -89,7 +91,7 @@ def update_records_in_airtable(auction_number, target_msrp, table, view_name, ta
                 groups.setdefault(product_name, []).append(record)
 
         logger.info(f"Grouped records into {len(groups)} unique product names")
-        RedisTaskStatus.set_status(task_id, "IN_PROGRESS", f"Grouped records into {len(groups)} unique product names")
+        self.update_state(state="PROGRESS", meta={'status': f"Grouped records into {len(groups)} unique product names"})
 
         update_count, total_msrp_reached = 0, 0
         total_groups = len(groups)
@@ -113,18 +115,18 @@ def update_records_in_airtable(auction_number, target_msrp, table, view_name, ta
             if i % (total_groups // 10) == 0:
                 progress = int((i / total_groups) * 100)
                 logger.info(f"Processed {i}/{total_groups} groups ({progress}%)")
-                RedisTaskStatus.set_status(task_id, "IN_PROGRESS", f"Processed {progress}% of groups")
+                self.update_state(state="PROGRESS", meta={'status': f"Processed {progress}% of groups"})
 
         logger.info(f"Auction {auction_number} has been added to {update_count} items with total MSRP of ${total_msrp_reached:.2f}")
-        RedisTaskStatus.set_status(task_id, "COMPLETED", f"Added auction {auction_number} to {update_count} items. Total MSRP: ${total_msrp_reached:.2f}")
+        self.update_state(state="SUCCESS", meta={'status': f"Added auction {auction_number} to {update_count} items. Total MSRP: ${total_msrp_reached:.2f}"})
     except Exception as e:
         logger.error(f"Error occurred: {e}")
         logger.exception("Full traceback:")
-        RedisTaskStatus.set_status(task_id, "ERROR", f"An error occurred: {str(e)}")
+        self.update_state(state="FAILURE", meta={'status': f"An error occurred: {str(e)}"})
 
-def run_remove_dups(auction_number, target_msrp, warehouse_name, task_id):
+def run_remove_dups(self, auction_number, target_msrp, warehouse_name):
     logger.info(f"Running remove_dups for auction {auction_number} in {warehouse_name}")
-    RedisTaskStatus.set_status(task_id, "IN_PROGRESS", f"Initializing remove_dups for auction {auction_number}")
+    self.update_state(state="PROGRESS", meta={'status': f"Initializing remove_dups for auction {auction_number}"})
     
     config_manager.set_active_warehouse(warehouse_name)
 
@@ -135,40 +137,27 @@ def run_remove_dups(auction_number, target_msrp, warehouse_name, task_id):
 
     if not all([AIRTABLE_TOKEN, AIRTABLE_INVENTORY_BASE_ID, AIRTABLE_INVENTORY_TABLE_ID, AIRTABLE_REMOVE_DUPS_VIEW]):
         logger.error("Missing Airtable configuration. Please check your config.json file.")
-        RedisTaskStatus.set_status(task_id, "ERROR", "Missing Airtable configuration")
+        self.update_state(state="FAILURE", meta={'status': "Missing Airtable configuration"})
         return
 
     logger.info("Airtable configuration loaded successfully")
-    RedisTaskStatus.set_status(task_id, "IN_PROGRESS", "Airtable configuration loaded")
+    self.update_state(state="PROGRESS", meta={'status': "Airtable configuration loaded"})
 
     try:
         table = Table(AIRTABLE_TOKEN, AIRTABLE_INVENTORY_BASE_ID, AIRTABLE_INVENTORY_TABLE_ID)
         logger.info("Airtable Table initialized successfully")
-        RedisTaskStatus.set_status(task_id, "IN_PROGRESS", "Airtable Table initialized")
+        self.update_state(state="PROGRESS", meta={'status': "Airtable Table initialized"})
     except Exception as e:
         logger.error(f"Failed to initialize Airtable: {str(e)}")
-        RedisTaskStatus.set_status(task_id, "ERROR", f"Failed to initialize Airtable: {str(e)}")
+        self.update_state(state="FAILURE", meta={'status': f"Failed to initialize Airtable: {str(e)}"})
         return
 
     try:
-        update_records_in_airtable(auction_number, target_msrp, table, AIRTABLE_REMOVE_DUPS_VIEW, task_id)
+        update_records_in_airtable(self, auction_number, target_msrp, table, AIRTABLE_REMOVE_DUPS_VIEW)
     except Exception as e:
         logger.error(f"An error occurred during the update process: {str(e)}")
         logger.exception("Full traceback:")
-        RedisTaskStatus.set_status(task_id, "ERROR", f"Error during update process: {str(e)}")
+        self.update_state(state="FAILURE", meta={'status': f"Error during update process: {str(e)}"})
     finally:
         logger.info("Remove duplicates process completed.")
-        RedisTaskStatus.set_status(task_id, "COMPLETED", "Remove duplicates process completed")
-
-if __name__ == '__main__':
-    import argparse
-    
-    parser = argparse.ArgumentParser(description="Remove duplicates in Airtable")
-    parser.add_argument("auction_number", help="Auction number")
-    parser.add_argument("target_msrp", type=float, help="Target MSRP")
-    parser.add_argument("warehouse_name", help="Warehouse name")
-    
-    args = parser.parse_args()
-
-    task_id = f"remove_duplicates_{int(time.time())}"
-    remove_duplicates_main(args.auction_number, args.target_msrp, args.warehouse_name, task_id)
+        self.update_state(state="SUCCESS", meta={'status': "Remove duplicates process completed"})

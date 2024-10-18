@@ -8,6 +8,7 @@ import requests
 import json
 import logging
 import traceback
+from celery import shared_task
 from io import StringIO
 from playwright.sync_api import sync_playwright, expect
 from datetime import datetime
@@ -39,11 +40,7 @@ def save_csv_to_database(event_id, csv_content):
         event, created = Event.objects.get_or_create(event_id=event_id)
         VoidedTransaction.objects.create(event=event, csv_data=csv_content)
 
-async def export_csv(page, event_id, should_stop):
-    if should_stop.is_set():
-        logger.info("CSV export operation stopped by user.")
-        return None
-
+async def export_csv(page, event_id):
     logger.info("Starting CSV export...")
     
     try:
@@ -67,10 +64,6 @@ async def export_csv(page, event_id, should_stop):
         logger.info("Removing temporary file...")
         os.unlink(temp_path)
 
-        if should_stop.is_set():
-            logger.info("CSV export operation stopped during download.")
-            return None
-
         logger.info(f"CSV content length: {len(csv_content)}")
         logger.info(f"CSV content (first 500 characters): {csv_content[:500]}")
 
@@ -90,16 +83,11 @@ async def export_csv(page, event_id, should_stop):
 def void_unpaid_main(event_id, upload_choice, warehouse, task_id):
     logger.info(f"Starting void_unpaid_main for event_id: {event_id}, upload_choice: {upload_choice}, warehouse: {warehouse}")
     config_manager.load_config(config_path)
-
     config_manager.set_active_warehouse(warehouse)
     
-    task_id = f"void_unpaid_{int(time.time())}"
     RedisTaskStatus.set_status(task_id, "STARTED", f"Starting void unpaid process for event {event_id}")
     
-    should_stop = threading.Event()
-
-    logger.info("Calling start_playwright_process")
-    asyncio.run(start_playwright_process(event_id, upload_choice, should_stop, task_id))
+    asyncio.run(start_playwright_process(event_id, upload_choice, task_id))
     logger.info("Finished void_unpaid_main")
     return task_id
 
@@ -159,7 +147,7 @@ def should_continue(should_stop, gui_callback, message):
         return False
     return True
 
-async def start_playwright_process(event_id, upload_choice, should_stop, task_id):
+async def start_playwright_process(event_id, upload_choice, task_id):
     logger.info(f"Starting playwright process for event_id: {event_id}")
     csv_content = None
     login_url = config_manager.get_global_var('website_login_url')
@@ -219,12 +207,12 @@ async def start_playwright_process(event_id, upload_choice, should_stop, task_id
             # Export CSV first
             logger.info("Exporting CSV...")
             RedisTaskStatus.set_status(task_id, "IN_PROGRESS", "Exporting CSV")
-            csv_content = await export_csv(page, event_id, should_stop)
+            csv_content = await export_csv(page, event_id)
 
             if csv_content:
                 logger.info("CSV exported successfully. Uploading to Airtable...")
                 RedisTaskStatus.set_status(task_id, "IN_PROGRESS", "Uploading to Airtable")
-                await send_to_airtable(upload_choice, csv_content, should_stop)
+                await send_to_airtable(upload_choice, csv_content)
             else:
                 logger.error("CSV content not set due to an error. Skipping Upload to Airtable.")
                 RedisTaskStatus.set_status(task_id, "ERROR", "Failed to export CSV")
@@ -233,12 +221,11 @@ async def start_playwright_process(event_id, upload_choice, should_stop, task_id
             # Now void the transactions
             logger.info("Starting to void unpaid transactions...")
             RedisTaskStatus.set_status(task_id, "IN_PROGRESS", "Voiding unpaid transactions")
-            await void_unpaid_transactions(page, report_url, should_stop, task_id)
+            await void_unpaid_transactions(page, report_url, task_id)
 
     except Exception as e:
         logger.exception(f"An error occurred in start_playwright_process: {str(e)}")
         RedisTaskStatus.set_status(task_id, "ERROR", f"An error occurred: {str(e)}")
-        should_stop.set()
     finally:
         logger.info("Closing browser")
         if 'browser' in locals():
@@ -250,7 +237,7 @@ async def start_playwright_process(event_id, upload_choice, should_stop, task_id
             logger.info("Process completed, but CSV data was not saved.")
             RedisTaskStatus.set_status(task_id, "COMPLETED", "Process completed, but CSV data was not saved")
 
-async def upload_to_airtable(records_batches, headers, csv_filepath, should_stop):
+async def upload_to_airtable(records_batches, headers, csv_filepath):
     all_batches_successful = True
     batch_count = 0
     total_batches = len(records_batches)
@@ -259,9 +246,6 @@ async def upload_to_airtable(records_batches, headers, csv_filepath, should_stop
     async with aiohttp.ClientSession() as session:
         for batch in records_batches:
             batch_count += 1
-            if should_stop.is_set():
-                logger.info("Upload to Airtable stopped by user.")
-                return
             try:
                 logger.info(f"Uploading batch {batch_count}/{total_batches} to Airtable")
                 async with session.post(AIRTABLE_URL(config_manager.get_warehouse_var('airtable_sales_base_id'),
@@ -294,10 +278,7 @@ def process_csv_for_airtable(csv_content):
     logger.info(f"Number of batches created: {len(batches)}")
     return batches
 
-async def send_to_airtable(upload_choice, csv_content, should_stop):
-    if should_stop.is_set():
-        logger.info("Upload to Airtable stopped by user.")
-        return
+async def send_to_airtable(upload_choice, csv_content):
     if upload_choice == 1:
         logger.info("Uploading data to Airtable...")
         records_batches = process_csv_for_airtable(csv_content)
@@ -305,18 +286,18 @@ async def send_to_airtable(upload_choice, csv_content, should_stop):
             'Authorization': f'Bearer {config_manager.get_warehouse_var("airtable_api_key")}',
             'Content-Type': 'application/json'
         }
-        await upload_to_airtable(records_batches, headers, csv_content, should_stop)
+        await upload_to_airtable(records_batches, headers, csv_content)
     else:
         logger.info("Upload to Airtable skipped due to upload_choice.")
 
-async def void_unpaid_transactions(page, report_url, should_stop, task_id, timeout=1000, max_retries=5):
+async def void_unpaid_transactions(page, report_url, task_id, timeout=1000, max_retries=5):
     print("Starting the voiding process for unpaid transactions...")
     RedisTaskStatus.set_status(task_id, "IN_PROGRESS", "Starting to void unpaid transactions")
     start_time = time.time()
     count = 0
     retries = 0
 
-    while not should_stop.is_set():
+    while True:
         if time.time() - start_time > timeout:
             print("Timeout reached, stopping voiding process.")
             RedisTaskStatus.set_status(task_id, "COMPLETED", f"Timeout reached. Voided {count} transactions")

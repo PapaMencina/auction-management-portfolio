@@ -24,13 +24,13 @@ from auction_webapp.celery import app
 from auction.scripts.create_auction import format_date, get_image, create_auction, save_event_to_database
 from auction.scripts.create_auction import create_auction_task
 from auction.scripts.void_unpaid_on_bid import void_unpaid_main
-from auction.scripts.remove_duplicates_in_airtable import remove_duplicates_main
-from auction.scripts.auction_formatter import auction_formatter_main
+from auction.scripts.remove_duplicates_in_airtable import remove_duplicates_task
+from auction.scripts.auction_formatter import auction_formatter_task
 # from auction.scripts.upload_to_hibid import upload_to_hibid_main
 from auction.models import Event
 from auction.utils.redis_utils import RedisTaskStatus
 from celery.result import AsyncResult
-from .tasks import run_auction_formatter_task, create_auction_task
+from .tasks import auction_formatter_task, create_auction_task, remove_duplicates_task, void_unpaid_task
 import time
 
 logger = logging.getLogger(__name__)
@@ -144,19 +144,23 @@ def create_auction_view(request):
     if request.method == 'POST':
         try:
             auction_title = request.POST.get('auction_title')
-            ending_date = datetime.strptime(request.POST.get('ending_date'), '%Y-%m-%d')
+            ending_date = request.POST.get('ending_date')  # Keep as string
             selected_warehouse = request.POST.get('selected_warehouse')
 
             if not all([auction_title, ending_date, selected_warehouse]):
                 return JsonResponse({'error': 'Missing required fields'}, status=400)
 
+            # Parse the date here to validate it
+            try:
+                datetime.strptime(ending_date, '%Y-%m-%d')
+            except ValueError:
+                return JsonResponse({'error': 'Invalid date format. Use YYYY-MM-DD.'}, status=400)
+
+            # Pass the date as a string to the Celery task
             task = create_auction_task.delay(auction_title, ending_date, selected_warehouse)
 
             logger.info(f"Auction creation task started for {auction_title}")
             return JsonResponse({'message': 'Auction creation process started', 'task_id': task.id})
-        except ValueError as e:
-            logger.error(f"Invalid date format: {str(e)}")
-            return JsonResponse({'error': 'Invalid date format'}, status=400)
         except Exception as e:
             logger.error(f"Error starting auction creation task: {str(e)}")
             logger.error(traceback.format_exc())
@@ -197,15 +201,7 @@ def void_unpaid_view(request):
             if not event:
                 return JsonResponse({'error': 'Invalid Auction ID or auction has not ended yet.'}, status=400)
 
-            task_id = f"void_unpaid_{int(time.time())}"
-            RedisTaskStatus.set_status(task_id, "STARTED", f"Starting void unpaid process for auction {event_id}")
-
-            Thread(target=void_unpaid_main, kwargs={
-                'event_id': event_id,
-                'upload_choice': upload_choice,
-                'warehouse': warehouse,
-                'task_id': task_id
-            }).start()
+            task_id = void_unpaid_main(event_id, upload_choice, warehouse)
 
             return JsonResponse({'message': 'Void unpaid process started', 'task_id': task_id})
 
@@ -225,17 +221,10 @@ def remove_duplicates_view(request):
         target_msrp = float(request.POST.get('target_msrp'))
         warehouse_name = request.POST.get('warehouse_name')
 
-        task_id = f"remove_duplicates_{int(time.time())}"
-        RedisTaskStatus.set_status(task_id, "STARTED", f"Starting remove duplicates process for auction {auction_number}")
+        # Start the Celery task
+        task = remove_duplicates_task.delay(auction_number, target_msrp, warehouse_name)
 
-        Thread(target=remove_duplicates_main, kwargs={
-            'auction_number': auction_number,
-            'target_msrp': target_msrp,
-            'warehouse_name': warehouse_name,
-            'task_id': task_id
-        }).start()
-
-        return JsonResponse({'message': 'Remove duplicates process started', 'task_id': task_id})
+        return JsonResponse({'message': 'Remove duplicates process started', 'task_id': task.id})
 
     context = {
         'auctions_json': json.dumps(auctions, cls=DjangoJSONEncoder),
@@ -253,9 +242,7 @@ def auction_formatter_view(request):
         selected_warehouse = request.POST.get('selected_warehouse')
         starting_price = request.POST.get('starting_price')
 
-        config_manager.set_active_warehouse(selected_warehouse)
-
-        task = run_auction_formatter_task.delay(auction_id, selected_warehouse, starting_price)
+        task = auction_formatter_task.delay(auction_id, selected_warehouse, starting_price)
         
         return JsonResponse({'message': 'Auction formatter process started', 'task_id': task.id})
 
@@ -335,20 +322,28 @@ def upload_to_hibid_view(request):
 @login_required
 def check_task_status(request, task_id):
     task = AsyncResult(task_id)
+    response = {
+        'state': task.state,
+        'status': '',
+        'details': ''
+    }
+    
     if task.state == 'PENDING':
-        response = {
-            'state': task.state,
-            'status': 'Task is waiting for execution'
-        }
-    elif task.state != 'FAILURE':
-        response = {
-            'state': task.state,
-            'status': task.info.get('status', '')
-        }
+        response['status'] = 'Task is waiting for execution'
+    elif task.state == 'STARTED':
+        response['status'] = 'Task has been started'
+    elif task.state == 'SUCCESS':
+        response['status'] = 'Task completed successfully'
+        response['details'] = str(task.result)
+    elif task.state == 'FAILURE':
+        response['status'] = 'Task failed'
+        response['details'] = str(task.result)
     else:
-        response = {
-            'state': task.state,
-            'status': str(task.info),
-        }
+        response['status'] = 'Task is in progress'
+        if isinstance(task.info, dict):
+            response['details'] = task.info.get('status', '')
+        else:
+            response['details'] = str(task.info)
+    
     return JsonResponse(response)
     
