@@ -13,6 +13,7 @@ https://docs.djangoproject.com/en/5.0/ref/settings/
 import os
 from pathlib import Path
 import dj_database_url
+from dj_db_conn_pool import setup_connection_pool
 import redis
 import django_redis
 from dotenv import load_dotenv
@@ -134,16 +135,20 @@ AUTH_USER_MODEL = 'auction.CustomUser'
 # Database configuration
 if 'DATABASE_URL' in os.environ:
     # Production database (Heroku)
+    DATABASE_CONFIG = dj_database_url.config(
+        default=os.environ.get('DATABASE_URL'),
+        conn_max_age=600,
+        ssl_require=True
+    )
+    
+    # Setup connection pool
+    setup_connection_pool(
+        config=DATABASE_CONFIG,
+        max_conns=20,  # Adjust this value as needed
+    )
+    
     DATABASES = {
-        'default': dj_database_url.config(
-            default=os.environ.get('DATABASE_URL'),
-            conn_max_age=600,
-            ssl_require=True
-        )
-    }
-    # Add PostgreSQL-specific options
-    DATABASES['default']['OPTIONS'] = {
-        'MAX_CONNS': 20,  # Adjust this based on your database plan and expected load
+        'default': DATABASE_CONFIG
     }
 else:
     # Local development database
