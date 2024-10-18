@@ -92,7 +92,6 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'auction',
-    'django_db_pool',
     'django_celery_results',
 ]
 
