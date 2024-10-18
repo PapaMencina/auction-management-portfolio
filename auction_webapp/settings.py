@@ -135,20 +135,14 @@ AUTH_USER_MODEL = 'auction.CustomUser'
 
 # Database configuration
 if 'DATABASE_URL' in os.environ:
-    # Production database (Heroku)
     DATABASES = {
         'default': dj_database_url.config(
             default=os.environ.get('DATABASE_URL'),
-            engine='django_db_pool.db.backends.postgresql',
             conn_max_age=600,
-            ssl_require=True,
-            pool_options={
-                'MAX_CONNS': 20,  # Adjust this value as needed
-            }
+            ssl_require=True
         )
     }
 else:
-    # Local development database
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.sqlite3',
