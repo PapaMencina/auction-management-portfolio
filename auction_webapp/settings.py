@@ -93,6 +93,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'auction',
+    'django_db_pool',
     'django_celery_results',
 ]
 
@@ -135,20 +136,16 @@ AUTH_USER_MODEL = 'auction.CustomUser'
 # Database configuration
 if 'DATABASE_URL' in os.environ:
     # Production database (Heroku)
-    DATABASE_CONFIG = dj_database_url.config(
-        default=os.environ.get('DATABASE_URL'),
-        conn_max_age=600,
-        ssl_require=True
-    )
-    
-    # Setup connection pool
-    setup_connection_pool(
-        config=DATABASE_CONFIG,
-        max_conns=20,  # Adjust this value as needed
-    )
-    
     DATABASES = {
-        'default': DATABASE_CONFIG
+        'default': dj_database_url.config(
+            default=os.environ.get('DATABASE_URL'),
+            engine='django_db_pool.db.backends.postgresql',
+            conn_max_age=600,
+            ssl_require=True,
+            pool_options={
+                'MAX_CONNS': 20,  # Adjust this value as needed
+            }
+        )
     }
 else:
     # Local development database
