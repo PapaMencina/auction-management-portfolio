@@ -3,6 +3,10 @@ FROM mcr.microsoft.com/playwright/python:v1.39.0-jammy
 
 WORKDIR /app
 
+# Add a non-root user
+RUN useradd -m celeryuser
+USER celeryuser
+
 COPY requirements.txt /app/
 RUN pip install --no-cache-dir -r requirements.txt
 
