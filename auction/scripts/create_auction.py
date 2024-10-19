@@ -536,3 +536,4 @@ if __name__ == "__main__":
     end_date = datetime.now() + timedelta(days=14)  # Set end date to 14 days from now
     result = create_auction_task.delay("Sample Auction", end_date.strftime('%Y-%m-%d'), "Maule Warehouse")
     print(f"Task started with ID: {result.id}")
+    
