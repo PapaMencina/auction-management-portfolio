@@ -1,17 +1,16 @@
-# Use the official Playwright Docker image with Python 3.10
+# Use an official Python runtime as a parent image
 FROM mcr.microsoft.com/playwright/python:v1.39.0-jammy
 
 WORKDIR /app
 
-# Add a non-root user
-RUN useradd -m celeryuser
-USER celeryuser
-
+# Copy the requirements file and install dependencies
 COPY requirements.txt /app/
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Install Playwright browsers
 RUN playwright install --with-deps
 
+# Copy the rest of the application code
 COPY . /app/
 
 CMD ["celery", "-A", "auction_webapp", "worker", "--concurrency=6", "--loglevel=info"]
