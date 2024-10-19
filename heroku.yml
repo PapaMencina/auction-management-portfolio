@@ -1,12 +1,6 @@
 build:
   docker:
-    web: Dockerfile
     worker: Dockerfile.worker
 
-release:
-  command:
-    - python manage.py migrate
-
 run:
-  web: gunicorn auction_webapp.wsgi:application --bind 0.0.0.0:$PORT
   worker: celery -A auction_webapp worker --concurrency=6 --loglevel=info
