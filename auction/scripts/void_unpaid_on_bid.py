@@ -80,8 +80,8 @@ async def export_csv(page, event_id):
         logger.error(f"Page content: {await page.content()}")
         return None
 
-@shared_task(bind=True)  # bind=True allows access to the task instance via self
-def void_unpaid_main(self, event_id, upload_choice, warehouse, task_id):
+@shared_task(bind=True)
+def void_unpaid_main(self, event_id, upload_choice, warehouse):
     try:
         logger.info(f"Starting void_unpaid_main for event_id: {event_id}, upload_choice: {upload_choice}, warehouse: {warehouse}")
         self.update_state(state="STARTED", meta={'status': f"Starting void unpaid process for event {event_id}"})
@@ -90,6 +90,7 @@ def void_unpaid_main(self, event_id, upload_choice, warehouse, task_id):
         config_manager.set_active_warehouse(warehouse)
         self.update_state(state="PROGRESS", meta={'status': f"Configured for warehouse: {warehouse}"})
         
+        task_id = self.request.id
         RedisTaskStatus.set_status(task_id, "STARTED", f"Starting void unpaid process for event {event_id}")
 
         # Running async Playwright process
@@ -111,7 +112,8 @@ def void_unpaid_main(self, event_id, upload_choice, warehouse, task_id):
         error_message = f"Unexpected error in void_unpaid_main: {str(e)}"
         logger.error(error_message)
         self.update_state(state="FAILURE", meta={'status': error_message})
-        RedisTaskStatus.set_status(task_id, "ERROR", error_message)
+        if hasattr(self, 'request'):
+            RedisTaskStatus.set_status(self.request.id, "ERROR", error_message)
         raise
 
 async def login(page, username, password):

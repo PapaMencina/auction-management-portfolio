@@ -192,11 +192,13 @@ def void_unpaid_view(request):
             data = json.loads(request.body)
             warehouse = data.get('warehouse')
             event_id = data.get('auction_id')
-            upload_choice = int(data.get('upload_choice'))
+            upload_choice = int(data.get('upload_choice', 0))  # Default to 0 if not provided
 
-            if not all([warehouse, event_id, upload_choice is not None]):
+            # Validate required fields
+            if not all([warehouse, event_id]):
                 return JsonResponse({'error': 'Missing required fields'}, status=400)
 
+            # Validate the event exists and has ended
             today = timezone.now().date()
             event = Event.objects.filter(
                 event_id=event_id,
@@ -205,21 +207,34 @@ def void_unpaid_view(request):
             ).first()
 
             if not event:
-                return JsonResponse({'error': 'Invalid Auction ID or auction has not ended yet.'}, status=400)
+                return JsonResponse({
+                    'error': 'Invalid Auction ID or auction has not ended yet.'
+                }, status=400)
 
-            task = void_unpaid_main.delay(event_id, upload_choice, warehouse)
+            # Start the Celery task
+            task = void_unpaid_main.delay(
+                event_id=event_id,
+                upload_choice=upload_choice,
+                warehouse=warehouse
+            )
 
             logger.info(f"Void unpaid task started for event {event_id}")
             return JsonResponse({
+                'status': 'success',
                 'message': 'Void unpaid process started',
                 'task_id': task.id
             })
 
         except json.JSONDecodeError:
-            return JsonResponse({'error': 'Invalid JSON data'}, status=400)
+            return JsonResponse({
+                'error': 'Invalid JSON data'
+            }, status=400)
         except Exception as e:
             logger.exception("Unexpected error in void_unpaid_view")
-            return JsonResponse({'error': str(e)}, status=500)
+            return JsonResponse({
+                'error': str(e),
+                'status': 'error'
+            }, status=500)
 
 @login_required
 def remove_duplicates_view(request):

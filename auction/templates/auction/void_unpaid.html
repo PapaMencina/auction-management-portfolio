@@ -46,172 +46,220 @@
 </div>
 
 <script>
-function updateAuctionDropdown() {
+document.addEventListener('DOMContentLoaded', function() {
+    const form = document.getElementById('void-unpaid-form');
+    const statusMessage = document.getElementById('status-message');
+    const submitButton = document.getElementById('submit-button');
+    const spinner = document.getElementById('spinner');
+
+    updateAuctionDropdown();
+
+    form.addEventListener('submit', async function(e) {
+        e.preventDefault();
+        
+        const formData = {
+            warehouse: document.getElementById('warehouse').value,
+            auction_id: document.getElementById('auction_id').value,
+            upload_choice: parseInt(document.querySelector('input[name="upload_choice"]:checked').value)
+        };
+
+        // Validate required fields
+        if (!formData.warehouse || !formData.auction_id) {
+            updateUI('ERROR', 'Please select both warehouse and auction');
+            return;
+        }
+
+        clearPreviousResults();
+        disableSubmitButton();
+        showSpinner();
+        updateUI('PROCESSING', 'Starting void unpaid process...');
+
+        try {
+            const response = await fetch('{% url "auction:void_unpaid" %}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+                },
+                body: JSON.stringify(formData)
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.error || 'Failed to start process');
+            }
+
+            if (data.task_id) {
+                console.log('Starting polling for task:', data.task_id);
+                updateUI('STARTED', 'Process started successfully');
+                pollTaskStatus(data.task_id);
+            } else {
+                throw new Error('No task ID received from server');
+            }
+
+        } catch (error) {
+            console.error('Error:', error);
+            updateUI('ERROR', error.message);
+            hideSpinner();
+            enableSubmitButton();
+        }
+    });
+});
+
+async function pollTaskStatus(taskId) {
+    const MAX_RETRIES = 3;
+    let retries = 0;
+
+    const poll = async () => {
+        try {
+            const response = await fetch(`/auction/check-task-status/${taskId}/`);
+            if (!response.ok) {
+                throw new Error('Failed to fetch task status');
+            }
+
+            const data = await response.json();
+            console.log('Task status:', data);
+
+            // Update UI with current status
+            updateUI(data.state, data.message || data.status);
+
+            if (data.state === 'SUCCESS') {
+                if (data.result) {
+                    displayResults(data.result);
+                }
+                hideSpinner();
+                enableSubmitButton();
+                return true;
+            }
+            
+            if (data.state === 'FAILURE' || data.state === 'ERROR') {
+                displayError(data.message || data.result || 'Task failed');
+                hideSpinner();
+                enableSubmitButton();
+                return true;
+            }
+
+            return false;
+
+        } catch (error) {
+            console.error('Error polling status:', error);
+            retries++;
+            
+            if (retries >= MAX_RETRIES) {
+                updateUI('ERROR', 'Failed to check task status after multiple attempts');
+                hideSpinner();
+                enableSubmitButton();
+                return true;
+            }
+            
+            return false;
+        }
+    };
+
+    while (!(await poll())) {
+        await new Promise(resolve => setTimeout(resolve, 5000));
+    }
+}
+
+async function updateAuctionDropdown() {
     const warehouseSelect = document.getElementById('warehouse');
     const auctionSelect = document.getElementById('auction_id');
     const selectedWarehouse = warehouseSelect.value;
 
-    // Clear existing options
+    // Reset auction dropdown
     auctionSelect.innerHTML = '<option value="">Select an auction</option>';
 
-    if (selectedWarehouse) {
-        // Fetch filtered auctions from the server
-        fetch(`/auction/get-warehouse-events/?warehouse=${selectedWarehouse}&process_type=past`)
-            .then(response => response.json())
-            .then(filteredAuctions => {
-                // Add new options
-                filteredAuctions.forEach(auction => {
-                    const option = document.createElement('option');
-                    option.value = auction.id;
-                    option.textContent = `${auction.title} (${auction.id}) - Ended: ${auction.ending_date}`;
-                    auctionSelect.appendChild(option);
-                });
-            })
-            .catch(error => {
-                console.error('Error fetching auctions:', error);
-                updateUI('ERROR', 'Failed to fetch auctions');
-            });
-    }
-}
+    if (!selectedWarehouse) return;
 
-function pollTaskStatus(taskId) {
-    const intervalId = setInterval(() => {
-        fetch(`/auction/check-task-status/${taskId}/`)
-            .then(response => response.json())
-            .then(data => {
-                console.log('Task status data:', data);
-                updateUI(data.state, data.message);
-                if (data.state === 'SUCCESS') {
-                    clearInterval(intervalId);
-                    hideSpinner();
-                    enableSubmitButton();
-                    displayResults(data.result);
-                } else if (data.state === 'FAILURE') {
-                    clearInterval(intervalId);
-                    hideSpinner();
-                    enableSubmitButton();
-                    displayError(data.result);
-                }
-            })
-            .catch(error => {
-                console.error('Error polling task status:', error);
-                updateUI('ERROR', `Failed to check task status: ${error.message}`);
-                clearInterval(intervalId);
-                hideSpinner();
-                enableSubmitButton();
-            });
-    }, 5000);
+    try {
+        updateUI('LOADING', 'Fetching auctions...');
+        
+        const response = await fetch(`/auction/get-warehouse-events/?warehouse=${selectedWarehouse}&process_type=past`);
+        if (!response.ok) throw new Error('Failed to fetch auctions');
+        
+        const filteredAuctions = await response.json();
+        
+        filteredAuctions.forEach(auction => {
+            const option = document.createElement('option');
+            option.value = auction.id;
+            option.textContent = `${auction.title} (${auction.id}) - Ended: ${auction.ending_date}`;
+            auctionSelect.appendChild(option);
+        });
+
+        updateUI('READY', filteredAuctions.length ? 'Select an auction to proceed' : 'No ended auctions found');
+        
+    } catch (error) {
+        console.error('Error fetching auctions:', error);
+        updateUI('ERROR', 'Failed to fetch auctions');
+    }
 }
 
 function updateUI(state, message) {
     const statusMessage = document.getElementById('status-message');
-    statusMessage.textContent = `Status: ${state} - ${message}`;
-    statusMessage.classList.remove('text-gray-600', 'text-green-600', 'text-red-600');
-    statusMessage.classList.add(
-        state === 'SUCCESS' ? 'text-green-600' : 
-        state === 'FAILURE' ? 'text-red-600' : 
-        'text-gray-600'
-    );
+    statusMessage.textContent = message;
+    
+    // Remove all existing color classes
+    statusMessage.classList.remove('text-gray-600', 'text-green-600', 'text-red-600', 'text-yellow-600');
+    
+    // Add appropriate color class based on state
+    switch (state) {
+        case 'SUCCESS':
+            statusMessage.classList.add('text-green-600');
+            break;
+        case 'ERROR':
+        case 'FAILURE':
+            statusMessage.classList.add('text-red-600');
+            break;
+        case 'PROCESSING':
+        case 'STARTED':
+            statusMessage.classList.add('text-yellow-600');
+            break;
+        default:
+            statusMessage.classList.add('text-gray-600');
+    }
 }
 
 function displayResults(result) {
     const resultsDiv = document.createElement('div');
+    resultsDiv.className = 'mt-4 p-4 bg-green-50 dark:bg-green-900 rounded-lg';
     resultsDiv.innerHTML = `
-        <h3 class="text-lg font-semibold mt-4">Void Unpaid Process Completed</h3>
-        <p>${result}</p>
+        <h3 class="text-lg font-semibold text-green-700 dark:text-green-300">Process Completed</h3>
+        <p class="mt-2 text-green-600 dark:text-green-200">${result}</p>
     `;
-    document.getElementById('status-message').appendChild(resultsDiv);
+    statusMessage.appendChild(resultsDiv);
 }
 
 function displayError(message) {
     const errorDiv = document.createElement('div');
+    errorDiv.className = 'mt-4 p-4 bg-red-50 dark:bg-red-900 rounded-lg';
     errorDiv.innerHTML = `
-        <h3 class="text-lg font-semibold mt-4 text-red-600">Error Occurred</h3>
-        <p>${message}</p>
+        <h3 class="text-lg font-semibold text-red-700 dark:text-red-300">Error Occurred</h3>
+        <p class="mt-2 text-red-600 dark:text-red-200">${message}</p>
     `;
-    document.getElementById('status-message').appendChild(errorDiv);
+    statusMessage.appendChild(errorDiv);
 }
 
 function showSpinner() {
-    document.getElementById('spinner').classList.remove('hidden');
+    spinner.classList.remove('hidden');
 }
 
 function hideSpinner() {
-    document.getElementById('spinner').classList.add('hidden');
+    spinner.classList.add('hidden');
 }
 
 function disableSubmitButton() {
-    const submitButton = document.getElementById('submit-button');
     submitButton.disabled = true;
     submitButton.classList.add('opacity-50', 'cursor-not-allowed');
 }
 
 function enableSubmitButton() {
-    const submitButton = document.getElementById('submit-button');
     submitButton.disabled = false;
     submitButton.classList.remove('opacity-50', 'cursor-not-allowed');
 }
 
 function clearPreviousResults() {
-    const statusMessage = document.getElementById('status-message');
     statusMessage.innerHTML = '';
 }
-
-document.addEventListener('DOMContentLoaded', function() {
-    const form = document.getElementById('void-unpaid-form');
-    const submitButton = document.getElementById('submit-button');
-
-    updateAuctionDropdown();
-
-    form.addEventListener('submit', function(e) {
-        e.preventDefault();
-        const auctionId = document.getElementById('auction_id').value;
-        
-        if (submitButton.dataset.processingAuctionId === auctionId) {
-            updateUI('WARNING', 'This auction is already being processed. Please wait for it to complete.');
-            return;
-        }
-
-        clearPreviousResults();
-
-        const formData = new FormData(this);
-        disableSubmitButton();
-        submitButton.dataset.processingAuctionId = auctionId;
-        showSpinner();
-        
-        updateUI('PROCESSING', 'Voiding unpaid transactions...');
-
-        fetch('{% url "auction:void_unpaid" %}', {
-            method: 'POST',
-            body: JSON.stringify(Object.fromEntries(formData)),
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRFToken': '{{ csrf_token }}'
-            }
-        })
-        .then(response => response.json())
-        .then(data => {
-            console.log('Response data:', data);
-            if (data.error) {
-                throw new Error(data.error);
-            }
-            updateUI('STARTED', data.message || 'Void unpaid process started');
-            if (data.task_id) {
-                console.log('Starting polling for task:', data.task_id);
-                pollTaskStatus(data.task_id);
-            } else {
-                console.warn('No task_id received from server');
-                hideSpinner();
-                enableSubmitButton();
-            }
-        })
-        .catch(error => {
-            console.error('Error:', error);
-            updateUI('ERROR', `Error starting void unpaid process: ${error.message}`);
-            hideSpinner();
-            enableSubmitButton();
-        });
-    });
-});
 </script>
 {% endblock %}
