@@ -80,27 +80,29 @@ async def export_csv(page, event_id):
         logger.error(f"Page content: {await page.content()}")
         return None
 
-def void_unpaid_main(event_id, upload_choice, warehouse, task_id):
+@shared_task(bind=True)  # bind=True allows access to the task instance via self
+def void_unpaid_main(self, event_id, upload_choice, warehouse, task_id):
     try:
         logger.info(f"Starting void_unpaid_main for event_id: {event_id}, upload_choice: {upload_choice}, warehouse: {warehouse}")
-        current_task.update_state(state="STARTED", meta={'status': f"Starting void unpaid process for event {event_id}"})
-
+        self.update_state(state="STARTED", meta={'status': f"Starting void unpaid process for event {event_id}"})
+        
         config_manager.load_config(config_path)
         config_manager.set_active_warehouse(warehouse)
-        current_task.update_state(state="PROGRESS", meta={'status': f"Configured for warehouse: {warehouse}"})
-
+        self.update_state(state="PROGRESS", meta={'status': f"Configured for warehouse: {warehouse}"})
+        
         RedisTaskStatus.set_status(task_id, "STARTED", f"Starting void unpaid process for event {event_id}")
 
+        # Running async Playwright process
         try:
             asyncio.run(start_playwright_process(event_id, upload_choice, task_id))
         except Exception as e:
             logger.error(f"Error in start_playwright_process: {str(e)}")
-            current_task.update_state(state="FAILURE", meta={'status': f"Error in void unpaid process: {str(e)}"})
+            self.update_state(state="FAILURE", meta={'status': f"Error in void unpaid process: {str(e)}"})
             RedisTaskStatus.set_status(task_id, "ERROR", f"Error in void unpaid process: {str(e)}")
             raise
 
         logger.info("Finished void_unpaid_main successfully")
-        current_task.update_state(state="SUCCESS", meta={'status': f"Void unpaid process completed for event {event_id}"})
+        self.update_state(state="SUCCESS", meta={'status': f"Void unpaid process completed for event {event_id}"})
         RedisTaskStatus.set_status(task_id, "COMPLETED", f"Void unpaid process completed for event {event_id}")
 
         return task_id
@@ -108,7 +110,7 @@ def void_unpaid_main(event_id, upload_choice, warehouse, task_id):
     except Exception as e:
         error_message = f"Unexpected error in void_unpaid_main: {str(e)}"
         logger.error(error_message)
-        current_task.update_state(state="FAILURE", meta={'status': error_message})
+        self.update_state(state="FAILURE", meta={'status': error_message})
         RedisTaskStatus.set_status(task_id, "ERROR", error_message)
         raise
 
