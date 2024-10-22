@@ -1,4 +1,3 @@
-# Use an official Python runtime as a parent image
 FROM mcr.microsoft.com/playwright/python:v1.39.0-jammy
 
 WORKDIR /app
@@ -13,4 +12,5 @@ RUN playwright install --with-deps
 # Copy the rest of the application code
 COPY . /app/
 
-CMD ["celery", "-A", "auction_webapp", "worker", "--concurrency=6", "--loglevel=info"]
+# Command to run the Celery worker
+CMD celery -A auction_webapp worker --concurrency=6 --loglevel=info

@@ -1,4 +1,3 @@
-# Use the official Playwright Docker image with Python 3.10
 FROM mcr.microsoft.com/playwright/python:v1.39.0-jammy
 
 WORKDIR /app
@@ -13,7 +12,8 @@ RUN playwright install --with-deps
 # Copy the rest of the application code
 COPY . /app/
 
-EXPOSE $PORT
+# Set environment variable for port
+ENV PORT=8000
 
-# Run the application
-CMD ["sh", "-c", "gunicorn auction_webapp.wsgi:application --bind 0.0.0.0:$PORT"]
+# Command to run the web server
+CMD gunicorn auction_webapp.wsgi:application --bind 0.0.0.0:$PORT
