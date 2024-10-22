@@ -838,23 +838,74 @@ class AuctionFormatter:
             if not processed_records:
                 raise ValueError("No processed records to generate CSV.")
             
-            csv_content = self.generate_csv_content(processed_records)
+            # Convert to DataFrame for sorting and duplicate handling
+            df = pd.DataFrame(processed_records)
+            self.gui_callback(f"Initial data loaded with {len(df)} records")
+            
+            # Convert MSRP to numeric for sorting
+            df['MSRP'] = pd.to_numeric(df['MSRP'], errors='coerce').round(2)
+            
+            # Filter out damaged/missing items
+            condition_mask = ~df['Subtitle'].str.contains('missing|damaged|no', 
+                                                        case=False, 
+                                                        na=False)
+            
+            # Process top items
+            potential_top = df[condition_mask].sort_values('MSRP', ascending=False)
+            
+            # Handle duplicates in top 50
+            top_50_indices = []
+            seen_titles = set()
+            duplicate_indices = []
+            
+            for idx, row in potential_top.iterrows():
+                title_key = row['Title'].lower().strip()
+                if len(top_50_indices) < 50:
+                    if title_key not in seen_titles:
+                        top_50_indices.append(idx)
+                        seen_titles.add(title_key)
+                    else:
+                        duplicate_indices.append(idx)
+            
+            # Split into groups
+            top_50_records = df.loc[top_50_indices].to_dict('records')
+            remaining_mask = ~df.index.isin(top_50_indices + duplicate_indices)
+            remaining_records = df[remaining_mask].to_dict('records')
+            duplicate_records = df.loc[duplicate_indices].to_dict('records')
+            
+            # Combine and shuffle remaining records
+            other_records = duplicate_records + remaining_records
+            random.shuffle(other_records)
+            
+            # Combine all records in final order
+            sorted_records = top_50_records + other_records
+            
+            self.gui_callback(f"Records sorted with {len(top_50_records)} premium items")
+            
+            # Use existing generate_csv_content with sorted records
+            csv_content = self.generate_csv_content(sorted_records)
             if not csv_content.strip():
                 raise ValueError("Generated CSV content is empty.")
             
+            # Clean using existing method
             cleaned_csv_content = self.clean_csv_content(csv_content)
             if not cleaned_csv_content.strip():
                 raise ValueError("Cleaned CSV content is empty.")
             
             self.final_csv_content = cleaned_csv_content
-            self.gui_callback(f"CSV content generated successfully. Length: {len(cleaned_csv_content)}")
+            self.gui_callback(f"CSV content generated successfully")
+            
+            await self.save_formatted_data(cleaned_csv_content)
             return cleaned_csv_content
+
         except Exception as e:
             error_message = f"Error generating CSV: {str(e)}"
             RedisTaskStatus.set_status(self.task_id, "ERROR", error_message)
             self.gui_callback(error_message)
+            logger.error(f"CSV generation error: {error_message}")
+            logger.error(traceback.format_exc())
             raise
-
+        
     async def process_single_image(self, semaphore, record_id, url, image_number):
         async with semaphore:
             image_semaphore = asyncio.Semaphore(4)
