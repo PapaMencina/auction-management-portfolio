@@ -44,24 +44,17 @@ PLAYWRIGHT_BROWSERS = os.environ.get('PLAYWRIGHT_BROWSERS', 'chromium').split(',
 
 REDIS_URL = os.environ.get('REDIS_URL', 'redis://127.0.0.1:6379/0')
 
-# Set up Redis SSL configuration
-REDIS_SSL_CONFIG = {
-    'ssl_cert_reqs': None,
-    'ssl_ca_certs': None
-} if REDIS_URL.startswith('rediss://') else {}
-
-# Celery Settings with proper SSL
+# Add ssl_cert_reqs to Redis URL if using SSL
+if REDIS_URL.startswith('rediss://'):
+    REDIS_URL = f"{REDIS_URL}?ssl_cert_reqs=none"
+    
+# Celery Settings
 CELERY_BROKER_URL = REDIS_URL
 CELERY_RESULT_BACKEND = REDIS_URL
 CELERY_ACCEPT_CONTENT = ['application/json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = 'America/Los_Angeles'
-
-if REDIS_URL.startswith('rediss://'):
-    CELERY_BROKER_USE_SSL = REDIS_SSL_CONFIG
-    CELERY_REDIS_BACKEND_USE_SSL = REDIS_SSL_CONFIG
-    BROKER_USE_SSL = REDIS_SSL_CONFIG
 
 # Redis cache configuration
 CACHES = {
@@ -72,27 +65,23 @@ CACHES = {
             "CLIENT_CLASS": "django_redis.client.DefaultClient",
             "CONNECTION_POOL_KWARGS": {
                 "max_connections": 20,
-                **REDIS_SSL_CONFIG
+                "ssl_cert_reqs": None if REDIS_URL.startswith('rediss://') else None
             }
         }
     }
 }
 
-# Redis direct connection with proper SSL
+# Redis connection
 if REDIS_URL.startswith('rediss://'):
-    REDIS_CONN = redis.from_url(
+    REDIS_CONN = redis.Redis.from_url(
         REDIS_URL,
-        ssl_cert_reqs=None,
         decode_responses=True,
-        socket_timeout=5,
-        retry_on_timeout=True
+        ssl_cert_reqs=None
     )
 else:
-    REDIS_CONN = redis.from_url(
+    REDIS_CONN = redis.Redis.from_url(
         REDIS_URL,
-        decode_responses=True,
-        socket_timeout=5,
-        retry_on_timeout=True
+        decode_responses=True
     )
 
 # Application definition

@@ -2,6 +2,7 @@ import os
 import asyncio
 from celery import Celery
 from django.conf import settings
+import ssl
 
 # Set the default Django settings module for the 'celery' program.
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'auction_webapp.settings')
@@ -17,19 +18,16 @@ app.autodiscover_tasks()
 
 # Configure SSL settings for Redis if using SSL
 if settings.REDIS_URL.startswith('rediss://'):
-    ssl_config = {
-        'ssl_cert_reqs': None,
-        'ssl_ca_certs': None,
-        'ssl_keyfile': None,
-        'ssl_certfile': None
-    }
     app.conf.update(
-        broker_use_ssl=ssl_config,
-        redis_backend_use_ssl=ssl_config,
-        broker_connection_retry_on_startup=True
+        broker_use_ssl={
+            'ssl_cert_reqs': ssl.CERT_NONE,
+            'ssl_ca_certs': None
+        },
+        redis_backend_use_ssl={
+            'ssl_cert_reqs': ssl.CERT_NONE,
+            'ssl_ca_certs': None
+        }
     )
-    # Ensure broker pool settings are also updated
-    app.conf.broker_pool_limit = 3  # Limit connection pool size
 
 # Set the default event loop policy to use
 asyncio.set_event_loop_policy(asyncio.DefaultEventLoopPolicy())
