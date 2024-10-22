@@ -4,5 +4,6 @@ build:
     worker: Dockerfile.worker
 
 release:
+  image: web
   command:
     - python manage.py migrate
