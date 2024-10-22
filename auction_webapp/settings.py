@@ -44,7 +44,7 @@ PLAYWRIGHT_BROWSERS = os.environ.get('PLAYWRIGHT_BROWSERS', 'chromium').split(',
 
 REDIS_URL = os.environ.get('REDIS_URL', 'redis://127.0.0.1:6379/0')
 
-# Celery Settings
+# Update Celery Settings
 CELERY_BROKER_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
 CELERY_RESULT_BACKEND = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
 CELERY_ACCEPT_CONTENT = ['application/json']
@@ -52,31 +52,57 @@ CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = 'America/Los_Angeles'
 
+# Update SSL settings for Celery Redis
 if REDIS_URL.startswith('rediss://'):
     CELERY_REDIS_BACKEND_USE_SSL = {
-        'ssl_cert_reqs': ssl_lib.CERT_NONE
+        'ssl_cert_reqs': ssl_lib.CERT_NONE,
+        'ssl_ca_certs': None
     }
     CELERY_BROKER_USE_SSL = {
-        'ssl_cert_reqs': ssl_lib.CERT_NONE
+        'ssl_cert_reqs': ssl_lib.CERT_NONE,
+        'ssl_ca_certs': None
     }
     BROKER_USE_SSL = {
-        'ssl_cert_reqs': ssl_lib.CERT_NONE
+        'ssl_cert_reqs': ssl_lib.CERT_NONE,
+        'ssl_ca_certs': None
     }
 
-# Redis cache configuration
+# Update Redis cache configuration
 CACHES = {
     "default": {
         "BACKEND": "django_redis.cache.RedisCache",
         "LOCATION": REDIS_URL,
         "OPTIONS": {
             "CLIENT_CLASS": "django_redis.client.DefaultClient",
-            "CONNECTION_POOL_KWARGS": {"max_connections": 50},  # Increased pool size
+            "CONNECTION_POOL_KWARGS": {"max_connections": 20},  # Reduced from 50
         }
     }
 }
 
+# Update SSL settings for Redis cache
 if REDIS_URL.startswith('rediss://'):
-    CACHES["default"]["OPTIONS"]["CONNECTION_POOL_KWARGS"] = {"ssl_cert_reqs": ssl_lib.CERT_NONE}
+    CACHES["default"]["OPTIONS"]["CONNECTION_POOL_KWARGS"].update({
+        "ssl_cert_reqs": ssl_lib.CERT_NONE,
+        "ssl_ca_certs": None
+    })
+
+# Update Redis connection with SSL handling
+if REDIS_URL.startswith('rediss://'):
+    REDIS_CONN = redis.Redis.from_url(
+        REDIS_URL,
+        ssl_cert_reqs=None,
+        ssl_ca_certs=None,
+        connection_pool_kwargs={
+            'ssl_cert_reqs': None,
+            'ssl_ca_certs': None,
+            'max_connections': 20
+        }
+    )
+else:
+    REDIS_CONN = redis.Redis.from_url(
+        REDIS_URL,
+        connection_pool_kwargs={'max_connections': 20}
+    )
 
 # Redis connection
 REDIS_CONN = redis.Redis.from_url(REDIS_URL)

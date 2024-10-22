@@ -6,8 +6,8 @@ WORKDIR /app
 COPY requirements.txt /app/
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install Playwright browsers
-RUN playwright install --with-deps
+# Install only Chromium browser to save space and memory
+RUN playwright install --with-deps chromium
 
 # Copy the rest of the application code
 COPY . /app/
@@ -15,5 +15,11 @@ COPY . /app/
 # Set environment variable for port
 ENV PORT=8000
 
-# Command to run the web server
-CMD gunicorn auction_webapp.wsgi:application --bind 0.0.0.0:$PORT
+# Command to run the web server with optimized settings
+CMD gunicorn auction_webapp.wsgi:application \
+    --bind 0.0.0.0:$PORT \
+    --workers=2 \
+    --threads=4 \
+    --timeout=120 \
+    --max-requests=1000 \
+    --max-request
