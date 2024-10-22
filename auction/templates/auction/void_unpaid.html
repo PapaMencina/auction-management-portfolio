@@ -51,31 +51,95 @@ document.addEventListener('DOMContentLoaded', function() {
     const statusMessage = document.getElementById('status-message');
     const submitButton = document.getElementById('submit-button');
     const spinner = document.getElementById('spinner');
+    const warehouseSelect = document.getElementById('warehouse');
+    const auctionSelect = document.getElementById('auction_id');
 
+    // Initial call to set up auction dropdown
     updateAuctionDropdown();
+
+    // Add event listeners to form controls
+    warehouseSelect.addEventListener('change', async () => {
+        submitButton.disabled = true;
+        await updateAuctionDropdown();
+        validateForm();
+    });
+
+    auctionSelect.addEventListener('change', validateForm);
+
+    function validateForm() {
+        const warehouse = warehouseSelect.value;
+        const auctionId = auctionSelect.value;
+        
+        if (warehouse && auctionId) {
+            submitButton.disabled = false;
+            submitButton.classList.remove('opacity-50', 'cursor-not-allowed');
+            updateUI('READY', 'Ready to process');
+        } else {
+            submitButton.disabled = true;
+            submitButton.classList.add('opacity-50', 'cursor-not-allowed');
+            updateUI('WAITING', warehouse ? 'Select an auction to proceed' : 'Select a warehouse first');
+        }
+    }
+
+    async function updateAuctionDropdown() {
+        const selectedWarehouse = warehouseSelect.value;
+        auctionSelect.innerHTML = '<option value="">Select an auction</option>';
+        
+        if (!selectedWarehouse) {
+            updateUI('WAITING', 'Select a warehouse first');
+            return;
+        }
+
+        try {
+            updateUI('LOADING', 'Fetching auctions...');
+            const response = await fetch(`/auction/get-warehouse-events/?warehouse=${encodeURIComponent(selectedWarehouse)}&process_type=past`);
+            
+            if (!response.ok) {
+                throw new Error('Failed to fetch auctions');
+            }
+            
+            const auctions = await response.json();
+            
+            if (auctions.length === 0) {
+                updateUI('READY', 'No ended auctions found');
+                return;
+            }
+
+            auctions.forEach(auction => {
+                const option = document.createElement('option');
+                option.value = auction.id;
+                option.textContent = `${auction.title} (${auction.id}) - Ended: ${new Date(auction.ending_date).toLocaleDateString()}`;
+                auctionSelect.appendChild(option);
+            });
+
+            updateUI('READY', 'Select an auction to proceed');
+            
+        } catch (error) {
+            console.error('Error fetching auctions:', error);
+            updateUI('ERROR', 'Failed to fetch auctions');
+        }
+    }
 
     form.addEventListener('submit', async function(e) {
         e.preventDefault();
         
         const formData = {
-            warehouse: document.getElementById('warehouse').value,
-            auction_id: document.getElementById('auction_id').value,
+            warehouse: warehouseSelect.value,
+            auction_id: auctionSelect.value,
             upload_choice: parseInt(document.querySelector('input[name="upload_choice"]:checked').value)
         };
 
-        // Validate required fields
         if (!formData.warehouse || !formData.auction_id) {
             updateUI('ERROR', 'Please select both warehouse and auction');
             return;
         }
 
-        clearPreviousResults();
-        disableSubmitButton();
-        showSpinner();
-        updateUI('PROCESSING', 'Starting void unpaid process...');
-
         try {
-            const response = await fetch('{% url "auction:void_unpaid" %}', {
+            disableFormControls(true);
+            showSpinner();
+            updateUI('PROCESSING', 'Starting void unpaid process...');
+
+            const response = await fetch('/auction/void-unpaid/', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -91,8 +155,6 @@ document.addEventListener('DOMContentLoaded', function() {
             }
 
             if (data.task_id) {
-                console.log('Starting polling for task:', data.task_id);
-                updateUI('STARTED', 'Process started successfully');
                 pollTaskStatus(data.task_id);
             } else {
                 throw new Error('No task ID received from server');
@@ -101,15 +163,29 @@ document.addEventListener('DOMContentLoaded', function() {
         } catch (error) {
             console.error('Error:', error);
             updateUI('ERROR', error.message);
+            disableFormControls(false);
             hideSpinner();
-            enableSubmitButton();
         }
     });
-});
 
-async function pollTaskStatus(taskId) {
+    function disableFormControls(disabled) {
+        warehouseSelect.disabled = disabled;
+        auctionSelect.disabled = disabled;
+        submitButton.disabled = disabled;
+        const radioButtons = document.querySelectorAll('input[name="upload_choice"]');
+        radioButtons.forEach(radio => radio.disabled = disabled);
+        
+        if (disabled) {
+            submitButton.classList.add('opacity-50', 'cursor-not-allowed');
+        } else {
+            submitButton.classList.remove('opacity-50', 'cursor-not-allowed');
+        }
+    }
+
+    async function pollTaskStatus(taskId) {
     const MAX_RETRIES = 3;
     let retries = 0;
+    let pollInterval;
 
     const poll = async () => {
         try {
@@ -124,142 +200,120 @@ async function pollTaskStatus(taskId) {
             // Update UI with current status
             updateUI(data.state, data.message || data.status);
 
-            if (data.state === 'SUCCESS') {
-                if (data.result) {
-                    displayResults(data.result);
-                }
-                hideSpinner();
-                enableSubmitButton();
-                return true;
-            }
-            
-            if (data.state === 'FAILURE' || data.state === 'ERROR') {
-                displayError(data.message || data.result || 'Task failed');
-                hideSpinner();
-                enableSubmitButton();
-                return true;
-            }
+            // Handle different task states
+            switch (data.state) {
+                case 'SUCCESS':
+                    clearInterval(pollInterval);
+                    hideSpinner();
+                    disableFormControls(false);
+                    if (data.result) {
+                        const resultDiv = document.createElement('div');
+                        resultDiv.className = 'mt-4 p-4 bg-green-50 dark:bg-green-900 rounded-lg';
+                        resultDiv.innerHTML = `
+                            <h3 class="text-lg font-semibold text-green-700 dark:text-green-300">Process Completed</h3>
+                            <p class="mt-2 text-green-600 dark:text-green-200">${data.result}</p>
+                        `;
+                        statusMessage.appendChild(resultDiv);
+                    }
+                    break;
 
-            return false;
+                case 'FAILURE':
+                case 'ERROR':
+                    clearInterval(pollInterval);
+                    hideSpinner();
+                    disableFormControls(false);
+                    const errorDiv = document.createElement('div');
+                    errorDiv.className = 'mt-4 p-4 bg-red-50 dark:bg-red-900 rounded-lg';
+                    errorDiv.innerHTML = `
+                        <h3 class="text-lg font-semibold text-red-700 dark:text-red-300">Error Occurred</h3>
+                        <p class="mt-2 text-red-600 dark:text-red-200">${data.message || data.result || 'Task failed'}</p>
+                    `;
+                    statusMessage.appendChild(errorDiv);
+                    break;
+
+                case 'PROGRESS':
+                    // Show progress information if available
+                    if (data.progress) {
+                        updateUI('PROCESSING', `${data.message || 'Processing'} (${Math.round(data.progress)}%)`);
+                    }
+                    break;
+
+                case 'PENDING':
+                case 'STARTED':
+                    // Continue polling
+                    break;
+
+                default:
+                    if (retries >= MAX_RETRIES) {
+                        clearInterval(pollInterval);
+                        hideSpinner();
+                        disableFormControls(false);
+                        updateUI('ERROR', 'Task status check failed after multiple attempts');
+                    }
+                    retries++;
+            }
 
         } catch (error) {
             console.error('Error polling status:', error);
             retries++;
             
             if (retries >= MAX_RETRIES) {
-                updateUI('ERROR', 'Failed to check task status after multiple attempts');
+                clearInterval(pollInterval);
                 hideSpinner();
-                enableSubmitButton();
-                return true;
+                disableFormControls(false);
+                updateUI('ERROR', 'Failed to check task status after multiple attempts');
             }
-            
-            return false;
         }
     };
 
-    while (!(await poll())) {
-        await new Promise(resolve => setTimeout(resolve, 5000));
-    }
-}
-
-async function updateAuctionDropdown() {
-    const warehouseSelect = document.getElementById('warehouse');
-    const auctionSelect = document.getElementById('auction_id');
-    const selectedWarehouse = warehouseSelect.value;
-
-    // Reset auction dropdown
-    auctionSelect.innerHTML = '<option value="">Select an auction</option>';
-
-    if (!selectedWarehouse) return;
-
-    try {
-        updateUI('LOADING', 'Fetching auctions...');
-        
-        const response = await fetch(`/auction/get-warehouse-events/?warehouse=${selectedWarehouse}&process_type=past`);
-        if (!response.ok) throw new Error('Failed to fetch auctions');
-        
-        const filteredAuctions = await response.json();
-        
-        filteredAuctions.forEach(auction => {
-            const option = document.createElement('option');
-            option.value = auction.id;
-            option.textContent = `${auction.title} (${auction.id}) - Ended: ${auction.ending_date}`;
-            auctionSelect.appendChild(option);
-        });
-
-        updateUI('READY', filteredAuctions.length ? 'Select an auction to proceed' : 'No ended auctions found');
-        
-    } catch (error) {
-        console.error('Error fetching auctions:', error);
-        updateUI('ERROR', 'Failed to fetch auctions');
-    }
-}
-
-function updateUI(state, message) {
-    const statusMessage = document.getElementById('status-message');
-    statusMessage.textContent = message;
+    // Initial poll
+    await poll();
     
-    // Remove all existing color classes
-    statusMessage.classList.remove('text-gray-600', 'text-green-600', 'text-red-600', 'text-yellow-600');
-    
-    // Add appropriate color class based on state
-    switch (state) {
-        case 'SUCCESS':
-            statusMessage.classList.add('text-green-600');
-            break;
-        case 'ERROR':
-        case 'FAILURE':
-            statusMessage.classList.add('text-red-600');
-            break;
-        case 'PROCESSING':
-        case 'STARTED':
-            statusMessage.classList.add('text-yellow-600');
-            break;
-        default:
-            statusMessage.classList.add('text-gray-600');
+    // Continue polling every 5 seconds
+    pollInterval = setInterval(poll, 5000);
+
+    // Set a timeout to stop polling after 30 minutes
+    setTimeout(() => {
+        if (pollInterval) {
+            clearInterval(pollInterval);
+            hideSpinner();
+            disableFormControls(false);
+            updateUI('ERROR', 'Task timed out after 30 minutes');
+        }
+    }, 30 * 60 * 1000);
+}
+
+    function updateUI(state, message) {
+        if (statusMessage) {
+            statusMessage.textContent = message;
+            statusMessage.className = 'mt-4 text-center text-sm ';
+            
+            switch (state) {
+                case 'SUCCESS':
+                    statusMessage.classList.add('text-green-600');
+                    break;
+                case 'ERROR':
+                    statusMessage.classList.add('text-red-600');
+                    break;
+                case 'PROCESSING':
+                    statusMessage.classList.add('text-yellow-600');
+                    break;
+                case 'LOADING':
+                    statusMessage.classList.add('text-blue-600');
+                    break;
+                default:
+                    statusMessage.classList.add('text-gray-600');
+            }
+        }
     }
-}
 
-function displayResults(result) {
-    const resultsDiv = document.createElement('div');
-    resultsDiv.className = 'mt-4 p-4 bg-green-50 dark:bg-green-900 rounded-lg';
-    resultsDiv.innerHTML = `
-        <h3 class="text-lg font-semibold text-green-700 dark:text-green-300">Process Completed</h3>
-        <p class="mt-2 text-green-600 dark:text-green-200">${result}</p>
-    `;
-    statusMessage.appendChild(resultsDiv);
-}
+    function showSpinner() {
+        spinner.classList.remove('hidden');
+    }
 
-function displayError(message) {
-    const errorDiv = document.createElement('div');
-    errorDiv.className = 'mt-4 p-4 bg-red-50 dark:bg-red-900 rounded-lg';
-    errorDiv.innerHTML = `
-        <h3 class="text-lg font-semibold text-red-700 dark:text-red-300">Error Occurred</h3>
-        <p class="mt-2 text-red-600 dark:text-red-200">${message}</p>
-    `;
-    statusMessage.appendChild(errorDiv);
-}
-
-function showSpinner() {
-    spinner.classList.remove('hidden');
-}
-
-function hideSpinner() {
-    spinner.classList.add('hidden');
-}
-
-function disableSubmitButton() {
-    submitButton.disabled = true;
-    submitButton.classList.add('opacity-50', 'cursor-not-allowed');
-}
-
-function enableSubmitButton() {
-    submitButton.disabled = false;
-    submitButton.classList.remove('opacity-50', 'cursor-not-allowed');
-}
-
-function clearPreviousResults() {
-    statusMessage.innerHTML = '';
-}
+    function hideSpinner() {
+        spinner.classList.add('hidden');
+    }
+});
 </script>
 {% endblock %}
