@@ -15,13 +15,21 @@ app.config_from_object('django.conf:settings', namespace='CELERY')
 # Load task modules from all registered Django apps.
 app.autodiscover_tasks()
 
+# Configure SSL settings for Redis if using SSL
 if settings.REDIS_URL.startswith('rediss://'):
-    app.conf.broker_use_ssl = {
+    ssl_config = {
         'ssl_cert_reqs': None,
+        'ssl_ca_certs': None,
+        'ssl_keyfile': None,
+        'ssl_certfile': None
     }
-    app.conf.redis_backend_use_ssl = {
-        'ssl_cert_reqs': None,
-    }
+    app.conf.update(
+        broker_use_ssl=ssl_config,
+        redis_backend_use_ssl=ssl_config,
+        broker_connection_retry_on_startup=True
+    )
+    # Ensure broker pool settings are also updated
+    app.conf.broker_pool_limit = 3  # Limit connection pool size
 
 # Set the default event loop policy to use
 asyncio.set_event_loop_policy(asyncio.DefaultEventLoopPolicy())
