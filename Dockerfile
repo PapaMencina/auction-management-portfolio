@@ -15,11 +15,11 @@ COPY . /app/
 # Set environment variable for port
 ENV PORT=8000
 
-# Command to run the web server with optimized settings
+# Command to run the web server with proper formatting
 CMD gunicorn auction_webapp.wsgi:application \
     --bind 0.0.0.0:$PORT \
-    --workers=2 \
-    --threads=4 \
-    --timeout=120 \
-    --max-requests=1000 \
-    --max-request
+    --workers 2 \
+    --threads 4 \
+    --timeout 120 \
+    --max-requests 1000 \
+    --max-requests-jitter 50
