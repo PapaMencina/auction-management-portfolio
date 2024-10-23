@@ -1,4 +1,4 @@
-# Worker Dockerfile
+# Web Dockerfile
 FROM mcr.microsoft.com/playwright/python:v1.39.0-jammy
 
 # Set environment variables for better Python performance
@@ -23,14 +23,17 @@ RUN playwright install chromium && \
 # Copy application code
 COPY . /app/
 
-# Configure Celery for Standard-2x dyno
-CMD celery -A auction_webapp worker \
-    --concurrency=4 \
-    --loglevel=info \
-    --max-memory-per-child=900000 \
-    --max-tasks-per-child=20 \
-    --optimization=fair \
-    --pool=prefork \
-    --without-gossip \
-    --without-mingle \
-    --without-heartbeat
+# Set environment variable for port
+ENV PORT=8000
+
+# Configure Gunicorn for Standard-1x dyno
+CMD gunicorn auction_webapp.wsgi:application \
+    --bind 0.0.0.0:$PORT \
+    --workers 2 \
+    --threads 4 \
+    --timeout 120 \
+    --max-requests 1000 \
+    --max-requests-jitter 50 \
+    --worker-class=gthread \
+    --worker-tmp-dir=/dev/shm \
+    --preload
