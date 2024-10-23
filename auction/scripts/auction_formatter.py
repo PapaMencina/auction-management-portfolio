@@ -53,7 +53,7 @@ config_path = os.path.join(
 config_manager.load_config(config_path)
 
 class FTPPool:
-    def __init__(self, max_connections=5):
+    def __init__(self, max_connections=6):
         self.max_connections = max_connections
         self.semaphore = asyncio.Semaphore(max_connections)
         self.server = config_manager.get_global_var('ftp_server')
@@ -485,13 +485,18 @@ class AuctionFormatter:
         self.current_step = 0
 
         # Configure for Heroku Standard-2x dyno
-        self.MAX_CONCURRENT_TASKS = 4  # Total concurrent tasks
-        self.MAX_CONCURRENT_IMAGES = 2  # Concurrent image processing
-        self.BATCH_SIZE = 25  # Smaller batch size for memory management
-        self.IMAGE_CHUNK_SIZE = 5  # Process images in smaller chunks
+        self.MAX_CONCURRENT_TASKS = 5  # Total concurrent tasks
+        self.MAX_CONCURRENT_IMAGES = 6  # Concurrent image processing
+        self.BATCH_SIZE = 75  # Smaller batch size for memory management
+        self.IMAGE_CHUNK_SIZE = 6  # Process images in smaller chunks
         
         # Memory management
         self.memory_limit = 900 * 1024 * 1024  # 900MB limit for Standard-2x (leaving buffer)
+        
+        # Website URLs and notification email
+        self.website_login_url = config_manager.get_global_var('website_login_url')
+        self.import_csv_url = config_manager.get_global_var('import_csv_url')
+        self.notification_email = config_manager.get_global_var('notification_email')
         
         config_manager.set_active_warehouse(selected_warehouse)
         
@@ -505,9 +510,9 @@ class AuctionFormatter:
         self.semaphores = {
             'main': asyncio.Semaphore(self.MAX_CONCURRENT_TASKS),
             'image': asyncio.Semaphore(self.MAX_CONCURRENT_IMAGES),
-            'ftp': asyncio.Semaphore(3)  # Limit FTP connections
+            'ftp': asyncio.Semaphore(6)  # Limit FTP connections
         }
-        self.ftp_pool = FTPPool(max_connections=3)  # Reduced FTP connections
+        self.ftp_pool = FTPPool(max_connections=6)  # Reduced FTP connections
         self.rate_limiter = RateLimiter(rate_limit=5, time_period=1)
     
     def update_progress(self, message, sub_progress=None):
@@ -877,6 +882,110 @@ class AuctionFormatter:
 
         return processed_records, failed_records
 
+    async def process_single_record_async(self, record, image_results):
+        """Async version of process_single_record as a method of AuctionFormatter"""
+        try:
+            record_id = record.get('id', '')
+            self.gui_callback(f"Processing record ID: {record_id}")
+
+            fields = record.get('fields', {})
+
+            new_record = {
+                'EventID': self.auction_id,
+                'LotNumber': str(fields.get("Lot Number", "")),
+                'Lot Number': str(fields.get("Lot Number", "")),
+                'Seller': "702Auctions",
+                'ConsignorNumber': "",
+                'Category_not_formatted': fields.get("Category", ""),
+                'Category': category_converter(fields.get("Category", "")),
+                'Region': "88850842" if self.selected_warehouse == "Maule Warehouse" else "88850843" if self.selected_warehouse == "Sunrise Warehouse" else "",
+                'ListingType': "Auction",
+                'Currency': "USD",
+                'Title': text_shortener("OFFSITE " + fields.get("Product Name", "") if self.selected_warehouse == "Sunrise Warehouse" else fields.get("Product Name", ""), 80),
+                'Subtitle': "",  # Will be set later
+                'Description': "",  # Will be set later
+                'Price': self.starting_price,
+                'Quantity': "1",
+                'IsTaxable': "TRUE",
+                'YouTubeID': "",
+                'PdfAttachments': "",
+                'Bold': "false",
+                'Badge': "",
+                'Highlight': "false",
+                'ShippingOptions': "",
+                'Duration': "",
+                'StartDTTM': "",
+                'EndDTTM': "",
+                'AutoRelist': "0",
+                'GoodTilCanceled': "false",
+                'Working Condition': fields.get("Working Condition", ""),
+                'UPC': "",  # Will be set later
+                'Truck': fields.get("Shipment", ""),
+                'Source': "AMZ FC",
+                'Size': fields.get("Size", ""),
+                'Photo Taker': fields.get("Clerk", ""),
+                'Packaging': "",
+                'Other Notes': fields.get("Notes", ""),
+                'MSRP': fields.get("MSRP", "0.00"),
+                'Location': fields.get("Location", ""),
+                'Item Condition': fields.get("Condition", ""),
+                'ID': record_id,
+                'Amazon ID': fields.get("B00 ASIN", ""),
+                'AuctionCount': fields.get("Auction Count", ""),
+                'HibidSearchText': fields.get("Description", ""),
+                'FullTitle': fields.get("Product Name", "")
+            }
+
+            # UPC handling
+            upc = str(fields.get("UPC", ""))
+            new_record["UPC"] = "" if upc.lower() == 'nan' or not upc.isdigit() else upc
+
+            # Subtitle
+            new_record["Subtitle"] = format_subtitle(
+                int(new_record["AuctionCount"]) if new_record["AuctionCount"] else 1,
+                float(new_record["MSRP"]) if new_record["MSRP"] else 0.00,
+                new_record["Other Notes"]
+            )
+
+            # Description
+            description_parts = [
+                format_html_field("Description", new_record['FullTitle']),
+                format_html_field("MSRP", new_record['MSRP']),
+                format_html_field("Condition", new_record['Item Condition']),
+                format_html_field("Notes", new_record['Other Notes']),
+                format_html_field("Other info", new_record['HibidSearchText']),
+                format_html_field("Lot Number", new_record['LotNumber'])
+            ]
+            new_record["Description"] = ''.join(part for part in description_parts if part)
+            new_record["Description"] += "<br><b>Pickup Information:</b> This item is available for LOCAL PICKUP ONLY. No shipping available."
+
+            # Handle image URLs
+            for i in range(1, 11):
+                new_record[f"Image_{i}"] = ''
+
+            if image_results:  # Using passed image results instead of checking uploaded_image_urls
+                self.gui_callback(f"Found uploaded images for record ID: {record_id}")
+                sorted_images = sorted(image_results, key=lambda x: x[1])
+                for url, image_number in sorted_images:
+                    if 1 <= image_number <= 10:
+                        new_record[f'Image_{image_number}'] = url
+                        self.gui_callback(f"Assigned Image_{image_number}: {url}")
+                
+                if not new_record['Image_1']:
+                    self.gui_callback(f"Warning: Image_1 is missing for record ID: {record_id}")
+            else:
+                self.gui_callback(f"No uploaded images found for record ID: {record_id}")
+
+            new_record['Success'] = True
+            return new_record
+
+        except Exception as e:
+            lot_number = fields.get('Lot Number', 'Unknown')
+            error_message = f"Error processing Lot Number {lot_number}: {str(e)}"
+            self.gui_callback(f"Error: {error_message}")
+            self.gui_callback(f"Traceback: {traceback.format_exc()}")
+            return {'Lot Number': lot_number, 'Failure Message': error_message, 'Success': False}
+
     def check_memory_usage(self) -> float:
         """Check current memory usage ratio"""
         import resource
@@ -1035,13 +1144,13 @@ class AuctionFormatter:
             return None
 
     async def process_single_record_with_semaphore(self, record, image_results):
-        """Process single record with proper error handling"""
+        """Process single record with semaphore control"""
         try:
             async with self.semaphores['main']:
                 return await self.process_single_record_async(record, image_results)
         except Exception as e:
-            self.gui_callback(f"Error processing record {record['id']}: {str(e)}")
-            return {'id': record['id'], 'error': str(e), 'Success': False}
+            self.gui_callback(f"Error processing record {record.get('id', 'unknown')}: {str(e)}")
+            return {'id': record.get('id', 'unknown'), 'error': str(e), 'Success': False}
 
     async def download_and_process_image(self, record_id, url, image_number, image_data_dict):
         image_data = await download_image_async(url, self.gui_callback)
