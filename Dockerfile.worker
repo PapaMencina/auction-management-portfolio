@@ -23,15 +23,18 @@ RUN playwright install chromium && \
 # Copy application code
 COPY . /app/
 
-# Configure Celery for Standard-2x dyno
+# Configure Celery for optimized performance
 CMD celery -A auction_webapp worker \
-    --concurrency=4 \
+    --concurrency=6 \
     --loglevel=info \
-    --max-memory-per-child=900000 \
-    --max-tasks-per-child=20 \
+    --max-memory-per-child=512000 \
+    --max-tasks-per-child=50 \
     --optimization=fair \
     --pool=prefork \
     --without-gossip \
     --without-mingle \
     --without-heartbeat \
-    -Ofair
+    --time-limit=3600 \
+    --soft-time-limit=3300 \
+    -Ofair \
+    --prefetch-multiplier=4
