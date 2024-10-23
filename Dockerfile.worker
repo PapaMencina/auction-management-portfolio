@@ -1,20 +1,36 @@
+# Worker Dockerfile
 FROM mcr.microsoft.com/playwright/python:v1.39.0-jammy
+
+# Set environment variables for better Python performance
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONHASHSEED=random \
+    PIP_NO_CACHE_DIR=off \
+    PIP_DISABLE_PIP_VERSION_CHECK=on \
+    PIP_DEFAULT_TIMEOUT=100
 
 WORKDIR /app
 
-# Copy the requirements file and install dependencies
+# Copy and install requirements
 COPY requirements.txt /app/
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install only Chromium browser to save space and memory
-RUN playwright install --with-deps chromium
+# Install only Chromium browser with minimal dependencies
+RUN playwright install chromium && \
+    playwright install-deps chromium && \
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-# Copy the rest of the application code
+# Copy application code
 COPY . /app/
 
-# Command to run the Celery worker with proper formatting
+# Configure Celery for Standard-2x dyno
 CMD celery -A auction_webapp worker \
-    --concurrency=3 \
+    --concurrency=4 \
     --loglevel=info \
-    --max-memory-per-child=450000 \
-    --max-tasks-per-child=10
+    --max-memory-per-child=900000 \
+    --max-tasks-per-child=20 \
+    --optimization=fair \
+    --pool=prefork \
+    --without-gossip \
+    --without-mingle \
+    --without-heartbeat

@@ -6,4 +6,16 @@ build:
 release:
   image: web
   command:
-    - python manage.py migrate
+    - python manage.py migrate --noinput
+    - python manage.py collectstatic --noinput
+
+setup:
+  config:
+    DJANGO_SETTINGS_MODULE: auction_webapp.settings
+    PLAYWRIGHT_BROWSERS_PATH: /app/.cache/ms-playwright
+    PYTHONPATH: /app
+    WEB_CONCURRENCY: 2
+    WORKER_CONCURRENCY: 4
+    CELERY_MAX_TASKS_PER_CHILD: 20
+    CELERY_MAX_MEMORY: 900000
+    CELERY_OPTIMIZATION: fair
