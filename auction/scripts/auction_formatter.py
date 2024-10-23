@@ -9,6 +9,7 @@ import tempfile
 import cachetools
 import tenacity
 import csv
+import gc
 
 from typing import Optional
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -790,9 +791,20 @@ class AuctionFormatter:
             RedisTaskStatus.set_status(self.task_id, "ERROR", f"Failed to fetch Airtable records: {str(e)}")
             self.gui_callback(f"Error fetching Airtable records: {str(e)}")
             return None
+    
+    def prepare_record_images(self, record):
+        """Prepare and sort record images"""
+        record_images = []
+        for j in range(1, 11):
+            image_info = record["fields"].get(f"Image {j}", [])
+            if image_info:
+                record_images.append((j, image_info[0].get("url")))
+        # Sort to ensure image_1 is processed first
+        record_images.sort(key=lambda x: x[0])
+        return record_images
 
     async def process_records_and_images(self, airtable_records):
-        """Process records with optimized batch handling"""
+        """Process records with optimized parallel processing"""
         if not self.semaphores:
             await self.setup_resources()
 
@@ -801,66 +813,67 @@ class AuctionFormatter:
         failed_records = []
         total_records = len(airtable_records)
 
-        for i in range(0, total_records, self.BATCH_SIZE):
+        # Process in larger batches, but with controlled concurrency
+        BATCH_SIZE = 50  # Increased from 25
+        MAX_CONCURRENT_IMAGES = 8  # Increased from 4
+
+        for i in range(0, total_records, BATCH_SIZE):
             if self.should_stop.is_set():
                 break
 
-            batch = airtable_records[i:i+self.BATCH_SIZE]
-            self.gui_callback(f"Processing batch {i//self.BATCH_SIZE + 1} of {(total_records + self.BATCH_SIZE - 1)//self.BATCH_SIZE}")
+            batch = airtable_records[i:i+BATCH_SIZE]
+            self.gui_callback(f"Processing batch {i//BATCH_SIZE + 1} of {(total_records + BATCH_SIZE - 1)//BATCH_SIZE}")
 
-            # Process images in smaller chunks
+            # Process images in parallel with controlled concurrency
+            image_tasks = []
+            semaphore = asyncio.Semaphore(MAX_CONCURRENT_IMAGES)
+
             for record in batch:
-                record_images = []
-                for j in range(1, 11):
-                    image_info = record["fields"].get(f"Image {j}", [])
-                    if image_info:
-                        record_images.append((j, image_info[0].get("url")))
+                record_images = self.prepare_record_images(record)
+                if record_images:
+                    image_tasks.extend([
+                        self.process_single_image_with_semaphore(semaphore, record['id'], url, j)
+                        for j, url in record_images
+                    ])
 
-                # Sort to ensure image_1 is processed first
-                record_images.sort(key=lambda x: x[0])
-                
-                # Process images in chunks
-                image_results = []
-                for k in range(0, len(record_images), self.IMAGE_CHUNK_SIZE):
-                    chunk = record_images[k:k + self.IMAGE_CHUNK_SIZE]
-                    chunk_tasks = [
-                        self.process_single_image(record['id'], url, j)
-                        for j, url in chunk
-                    ]
-                    chunk_results = await asyncio.gather(*chunk_tasks, return_exceptions=True)
-                    
-                    for result in chunk_results:
-                        if isinstance(result, Exception):
-                            self.gui_callback(f"Error processing image: {str(result)}")
-                            continue
-                        if result:
-                            image_results.append(result)
+            # Process images concurrently
+            image_results = {}
+            if image_tasks:
+                results = await asyncio.gather(*image_tasks, return_exceptions=True)
+                for result in results:
+                    if isinstance(result, Exception):
+                        self.gui_callback(f"Error in image processing: {str(result)}")
+                        continue
+                    if result:
+                        record_id, url, image_number = result
+                        if record_id not in image_results:
+                            image_results[record_id] = []
+                        image_results[record_id].append((url, image_number))
 
-                # Process record with its images
-                async with self.semaphores['main']:
-                    try:
-                        record_result = await self.process_single_record_async(record, image_results)
-                        if record_result.get('Success', False):
-                            processed_records.append(record_result)
-                        else:
-                            failed_records.append(record_result)
-                    except Exception as e:
-                        self.gui_callback(f"Error processing record {record['id']}: {str(e)}")
-                        failed_records.append({'id': record['id'], 'error': str(e)})
+            # Process records with their images
+            record_tasks = [
+                self.process_single_record_with_semaphore(record, image_results.get(record['id'], []))
+                for record in batch
+            ]
 
-            # Calculate progress
-            progress = min((i + self.BATCH_SIZE) / total_records * 100, 100)
-            self.gui_callback(f"Processed {progress:.1f}% of records")
+            batch_results = await asyncio.gather(*record_tasks, return_exceptions=True)
             
-            # Force garbage collection after each batch
-            import gc
-            gc.collect()
+            # Handle results
+            for result in batch_results:
+                if isinstance(result, Exception):
+                    self.gui_callback(f"Error processing record: {str(result)}")
+                    continue
+                if result.get('Success', False):
+                    processed_records.append(result)
+                else:
+                    failed_records.append(result)
 
-            # Check memory usage and adjust if needed
-            if self.check_memory_usage() > 0.8:  # Over 80% memory usage
-                self.gui_callback("High memory usage detected, reducing batch size")
-                self.BATCH_SIZE = max(10, self.BATCH_SIZE - 5)
-                await asyncio.sleep(2)  # Allow time for memory cleanup
+            # Calculate and report progress
+            progress = min((i + BATCH_SIZE) / total_records * 100, 100)
+            self.gui_callback(f"Processed {progress:.1f}% of records")
+
+            # Quick cleanup after each batch
+            gc.collect()
 
         return processed_records, failed_records
 
@@ -960,27 +973,23 @@ class AuctionFormatter:
             logger.error(traceback.format_exc())
             raise
         
-    async def process_single_image(self, record_id, url, image_number):
-        """Process single image with proper semaphore handling"""
-        if not self.semaphores:
-            await self.setup_resources()
-
-        async with self.semaphores['image']:
+    async def process_single_image_with_semaphore(self, semaphore, record_id, url, image_number):
+        """Process single image with semaphore control"""
+        async with semaphore:
             for attempt in range(3):
                 try:
                     self.gui_callback(f"Processing image {image_number} for record {record_id} (Attempt {attempt + 1})")
                     
-                    # Download and process image
-                    image_data = await download_image_async(url, self.gui_callback)
-                    if not image_data:
-                        continue
+                    # Process image with timeouts
+                    async with asyncio.timeout(30):  # 30 second timeout for entire operation
+                        image_data = await download_image_async(url, self.gui_callback)
+                        if not image_data:
+                            continue
 
-                    processed_data = await process_image_async(image_data, self.gui_callback)
-                    if not processed_data:
-                        continue
+                        processed_data = await process_image_async(image_data, self.gui_callback)
+                        if not processed_data:
+                            continue
 
-                    # Upload with FTP semaphore
-                    async with self.semaphores['ftp']:
                         file_name = f"{record_id}_{image_number}.jpg"
                         uploaded_url = await upload_file_via_ftp_async(
                             file_name, 
@@ -990,27 +999,24 @@ class AuctionFormatter:
                         )
                         
                         if uploaded_url:
-                            self.gui_callback(f"Successfully processed image {image_number} for record {record_id}")
                             return (record_id, uploaded_url, image_number)
 
-                    await asyncio.sleep(attempt + 1)  # Exponential backoff
-
+                    await asyncio.sleep(attempt + 1)
+                except asyncio.TimeoutError:
+                    self.gui_callback(f"Timeout processing image {image_number} for record {record_id}")
                 except Exception as e:
                     self.gui_callback(f"Error processing image {image_number} for record {record_id}: {str(e)}")
-                    await asyncio.sleep(2 ** attempt)  # Exponential backoff
-
+                    await asyncio.sleep(attempt + 1)
             return None
 
-    async def process_single_record_async(self, semaphore, record, image_results):
-        async with semaphore:
-            uploaded_image_urls = defaultdict(list)
-            for result in image_results:
-                if result and result[0] == record['id']:
-                    uploaded_image_urls[result[0]].append((result[1], result[2]))
-            
-            return process_single_record(
-                record, uploaded_image_urls, self.auction_id, self.selected_warehouse, self.starting_price, self.gui_callback
-            )
+    async def process_single_record_with_semaphore(self, record, image_results):
+        """Process single record with proper error handling"""
+        try:
+            async with self.semaphores['main']:
+                return await self.process_single_record_async(record, image_results)
+        except Exception as e:
+            self.gui_callback(f"Error processing record {record['id']}: {str(e)}")
+            return {'id': record['id'], 'error': str(e), 'Success': False}
 
     async def download_and_process_image(self, record_id, url, image_number, image_data_dict):
         image_data = await download_image_async(url, self.gui_callback)

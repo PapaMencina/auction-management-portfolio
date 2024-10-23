@@ -33,4 +33,5 @@ CMD celery -A auction_webapp worker \
     --pool=prefork \
     --without-gossip \
     --without-mingle \
-    --without-heartbeat
+    --without-heartbeat \
+    -Ofair
