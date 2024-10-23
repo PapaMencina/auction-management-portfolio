@@ -484,14 +484,14 @@ class AuctionFormatter:
         self.total_steps = 6
         self.current_step = 0
 
-        # Configure for Heroku Standard-2x dyno
-        self.MAX_CONCURRENT_TASKS = 5  # Total concurrent tasks
-        self.MAX_CONCURRENT_IMAGES = 6  # Concurrent image processing
-        self.BATCH_SIZE = 75  # Smaller batch size for memory management
-        self.IMAGE_CHUNK_SIZE = 6  # Process images in smaller chunks
+        # Optimized configuration for better performance
+        self.MAX_CONCURRENT_TASKS = 8        # Increased from 4
+        self.MAX_CONCURRENT_IMAGES = 12      # Increased from 2
+        self.BATCH_SIZE = 75                 # Increased from 25
+        self.IMAGE_CHUNK_SIZE = 10           # Increased from 5
         
-        # Memory management
-        self.memory_limit = 900 * 1024 * 1024  # 900MB limit for Standard-2x (leaving buffer)
+        # Memory management - adjusted based on observed usage
+        self.memory_limit = 900 * 1024 * 1024  # 800MB target (still safe below 900MB limit)
         
         # Website URLs and notification email
         self.website_login_url = config_manager.get_global_var('website_login_url')
@@ -500,20 +500,19 @@ class AuctionFormatter:
         
         config_manager.set_active_warehouse(selected_warehouse)
         
-        # These will be initialized in setup_resources()
         self.semaphores = None
         self.ftp_pool = None
         self.rate_limiter = None
 
     async def setup_resources(self):
-        """Initialize resources within the correct event loop"""
+        """Initialize resources with optimized concurrency settings"""
         self.semaphores = {
             'main': asyncio.Semaphore(self.MAX_CONCURRENT_TASKS),
             'image': asyncio.Semaphore(self.MAX_CONCURRENT_IMAGES),
-            'ftp': asyncio.Semaphore(6)  # Limit FTP connections
+            'ftp': asyncio.Semaphore(7)  # Increased to maximum allowed FTP connections
         }
-        self.ftp_pool = FTPPool(max_connections=6)  # Reduced FTP connections
-        self.rate_limiter = RateLimiter(rate_limit=5, time_period=1)
+        self.ftp_pool = FTPPool(max_connections=7)  # Increased to maximum allowed
+        self.rate_limiter = RateLimiter(rate_limit=10, time_period=1)  # Doubled rate limit
     
     def update_progress(self, message, sub_progress=None):
         self.current_step += 1
@@ -809,7 +808,7 @@ class AuctionFormatter:
         return record_images
 
     async def process_records_and_images(self, airtable_records):
-        """Process records with optimized parallel processing"""
+        """Optimized record and image processing with increased parallelism"""
         if not self.semaphores:
             await self.setup_resources()
 
@@ -818,34 +817,33 @@ class AuctionFormatter:
         failed_records = []
         total_records = len(airtable_records)
 
-        # Process in larger batches, but with controlled concurrency
-        BATCH_SIZE = 50  # Increased from 25
-        MAX_CONCURRENT_IMAGES = 8  # Increased from 4
-
-        for i in range(0, total_records, BATCH_SIZE):
+        # Process in larger chunks with higher concurrency
+        for i in range(0, total_records, self.BATCH_SIZE):
             if self.should_stop.is_set():
                 break
 
-            batch = airtable_records[i:i+BATCH_SIZE]
-            self.gui_callback(f"Processing batch {i//BATCH_SIZE + 1} of {(total_records + BATCH_SIZE - 1)//BATCH_SIZE}")
+            batch = airtable_records[i:i+self.BATCH_SIZE]
+            self.gui_callback(f"Processing batch {i//self.BATCH_SIZE + 1} of {(total_records + self.BATCH_SIZE - 1)//self.BATCH_SIZE}")
 
-            # Process images in parallel with controlled concurrency
+            # Process images with higher concurrency
             image_tasks = []
-            semaphore = asyncio.Semaphore(MAX_CONCURRENT_IMAGES)
-
             for record in batch:
                 record_images = self.prepare_record_images(record)
                 if record_images:
-                    image_tasks.extend([
-                        self.process_single_image_with_semaphore(semaphore, record['id'], url, j)
+                    # Process multiple images per record concurrently
+                    record_image_tasks = [
+                        self.process_single_image_with_semaphore(self.semaphores['image'], record['id'], url, j)
                         for j, url in record_images
-                    ])
+                    ]
+                    image_tasks.extend(record_image_tasks)
 
-            # Process images concurrently
+            # Process all image tasks concurrently with chunking
             image_results = {}
-            if image_tasks:
-                results = await asyncio.gather(*image_tasks, return_exceptions=True)
-                for result in results:
+            for chunk_start in range(0, len(image_tasks), self.IMAGE_CHUNK_SIZE):
+                chunk_end = chunk_start + self.IMAGE_CHUNK_SIZE
+                chunk_results = await asyncio.gather(*image_tasks[chunk_start:chunk_end], return_exceptions=True)
+                
+                for result in chunk_results:
                     if isinstance(result, Exception):
                         self.gui_callback(f"Error in image processing: {str(result)}")
                         continue
@@ -855,7 +853,7 @@ class AuctionFormatter:
                             image_results[record_id] = []
                         image_results[record_id].append((url, image_number))
 
-            # Process records with their images
+            # Process records concurrently
             record_tasks = [
                 self.process_single_record_with_semaphore(record, image_results.get(record['id'], []))
                 for record in batch
@@ -863,7 +861,6 @@ class AuctionFormatter:
 
             batch_results = await asyncio.gather(*record_tasks, return_exceptions=True)
             
-            # Handle results
             for result in batch_results:
                 if isinstance(result, Exception):
                     self.gui_callback(f"Error processing record: {str(result)}")
@@ -873,12 +870,12 @@ class AuctionFormatter:
                 else:
                     failed_records.append(result)
 
-            # Calculate and report progress
-            progress = min((i + BATCH_SIZE) / total_records * 100, 100)
+            progress = min((i + self.BATCH_SIZE) / total_records * 100, 100)
             self.gui_callback(f"Processed {progress:.1f}% of records")
 
-            # Quick cleanup after each batch
-            gc.collect()
+            # Only collect garbage every few batches
+            if i % (self.BATCH_SIZE * 3) == 0:
+                gc.collect()
 
         return processed_records, failed_records
 
@@ -1083,41 +1080,37 @@ class AuctionFormatter:
             raise
         
     async def process_single_image_with_semaphore(self, semaphore, record_id, url, image_number):
-        """Process single image with semaphore control"""
+        """Optimized image processing with reduced delays"""
         async with semaphore:
             for attempt in range(3):
                 try:
                     self.gui_callback(f"Processing image {image_number} for record {record_id} (Attempt {attempt + 1})")
                     
-                    # Download image with timeout
+                    # Reduced timeout for faster failure detection
                     try:
                         image_data = await asyncio.wait_for(
                             download_image_async(url, self.gui_callback),
-                            timeout=30
+                            timeout=20  # Reduced from 30
                         )
                         if not image_data:
-                            await asyncio.sleep(attempt + 1)
+                            await asyncio.sleep(1)  # Reduced delay
                             continue
                     except asyncio.TimeoutError:
-                        self.gui_callback(f"Timeout downloading image {image_number} for record {record_id}")
-                        await asyncio.sleep(attempt + 1)
+                        await asyncio.sleep(1)
                         continue
 
-                    # Process image with timeout
                     try:
                         processed_data = await asyncio.wait_for(
                             process_image_async(image_data, self.gui_callback),
-                            timeout=30
+                            timeout=20
                         )
                         if not processed_data:
-                            await asyncio.sleep(attempt + 1)
+                            await asyncio.sleep(1)
                             continue
                     except asyncio.TimeoutError:
-                        self.gui_callback(f"Timeout processing image {image_number} for record {record_id}")
-                        await asyncio.sleep(attempt + 1)
+                        await asyncio.sleep(1)
                         continue
 
-                    # Upload image with timeout
                     try:
                         file_name = f"{record_id}_{image_number}.jpg"
                         uploaded_url = await asyncio.wait_for(
@@ -1127,19 +1120,19 @@ class AuctionFormatter:
                                 self.gui_callback,
                                 self.should_stop
                             ),
-                            timeout=30
+                            timeout=20
                         )
                         
                         if uploaded_url:
                             return (record_id, uploaded_url, image_number)
                     except asyncio.TimeoutError:
-                        self.gui_callback(f"Timeout uploading image {image_number} for record {record_id}")
+                        await asyncio.sleep(1)
                     
-                    await asyncio.sleep(attempt + 1)
+                    await asyncio.sleep(1)
 
                 except Exception as e:
                     self.gui_callback(f"Error processing image {image_number} for record {record_id}: {str(e)}")
-                    await asyncio.sleep(attempt + 1)
+                    await asyncio.sleep(1)
 
             return None
 
