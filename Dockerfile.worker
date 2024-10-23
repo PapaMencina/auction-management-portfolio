@@ -25,7 +25,7 @@ COPY . /app/
 
 # Configure Celery for optimized performance
 CMD celery -A auction_webapp worker \
-    --concurrency=6 \
+    --concurrency=8 \
     --loglevel=info \
     --max-memory-per-child=512000 \
     --max-tasks-per-child=50 \

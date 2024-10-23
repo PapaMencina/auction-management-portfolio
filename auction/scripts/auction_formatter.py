@@ -53,7 +53,7 @@ config_path = os.path.join(
 config_manager.load_config(config_path)
 
 class FTPPool:
-    def __init__(self, max_connections=6):
+    def __init__(self, max_connections=8):
         self.max_connections = max_connections
         self.semaphore = asyncio.Semaphore(max_connections)
         self.server = config_manager.get_global_var('ftp_server')
@@ -75,7 +75,7 @@ class FTPPool:
         # This method is now a no-op since connections are closed automatically
         pass
 
-ftp_pool = FTPPool(max_connections=6)  # Limit to 6 connections
+ftp_pool = FTPPool(max_connections=8)  # Limit to 8 connections
 
 class RateLimiter:
     def __init__(self, rate_limit, time_period):
@@ -509,10 +509,10 @@ class AuctionFormatter:
         self.semaphores = {
             'main': asyncio.Semaphore(self.MAX_CONCURRENT_TASKS),
             'image': asyncio.Semaphore(self.MAX_CONCURRENT_IMAGES),
-            'ftp': asyncio.Semaphore(7)  # Increased to maximum allowed FTP connections
+            'ftp': asyncio.Semaphore(8)  # Increased to maximum allowed FTP connections
         }
-        self.ftp_pool = FTPPool(max_connections=7)  # Increased to maximum allowed
-        self.rate_limiter = RateLimiter(rate_limit=10, time_period=1)  # Doubled rate limit
+        self.ftp_pool = FTPPool(max_connections=8)  # Increased to maximum allowed
+        self.rate_limiter = RateLimiter(rate_limit=10, time_period=1)
     
     def update_progress(self, message, sub_progress=None):
         self.current_step += 1
