@@ -980,33 +980,58 @@ class AuctionFormatter:
                 try:
                     self.gui_callback(f"Processing image {image_number} for record {record_id} (Attempt {attempt + 1})")
                     
-                    # Process image with timeouts
-                    async with asyncio.timeout(30):  # 30 second timeout for entire operation
-                        image_data = await download_image_async(url, self.gui_callback)
+                    # Download image with timeout
+                    try:
+                        image_data = await asyncio.wait_for(
+                            download_image_async(url, self.gui_callback),
+                            timeout=30
+                        )
                         if not image_data:
+                            await asyncio.sleep(attempt + 1)
                             continue
+                    except asyncio.TimeoutError:
+                        self.gui_callback(f"Timeout downloading image {image_number} for record {record_id}")
+                        await asyncio.sleep(attempt + 1)
+                        continue
 
-                        processed_data = await process_image_async(image_data, self.gui_callback)
+                    # Process image with timeout
+                    try:
+                        processed_data = await asyncio.wait_for(
+                            process_image_async(image_data, self.gui_callback),
+                            timeout=30
+                        )
                         if not processed_data:
+                            await asyncio.sleep(attempt + 1)
                             continue
+                    except asyncio.TimeoutError:
+                        self.gui_callback(f"Timeout processing image {image_number} for record {record_id}")
+                        await asyncio.sleep(attempt + 1)
+                        continue
 
+                    # Upload image with timeout
+                    try:
                         file_name = f"{record_id}_{image_number}.jpg"
-                        uploaded_url = await upload_file_via_ftp_async(
-                            file_name, 
-                            processed_data,
-                            self.gui_callback,
-                            self.should_stop
+                        uploaded_url = await asyncio.wait_for(
+                            upload_file_via_ftp_async(
+                                file_name,
+                                processed_data,
+                                self.gui_callback,
+                                self.should_stop
+                            ),
+                            timeout=30
                         )
                         
                         if uploaded_url:
                             return (record_id, uploaded_url, image_number)
-
+                    except asyncio.TimeoutError:
+                        self.gui_callback(f"Timeout uploading image {image_number} for record {record_id}")
+                    
                     await asyncio.sleep(attempt + 1)
-                except asyncio.TimeoutError:
-                    self.gui_callback(f"Timeout processing image {image_number} for record {record_id}")
+
                 except Exception as e:
                     self.gui_callback(f"Error processing image {image_number} for record {record_id}: {str(e)}")
                     await asyncio.sleep(attempt + 1)
+
             return None
 
     async def process_single_record_with_semaphore(self, record, image_results):
