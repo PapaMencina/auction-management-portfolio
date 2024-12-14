@@ -364,10 +364,10 @@ def process_single_record(airtable_record: Dict, uploaded_image_urls: Dict[str, 
             'ConsignorNumber': "",
             'Category_not_formatted': fields.get("Category", ""),
             'Category': category_converter(fields.get("Category", "")),
-            'Region': "88850842" if selected_warehouse == "Maule Warehouse" else "88850843" if selected_warehouse == "Sunrise Warehouse" else "",
+            'Region': "88850842" if selected_warehouse == "Maule Warehouse" else "88850843" if selected_warehouse == "Sahara Warehouse" else "",
             'ListingType': "Auction",
             'Currency': "USD",
-            'Title': text_shortener("OFFSITE " + fields.get("Product Name", "") if selected_warehouse == "Sunrise Warehouse" else fields.get("Product Name", ""), 80),
+            'Title': text_shortener("OFFSITE " + fields.get("Product Name", "") if selected_warehouse == "Sahara Warehouse" else fields.get("Product Name", ""), 80),
             'Subtitle': "",  # Will be set later
             'Description': "",  # Will be set later
             'Price': starting_price,
@@ -895,10 +895,10 @@ class AuctionFormatter:
                 'ConsignorNumber': "",
                 'Category_not_formatted': fields.get("Category", ""),
                 'Category': category_converter(fields.get("Category", "")),
-                'Region': "88850842" if self.selected_warehouse == "Maule Warehouse" else "88850843" if self.selected_warehouse == "Sunrise Warehouse" else "",
+                'Region': "88850842" if self.selected_warehouse == "Maule Warehouse" else "88850843" if self.selected_warehouse == "Sahara Warehouse" else "",
                 'ListingType': "Auction",
                 'Currency': "USD",
-                'Title': text_shortener("OFFSITE " + fields.get("Product Name", "") if self.selected_warehouse == "Sunrise Warehouse" else fields.get("Product Name", ""), 80),
+                'Title': text_shortener("OFFSITE " + fields.get("Product Name", "") if self.selected_warehouse == "Sahara Warehouse" else fields.get("Product Name", ""), 80),
                 'Subtitle': "",  # Will be set later
                 'Description': "",  # Will be set later
                 'Price': self.starting_price,
