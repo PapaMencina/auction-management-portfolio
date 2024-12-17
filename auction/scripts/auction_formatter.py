@@ -358,7 +358,7 @@ def process_single_record(airtable_record: Dict, uploaded_image_urls: Dict[str, 
 
         new_record = {
             'EventID': auction_id,
-            'LotNumber': str(fields.get("Lot Number", "")),
+            'LotNumber': ('M' if selected_warehouse == "Maule Warehouse" else 'S' if selected_warehouse == "Sahara Warehouse" else '') + str(fields.get("Lot Number", "")),
             'Lot Number': str(fields.get("Lot Number", "")),  # Duplicate as in original
             'Seller': "702Auctions",
             'ConsignorNumber': "",
@@ -367,7 +367,7 @@ def process_single_record(airtable_record: Dict, uploaded_image_urls: Dict[str, 
             'Region': "88850842" if selected_warehouse == "Maule Warehouse" else "88850843" if selected_warehouse == "Sahara Warehouse" else "",
             'ListingType': "Auction",
             'Currency': "USD",
-            'Title': text_shortener("OFFSITE " + fields.get("Product Name", "") if selected_warehouse == "Sahara Warehouse" else fields.get("Product Name", ""), 80),
+            'Title': text_shortener(fields.get("Product Name", ""), 80),
             'Subtitle': "",  # Will be set later
             'Description': "",  # Will be set later
             'Price': starting_price,
@@ -889,7 +889,7 @@ class AuctionFormatter:
 
             new_record = {
                 'EventID': self.auction_id,
-                'LotNumber': str(fields.get("Lot Number", "")),
+                'LotNumber': ('M' if self.selected_warehouse == "Maule Warehouse" else 'S' if self.selected_warehouse == "Sahara Warehouse" else '') + str(fields.get("Lot Number", "")),
                 'Lot Number': str(fields.get("Lot Number", "")),
                 'Seller': "702Auctions",
                 'ConsignorNumber': "",
@@ -898,7 +898,7 @@ class AuctionFormatter:
                 'Region': "88850842" if self.selected_warehouse == "Maule Warehouse" else "88850843" if self.selected_warehouse == "Sahara Warehouse" else "",
                 'ListingType': "Auction",
                 'Currency': "USD",
-                'Title': text_shortener("OFFSITE " + fields.get("Product Name", "") if self.selected_warehouse == "Sahara Warehouse" else fields.get("Product Name", ""), 80),
+                'Title': text_shortener(fields.get("Product Name", ""), 80),
                 'Subtitle': "",  # Will be set later
                 'Description': "",  # Will be set later
                 'Price': self.starting_price,

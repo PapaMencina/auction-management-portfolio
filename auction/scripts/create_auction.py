@@ -275,24 +275,24 @@ async def get_image(page, ending_date, selected_warehouse):
         logger.info('RelayThat login successful. Waiting for page to load...')
         await page.wait_for_load_state('networkidle', timeout=60000)
 
-        if selected_warehouse == "Maule Warehouse":
-            logger.info(f'Inserting ending date: {ending_date} into RelayThat design')
-            date_input_selector = 'textarea.text-input__textarea'
-            await page.wait_for_selector(date_input_selector, state="visible", timeout=10000)
-            
-            await page.evaluate(f'''(selector) => {{
-                const element = document.querySelector(selector);
-                element.value = '';
-                element.dispatchEvent(new Event('input', {{ bubbles: true }}));
-            }}''', date_input_selector)
-            await page.fill(date_input_selector, f"Ending {ending_date}")
-            
-            await page.evaluate(f'''(selector) => {{
-                const element = document.querySelector(selector);
-                element.dispatchEvent(new Event('input', {{ bubbles: true }}));
-            }}''', date_input_selector)
-            
-            await page.wait_for_timeout(3000)
+        # Remove the warehouse condition and always insert ending date
+        logger.info(f'Inserting ending date: {ending_date} into RelayThat design')
+        date_input_selector = 'textarea.text-input__textarea'
+        await page.wait_for_selector(date_input_selector, state="visible", timeout=10000)
+        
+        await page.evaluate(f'''(selector) => {{
+            const element = document.querySelector(selector);
+            element.value = '';
+            element.dispatchEvent(new Event('input', {{ bubbles: true }}));
+        }}''', date_input_selector)
+        await page.fill(date_input_selector, f"Ending {ending_date}")
+        
+        await page.evaluate(f'''(selector) => {{
+            const element = document.querySelector(selector);
+            element.dispatchEvent(new Event('input', {{ bubbles: true }}));
+        }}''', date_input_selector)
+        
+        await page.wait_for_timeout(3000)
 
         logger.info('Preparing to download image...')
         
