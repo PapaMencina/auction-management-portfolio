@@ -82,8 +82,7 @@ def get_fields_to_update(record, auction_number):
     print(f"Auction {auction_number} already exists in record")
     return {}
 
-def update_records_in_airtable(self, auction_number, target_msrp, table, view_name):
-    """Main function to update records in Airtable based on the auction number."""
+async def update_records_in_airtable(self, auction_number, target_msrp, table, view_name):
     try:
         logger.info(f"Starting to update records for auction {auction_number}")
         self.update_state(state="PROGRESS", meta={'status': f"Fetching records for auction {auction_number}"})
@@ -104,6 +103,10 @@ def update_records_in_airtable(self, auction_number, target_msrp, table, view_na
         update_count, total_msrp_reached = 0, 0
         total_groups = len(groups)
 
+        # Calculate progress interval based on total groups
+        # If less than 10 groups, update progress for each group
+        progress_interval = max(1, total_groups // 10) if total_groups > 0 else 1
+
         for i, product_name in enumerate(random.sample(list(groups.keys()), total_groups)):
             if total_msrp_reached >= target_msrp:
                 break
@@ -120,7 +123,8 @@ def update_records_in_airtable(self, auction_number, target_msrp, table, view_na
                     update_count += 1
                     total_msrp_reached += record['fields'].get('MSRP', 0)
             
-            if i % (total_groups // 10) == 0 or i == total_groups - 1:
+            # Update progress at regular intervals or for each item if small number
+            if i % progress_interval == 0 or i == total_groups - 1:
                 progress = int((i + 1) / total_groups * 100)
                 logger.info(f"Processed {i + 1}/{total_groups} groups ({progress}%)")
                 self.update_state(state="PROGRESS", meta={
@@ -175,3 +179,4 @@ def run_remove_dups(self, auction_number, target_msrp, warehouse_name):
         logger.exception("Full traceback:")
         self.update_state(state="FAILURE", meta={'status': error_message})
         raise
+    
