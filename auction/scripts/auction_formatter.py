@@ -741,9 +741,13 @@ class AuctionFormatter:
 
             upload_success = await self.upload_csv_to_website_playwright(cleaned_csv_content)
             if upload_success:
-                self.update_progress("Auction formatting process completed successfully")
+                final_message = "Auction formatting process completed successfully"
+                self.update_progress(final_message)
+                return final_message
             else:
-                self.update_progress("Failed to upload CSV to website")
+                error_message = "Failed to upload CSV to website"
+                self.update_progress(error_message)
+                return error_message
 
         except Exception as e:
             error_message = f"Error in auction formatting process: {str(e)}"
@@ -1095,7 +1099,7 @@ class AuctionFormatter:
                         if not image_data:
                             await asyncio.sleep(1)  # Reduced delay
                             continue
-                    except asyncio.TimeoutError:
+                    except asyncio.TimeoutError: 
                         await asyncio.sleep(1)
                         continue
 
@@ -1261,34 +1265,27 @@ class AuctionFormatter:
             browser = await p.chromium.launch(headless=True)
             page = await browser.new_page()
 
-            username, password = self.get_maule_login_credentials()
-            login_success = await self.login_to_website(page, username, password)
+            try:
+                username, password = self.get_maule_login_credentials()
+                login_success = await self.login_to_website(page, username, password)
 
-            if login_success:
+                if not login_success:
+                    self.gui_callback("Login to auction site failed")
+                    return False
+
                 upload_success = await self.upload_csv_to_website(page, csv_content)
                 if upload_success:
                     self.gui_callback("CSV uploaded successfully")
+                    return True
                 else:
                     self.gui_callback("CSV upload failed")
-            else:
-                self.gui_callback("Login to auction site failed")
+                    return False
 
-            await browser.close()
-
-# def auction_formatter_main(auction_id, selected_warehouse, starting_price, gui_callback, should_stop, callback, task_id=None):
-#     config_manager.set_active_warehouse(selected_warehouse)
-#     event = get_event(auction_id)
-#     formatter = AuctionFormatter(event, gui_callback, should_stop, callback, selected_warehouse, starting_price, task_id)
-    
-#     async def run_formatter():
-#         try:
-#             await formatter.run_auction_formatter()
-#         except Exception as e:
-#             gui_callback(f"Error in auction_formatter_main: {str(e)}")
-#             gui_callback(f"Traceback: {traceback.format_exc()}")
-#             RedisTaskStatus.set_status(task_id, "ERROR", f"Error in auction formatting process: {str(e)}")
-
-#     return run_formatter
+            except Exception as e:
+                self.gui_callback(f"Error during CSV upload process: {str(e)}")
+                return False
+            finally:
+                await browser.close()
 
 @shared_task(bind=True)
 def auction_formatter_task(self, auction_id, selected_warehouse, starting_price):
