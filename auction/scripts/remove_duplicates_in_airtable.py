@@ -82,7 +82,7 @@ def get_fields_to_update(record, auction_number):
     print(f"Auction {auction_number} already exists in record")
     return {}
 
-async def update_records_in_airtable(self, auction_number, target_msrp, table, view_name):
+def update_records_in_airtable(self, auction_number, target_msrp, table, view_name):
     try:
         logger.info(f"Starting to update records for auction {auction_number}")
         self.update_state(state="PROGRESS", meta={'status': f"Fetching records for auction {auction_number}"})
@@ -139,6 +139,9 @@ async def update_records_in_airtable(self, auction_number, target_msrp, table, v
         logger.info(final_message)
         self.update_state(state="SUCCESS", meta={'status': final_message})
         
+        # Return values for potential use
+        return update_count, total_msrp_reached
+        
     except Exception as e:
         error_message = f"Error occurred in update_records_in_airtable: {str(e)}"
         logger.error(error_message)
@@ -179,4 +182,3 @@ def run_remove_dups(self, auction_number, target_msrp, warehouse_name):
         logger.exception("Full traceback:")
         self.update_state(state="FAILURE", meta={'status': error_message})
         raise
-    
