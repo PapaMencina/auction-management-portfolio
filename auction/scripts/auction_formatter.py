@@ -420,7 +420,7 @@ def process_single_record(airtable_record: Dict, uploaded_image_urls: Dict[str, 
             format_html_field("Condition", new_record['Item Condition']),
             format_html_field("Notes", new_record['Other Notes']),
             format_html_field("Other info", new_record['HibidSearchText']),
-            format_html_field("Lot Number", new_record['LotNumber'])
+            format_html_field("Lot Number", new_record['Lot Number'])
         ]
         new_record["Description"] = ''.join(part for part in description_parts if part)
         new_record["Description"] += "<br><b>Pickup Information:</b> This item is available for LOCAL PICKUP ONLY. No shipping available."
