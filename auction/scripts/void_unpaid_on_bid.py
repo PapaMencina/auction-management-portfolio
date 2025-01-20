@@ -288,10 +288,49 @@ async def upload_to_airtable(records_batches, headers, csv_filepath):
         logger.warning(f"Upload to Airtable incomplete. {batch_count}/{total_batches} batches attempted.")
 
 def process_csv_for_airtable(csv_content):
+    # Define mapping of CSV column names to Airtable field names
+    field_mapping = {
+        "Lot Number": "Lot #",
+        "Date/Time": "Date/Time",
+        "Invoice #": "Invoice #",
+        "Description": "Description",
+        "Price": "Price",
+        "Quantity": "Quantity",
+        "Total": "Total",
+        "Paid": "Paid",
+        "Buyer ID": "Buyer ID",
+        "Buyer": "Buyer",
+        "Address": "Address",
+        "First Name": "First Name",
+        "Last Name": "Last Name",
+        "MSRP": "MSRP",
+        "UPC": "UPC",
+        "Item Condition": "Item Condition",
+        "Other Notes": "Other Notes",
+        "Source": "Source",
+        "Photo Taker": "Photo Taker",
+        "Amazon ID": "Amazon ID",
+        "Buyer Phone Number": "Buyer Phone Number",
+        "Buyer Tax Exempt": "Buyer Tax Exempt",
+        "Status": "Status"
+    }
+    
     csv_file = StringIO(csv_content)
     reader = csv.DictReader(csv_file)
-    records = [{"fields": record} for record in reader]
+    
+    records = []
+    for row in reader:
+        # Create a new dict with mapped fields
+        mapped_record = {}
+        for key, value in row.items():
+            # If we have a mapping for this field, use the mapped name
+            airtable_field_name = field_mapping.get(key, key)
+            mapped_record[airtable_field_name] = value
+                
+        records.append({"fields": mapped_record})
+    
     logger.info(f"Total records processed from CSV: {len(records)}")
+    # Create batches of 10 records each for Airtable's rate limits
     batches = list(records[i:i+10] for i in range(0, len(records), 10))
     logger.info(f"Number of batches created: {len(batches)}")
     return batches
