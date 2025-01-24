@@ -7,12 +7,10 @@ import random
 import asyncio
 import tempfile
 import cachetools
-import tenacity
 import csv
 import gc
 
 from typing import Optional
-from tenacity import retry, stop_after_attempt, wait_exponential
 from asyncio import Semaphore
 from collections import defaultdict
 from typing import List, Dict, Tuple
@@ -29,9 +27,9 @@ from celery.utils.log import get_task_logger
 
 # Third-party imports
 import aiohttp
-import aioftp
+from minio import Minio
+from minio.error import S3Error
 import pandas as pd
-from aioftp import StatusCodeError, Client
 from PIL import Image, ExifTags
 from playwright.async_api import async_playwright
 
@@ -52,36 +50,38 @@ config_path = os.path.join(
 )
 config_manager.load_config(config_path)
 
-class FTPPool:
-    def __init__(self, max_connections=8):
-        self.max_connections = max_connections
-        self.semaphore = asyncio.Semaphore(max_connections)
-        self.server = config_manager.get_global_var('ftp_server')
-        self.username = config_manager.get_global_var('ftp_username')
-        self.password = config_manager.get_global_var('ftp_password')
+# Initialize MinIO client
+minio_client = Minio(
+    endpoint=config_manager.get_global_var('minio_endpoint'),
+    access_key=config_manager.get_global_var('minio_access_key'),
+    secret_key=config_manager.get_global_var('minio_secret_key'),
+    secure=config_manager.get_global_var('minio_secure')
+)
 
-    @asynccontextmanager
-    async def get_client(self):
-        async with self.semaphore:
-            client = aioftp.Client()
-            try:
-                await client.connect(self.server)
-                await client.login(self.username, self.password)
-                yield client
-            finally:
-                await client.quit()
-    
-    async def close_all(self):
-        # This method is now a no-op since connections are closed automatically
-        pass
-
-ftp_pool = FTPPool(max_connections=8)  # Limit to 8 connections
+# Ensure bucket exists
+bucket_name = config_manager.get_global_var('minio_bucket')
+try:
+    if not minio_client.bucket_exists(bucket_name):
+        minio_client.make_bucket(bucket_name)
+        minio_client.set_bucket_policy(bucket_name, {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Effect": "Allow",
+                    "Principal": {"AWS": "*"},
+                    "Action": ["s3:GetObject"],
+                    "Resource": [f"arn:aws:s3:::{bucket_name}/*"]
+                }
+            ]
+        })
+except S3Error as e:
+    logger.error(f"Error setting up MinIO bucket: {str(e)}")
 
 class RateLimiter:
     def __init__(self, rate_limit, time_period):
         self.rate_limit = rate_limit
         self.time_period = time_period
-        self.semaphore = None  # We'll initialize this when we first use it
+        self.semaphore = None
 
     async def acquire(self):
         if self.semaphore is None:
@@ -93,7 +93,7 @@ class RateLimiter:
         await asyncio.sleep(self.time_period)
         self.semaphore.release()
 
-rate_limiter = RateLimiter(rate_limit=5, time_period=1)  # 5 requests per second
+rate_limiter = RateLimiter(rate_limit=20, time_period=1)  # Increased rate limit since MinIO is more performant
 
 def get_image_orientation(img: Image.Image) -> int:
     try:
@@ -188,46 +188,40 @@ async def process_image_async(image_data: bytes, gui_callback, width_threshold: 
     
     return None
 
-@retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=1, min=4, max=10))
-async def upload_file_with_retry(client, remote_path, file_content):
-    async with client.upload_stream(remote_path) as stream:
-        await stream.write(file_content)
+async def upload_file_to_minio(file_name: str, file_content: bytes, gui_callback) -> Optional[str]:
+    try:
+        await rate_limiter.acquire()
+        
+        # Create a temporary file to store the content
+        with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+            temp_file.write(file_content)
+            temp_file_path = temp_file.name
+
+        try:
+            # Upload to MinIO
+            minio_client.fput_object(
+                bucket_name,
+                file_name,
+                temp_file_path,
+                content_type='image/jpeg'
+            )
+            
+            # Generate public URL
+            url = f"https://{config_manager.get_global_var('minio_endpoint')}/{bucket_name}/{file_name}"
+            gui_callback(f"File uploaded successfully: {url}")
+            return url
+
+        finally:
+            # Clean up temporary file
+            os.unlink(temp_file_path)
+
+    except Exception as e:
+        gui_callback(f"Error uploading to MinIO: {str(e)}")
+        return None
 
 async def upload_file_via_ftp_async(file_name, file_content, gui_callback, should_stop, max_retries=3):
-    await rate_limiter.acquire()
-    remote_file_path = config_manager.get_global_var('ftp_remote_path')
-    full_path = os.path.join(remote_file_path, file_name)
-    
-    for attempt in range(max_retries):
-        try:
-            async with ftp_pool.get_client() as client:
-                gui_callback(f"Uploading file {file_name} to {remote_file_path}")
-                await ensure_directory_exists(client, os.path.dirname(remote_file_path), gui_callback)
-                
-                gui_callback(f"Starting file upload...")
-                await upload_file_with_retry(client, full_path, file_content)
-
-                gui_callback(f"File {file_name} uploaded successfully")
-                formatted_url = remote_file_path.replace("/public_html", "", 1).lstrip('/')
-                return f"https://{formatted_url}/{file_name}"
-        except Exception as e:
-            gui_callback(f"FTP upload error (attempt {attempt + 1}/{max_retries}): {str(e)}")
-            if attempt == max_retries - 1:
-                return None
-            await asyncio.sleep(2 ** attempt)  # Exponential backoff
-    return None
-
-async def ensure_directory_exists(client, path, gui_callback):
-    try:
-        await client.make_directory(path)
-        gui_callback(f"Created directory {path}")
-    except aioftp.StatusCodeError as e:
-        if "Directory already exists" in str(e):
-            gui_callback(f"Directory {path} already exists")
-        else:
-            gui_callback(f"Error creating directory {path}: {e}")
-    except Exception as e:
-        gui_callback(f"Unexpected error creating directory {path}: {e}")
+    """Compatibility wrapper for MinIO upload"""
+    return await upload_file_to_minio(file_name, file_content, gui_callback)
 
 @cachetools.cached(cache=cachetools.TTLCache(maxsize=100, ttl=3600))
 async def get_cached_airtable_records(BASE: str, TABLE: str, VIEW: str, gui_callback, airtable_token: str) -> List[Dict]:
@@ -485,13 +479,13 @@ class AuctionFormatter:
         self.current_step = 0
 
         # Optimized configuration for better performance
-        self.MAX_CONCURRENT_TASKS = 8        # Increased from 4
-        self.MAX_CONCURRENT_IMAGES = 12      # Increased from 2
-        self.BATCH_SIZE = 75                 # Increased from 25
-        self.IMAGE_CHUNK_SIZE = 10           # Increased from 5
+        self.MAX_CONCURRENT_TASKS = 12        # Increased from 8 for MinIO
+        self.MAX_CONCURRENT_IMAGES = 20      # Increased from 12 for MinIO
+        self.BATCH_SIZE = 75                 # Keep batch size the same
+        self.IMAGE_CHUNK_SIZE = 15           # Increased from 10 for MinIO
         
-        # Memory management - adjusted based on observed usage
-        self.memory_limit = 900 * 1024 * 1024  # 800MB target (still safe below 900MB limit)
+        # Memory management
+        self.memory_limit = 900 * 1024 * 1024  # 900MB target
         
         # Website URLs and notification email
         self.website_login_url = config_manager.get_global_var('website_login_url')
@@ -501,19 +495,16 @@ class AuctionFormatter:
         config_manager.set_active_warehouse(selected_warehouse)
         
         self.semaphores = None
-        self.ftp_pool = None
         self.rate_limiter = None
 
     async def setup_resources(self):
         """Initialize resources with optimized concurrency settings"""
         self.semaphores = {
             'main': asyncio.Semaphore(self.MAX_CONCURRENT_TASKS),
-            'image': asyncio.Semaphore(self.MAX_CONCURRENT_IMAGES),
-            'ftp': asyncio.Semaphore(8)  # Increased to maximum allowed FTP connections
+            'image': asyncio.Semaphore(self.MAX_CONCURRENT_IMAGES)
         }
-        self.ftp_pool = FTPPool(max_connections=8)  # Increased to maximum allowed
-        self.rate_limiter = RateLimiter(rate_limit=10, time_period=1)
-    
+        self.rate_limiter = RateLimiter(rate_limit=20, time_period=1)  # Increased for MinIO
+
     def update_progress(self, message, sub_progress=None):
         self.current_step += 1
         progress = (self.current_step / self.total_steps) * 100
@@ -714,10 +705,6 @@ class AuctionFormatter:
         try:
             self.update_progress("Starting auction formatting")
 
-            global ftp_pool
-            ftp_pool = FTPPool(max_connections=6)
-            self.update_progress("FTP pool initialized")
-
             airtable_records = await self.fetch_airtable_records()
             if not airtable_records:
                 self.update_progress("Failed to fetch Airtable records")
@@ -755,8 +742,7 @@ class AuctionFormatter:
             raise
 
         finally:
-            if 'ftp_pool' in globals():
-                await ftp_pool.close_all()
+            await self.cleanup_resources()
             await sync_to_async(self.callback)()
 
     def validate_csv_content(self, csv_content):
@@ -996,14 +982,10 @@ class AuctionFormatter:
     async def cleanup_resources(self):
         """Cleanup resources properly"""
         try:
-            if self.ftp_pool:
-                await self.ftp_pool.close_all()
-            
             # Clear semaphores
             self.semaphores = None
             
             # Force garbage collection
-            import gc
             gc.collect()
             
         except Exception as e:
