@@ -141,43 +141,47 @@ async def process_image_async(image_data: bytes, gui_callback, width_threshold: 
             gui_callback("Error: Empty image data")
             return None
 
-        img = Image.open(BytesIO(image_data))
-
-        # Verify that the image was opened successfully
-        if not img:
-            gui_callback("Error: Failed to open image")
-            return None
-
-        orientation = get_image_orientation(img)
-
-        if orientation == 6:
-            img = img.rotate(-90, expand=True)
-        elif orientation == 8:
-            img = img.rotate(90, expand=True)
-
-        if img.mode == 'P':
-            img = img.convert('RGB')
-
-        width, height = img.size
-        if width > width_threshold:
-            new_width = width_threshold
-            new_height = int(height * (new_width / width))
-            try:
-                img = img.resize((new_width, new_height), Image.LANCZOS)
-            except Exception as resize_error:
-                gui_callback(f"Error resizing image: {str(resize_error)}")
+        # Use BytesIO to avoid disk I/O
+        with Image.open(BytesIO(image_data)) as img:
+            # Verify that the image was opened successfully
+            if not img:
+                gui_callback("Error: Failed to open image")
                 return None
 
-        if img.mode == 'RGBA':
-            img = img.convert('RGB')
+            # Convert to RGB early if needed
+            if img.mode in ('RGBA', 'P'):
+                img = img.convert('RGB')
 
-        dpi = img.info.get('dpi', (72, 72))
-        if dpi[0] > dpi_threshold or dpi[1] > dpi_threshold:
-            img.info['dpi'] = (dpi_threshold, dpi_threshold)
+            # Handle orientation
+            orientation = get_image_orientation(img)
+            if orientation == 6:
+                img = img.transpose(Image.ROTATE_270)
+            elif orientation == 8:
+                img = img.transpose(Image.ROTATE_90)
 
-        output = BytesIO()
-        img.save(output, format='JPEG')
-        return output.getvalue()
+            # Resize if needed (using LANCZOS for better quality)
+            width, height = img.size
+            if width > width_threshold:
+                new_width = width_threshold
+                new_height = int(height * (new_width / width))
+                try:
+                    img = img.resize((new_width, new_height), Image.LANCZOS)
+                except Exception as resize_error:
+                    gui_callback(f"Error resizing image: {str(resize_error)}")
+                    return None
+
+            # Set DPI
+            if img.info.get('dpi', (72, 72))[0] > dpi_threshold:
+                img.info['dpi'] = (dpi_threshold, dpi_threshold)
+
+            # Optimize output
+            output = BytesIO()
+            img.save(output, 
+                    format='JPEG', 
+                    quality=85,  # Slightly reduced quality for better performance
+                    optimize=True,
+                    progressive=True)
+            return output.getvalue()
 
     except (IOError, OSError) as e:
         gui_callback(f"Error opening or processing image: {str(e)}")
@@ -478,14 +482,14 @@ class AuctionFormatter:
         self.total_steps = 6
         self.current_step = 0
 
-        # Optimized configuration for better performance
-        self.MAX_CONCURRENT_TASKS = 12        # Increased from 8 for MinIO
-        self.MAX_CONCURRENT_IMAGES = 20      # Increased from 12 for MinIO
-        self.BATCH_SIZE = 75                 # Keep batch size the same
-        self.IMAGE_CHUNK_SIZE = 15           # Increased from 10 for MinIO
+        # Standard-2X dyno optimized configuration (2x-8x compute)
+        self.MAX_CONCURRENT_TASKS = 16        # Increased for 2x CPU share
+        self.MAX_CONCURRENT_IMAGES = 32       # Doubled for parallel processing
+        self.BATCH_SIZE = 50                  # Smaller batches for better memory management
+        self.IMAGE_CHUNK_SIZE = 10           # Smaller chunks for better throughput
         
-        # Memory management
-        self.memory_limit = 900 * 1024 * 1024  # 900MB target
+        # Memory management - Standard-2X has 1GB RAM
+        self.memory_limit = 512 * 1024 * 1024  # 512MB target (safe margin for other processes)
         
         # Website URLs and notification email
         self.website_login_url = config_manager.get_global_var('website_login_url')
@@ -503,7 +507,7 @@ class AuctionFormatter:
             'main': asyncio.Semaphore(self.MAX_CONCURRENT_TASKS),
             'image': asyncio.Semaphore(self.MAX_CONCURRENT_IMAGES)
         }
-        self.rate_limiter = RateLimiter(rate_limit=20, time_period=1)  # Increased for MinIO
+        self.rate_limiter = RateLimiter(rate_limit=32, time_period=1)  # Increased for 2x CPU
 
     def update_progress(self, message, sub_progress=None):
         self.current_step += 1
@@ -807,33 +811,40 @@ class AuctionFormatter:
         failed_records = []
         total_records = len(airtable_records)
 
-        # Process in larger chunks with higher concurrency
-        for i in range(0, total_records, self.BATCH_SIZE):
+        # Process in chunks for better memory management
+        chunk_size = min(self.BATCH_SIZE, 50)  # Limit chunk size
+        for i in range(0, total_records, chunk_size):
             if self.should_stop.is_set():
                 break
 
-            batch = airtable_records[i:i+self.BATCH_SIZE]
-            self.gui_callback(f"Processing batch {i//self.BATCH_SIZE + 1} of {(total_records + self.BATCH_SIZE - 1)//self.BATCH_SIZE}")
+            chunk = airtable_records[i:i+chunk_size]
+            self.gui_callback(f"Processing chunk {i//chunk_size + 1} of {(total_records + chunk_size - 1)//chunk_size}")
 
-            # Process images with higher concurrency
+            # Process images with higher concurrency but controlled batch size
             image_tasks = []
-            for record in batch:
+            for record in chunk:
                 record_images = self.prepare_record_images(record)
                 if record_images:
-                    # Process multiple images per record concurrently
                     record_image_tasks = [
-                        self.process_single_image_with_semaphore(self.semaphores['image'], record['id'], url, j)
+                        self.process_single_image_with_semaphore(
+                            self.semaphores['image'],
+                            record['id'],
+                            url,
+                            j
+                        )
                         for j, url in record_images
                     ]
                     image_tasks.extend(record_image_tasks)
 
-            # Process all image tasks concurrently with chunking
+            # Process images in smaller batches
             image_results = {}
-            for chunk_start in range(0, len(image_tasks), self.IMAGE_CHUNK_SIZE):
-                chunk_end = chunk_start + self.IMAGE_CHUNK_SIZE
-                chunk_results = await asyncio.gather(*image_tasks[chunk_start:chunk_end], return_exceptions=True)
+            batch_size = min(self.IMAGE_CHUNK_SIZE, 10)
+            for batch_start in range(0, len(image_tasks), batch_size):
+                batch_end = batch_start + batch_size
+                batch = image_tasks[batch_start:batch_end]
                 
-                for result in chunk_results:
+                results = await asyncio.gather(*batch, return_exceptions=True)
+                for result in results:
                     if isinstance(result, Exception):
                         self.gui_callback(f"Error in image processing: {str(result)}")
                         continue
@@ -843,10 +854,10 @@ class AuctionFormatter:
                             image_results[record_id] = []
                         image_results[record_id].append((url, image_number))
 
-            # Process records concurrently
+            # Process records with controlled concurrency
             record_tasks = [
                 self.process_single_record_with_semaphore(record, image_results.get(record['id'], []))
-                for record in batch
+                for record in chunk
             ]
 
             batch_results = await asyncio.gather(*record_tasks, return_exceptions=True)
@@ -860,12 +871,13 @@ class AuctionFormatter:
                 else:
                     failed_records.append(result)
 
-            progress = min((i + self.BATCH_SIZE) / total_records * 100, 100)
+            progress = min((i + chunk_size) / total_records * 100, 100)
             self.gui_callback(f"Processed {progress:.1f}% of records")
 
-            # Only collect garbage every few batches
-            if i % (self.BATCH_SIZE * 3) == 0:
-                gc.collect()
+            # Memory management
+            if self.check_memory_usage() > 0.8:  # If memory usage is above 80%
+                gc.collect()  # Force garbage collection
+                await asyncio.sleep(1)  # Give system time to reclaim memory
 
         return processed_records, failed_records
 

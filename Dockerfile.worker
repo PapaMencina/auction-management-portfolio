@@ -1,13 +1,24 @@
 # Worker Dockerfile
 FROM mcr.microsoft.com/playwright/python:v1.39.0-jammy
 
-# Set environment variables for better Python performance
+# Install system dependencies for better image processing performance
+RUN apt-get update && apt-get install -y \
+    libjpeg-dev \
+    libpng-dev \
+    libtiff-dev \
+    libwebp-dev \
+    libopenjp2-7-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set environment variables for better Python and Pillow performance
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONHASHSEED=random \
     PIP_NO_CACHE_DIR=off \
     PIP_DISABLE_PIP_VERSION_CHECK=on \
-    PIP_DEFAULT_TIMEOUT=100
+    PIP_DEFAULT_TIMEOUT=100 \
+    PILLOW_ENABLE_SIMD=1 \
+    MALLOC_TRIM_THRESHOLD_=100000
 
 WORKDIR /app
 
@@ -23,7 +34,7 @@ RUN playwright install chromium && \
 # Copy application code
 COPY . /app/
 
-# Configure Celery for optimized performance
+# Configure Celery for Standard-2X dyno (1GB RAM, 2x CPU)
 CMD celery -A auction_webapp worker \
     --concurrency=8 \
     --loglevel=info \
