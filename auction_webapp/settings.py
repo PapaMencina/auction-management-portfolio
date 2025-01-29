@@ -35,7 +35,7 @@ SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'django-insecure-8x1zg3y9w2m0v7
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get('DJANGO_DEBUG', 'False') == 'True'
 
-ALLOWED_HOSTS = ['auction-management-system-877a79758b85.herokuapp.com', 'localhost', '127.0.0.1', '0.0.0.0']
+ALLOWED_HOSTS = ['auction-management-system-877a79758b85.herokuapp.com', 'localhost', '127.0.0.1', '0.0.0.0', 'ams.702market.com']
 
 # Playwright settings
 # PLAYWRIGHT_BROWSERS_PATH = os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "/app/.cache/ms-playwright")
