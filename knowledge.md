@@ -59,7 +59,26 @@ All major operations run as Celery tasks:
 ### Task Status Updates
 - Use RedisTaskStatus for real-time progress updates
 - Include both state and descriptive messages
-- States: ["NOT_STARTED", "IN_PROGRESS", "COMPLETE", "FAILED"]
+- States: ["NOT_STARTED", "IN_PROGRESS", "COMPLETED", "ERROR", "WARNING"]
+- Always include stage and substage information for better tracking
+- Task history is kept for 24 hours (last 50 entries)
+- Status updates should include:
+  - stage: Main process stage
+  - substage: Current specific operation
+  - error_context: Detailed error information when needed
+  - progress: Numerical progress (0-100) when applicable
+
+### Task Status Example
+```python
+RedisTaskStatus.set_status(
+    task_id,
+    RedisTaskStatus.STATUS_IN_PROGRESS,
+    "Processing auction data",
+    progress=25,
+    stage="Data Processing",
+    substage="Validating input"
+)
+```
 
 ### Configuration
 - Use config_manager for all configuration access
