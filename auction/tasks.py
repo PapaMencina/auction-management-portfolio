@@ -33,7 +33,7 @@ def run_auction_formatter_task(self, auction_id, selected_warehouse, starting_pr
     return formatter.run_auction_formatter()
 
 @shared_task(bind=True)
-def create_auction_task(self, auction_title, ending_date, selected_warehouse):
+def create_auction_task(self, auction_title, ending_date, selected_warehouse, ending_time='18:30'):
     task_id = self.request.id
     
     if isinstance(ending_date, str):
@@ -47,7 +47,7 @@ def create_auction_task(self, auction_title, ending_date, selected_warehouse):
         raise TypeError("ending_date must be a string or datetime object")
     
     async def run_async_task():
-        return await create_auction_main(auction_title, ending_date, selected_warehouse, task_id)
+        return await create_auction_main(auction_title, ending_date, selected_warehouse, task_id, ending_time)
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)

@@ -333,7 +333,7 @@ async def get_image(page, ending_date, selected_warehouse):
         await page.screenshot(path='get_image_error.png')
         return None
 
-async def create_auction(page, auction_title, image_path, formatted_start_date, bid_formatted_ending_date, selected_warehouse):
+async def create_auction(page, auction_title, image_path, formatted_start_date, bid_formatted_ending_date, selected_warehouse, ending_time='18:30'):
     try:
         logger.info('Navigating to auction creation page...')
         bid_create_event = config_manager.get_global_var('bid_create_event')
@@ -373,10 +373,10 @@ async def create_auction(page, auction_title, image_path, formatted_start_date, 
                 <li>All auctions are no reserve and sold to the highest bidder.&nbsp;</li>
                 <li>A 15% buyers fee applies to all items.&nbsp;</li>
                 <li>We accept Cash and&nbsp;all major credit cards.</li>
-                <li>All payments must be made online prior to pickup. You will be emailed an invoice with a payment link,&nbsp;or your invoice can be found under the My Account section and can be paid for there. If you are paying cash, your order must be paid and picked up within 72 hours.&nbsp;</li>
+                <li>All payments must be made online prior to pickup. You will be emailed an invoice with a payment link,&nbsp;or your invoice can be found under the My Account section and can be paid for there. If you are paying cash, your order must be paid and picked up within 48 hours.&nbsp;</li>
                 <li>All invoices will be automatically charged to the Credit / Debit card on file&nbsp;by 5pm&nbsp;the following&nbsp;day.</li>
                 <li>If there is no Credit/Debit card on file and there is no payment within 24 hours, the item will be relisted and you will not be allowed to bid again until you add a payment method to your account.</li>
-                <li>All bidders must pick up&nbsp;their items&nbsp;from&nbsp;<b>1889 E. MAULE AVE. SUITE F&nbsp;Las Vegas, NV 89119</b>&nbsp;within&nbsp;<b>7 days</b>.</li>
+                <li>All bidders must pick up&nbsp;their items&nbsp;from&nbsp;<b>1889 E. MAULE AVE SUITE F LAS VEGAS, NV 89119</b>&nbsp;within&nbsp;<b>5 days</b>.</li>
                 <li>Once payment is received, you will receive an email with a link to schedule a pickup time and pickup instructions.</li>
                 <li>All items must be picked up within 10 days of the auction ending&nbsp;or your order will be canceled and may be subject to a restocking fee.</li>
             </ul>
@@ -386,7 +386,7 @@ async def create_auction(page, auction_title, image_path, formatted_start_date, 
             <p>For our complete terms and conditions,&nbsp;<a href="https://bid.702auctions.com/Home/Terms">Click Here</a></p>
             """
             formatted_text_shipping_info = """
-                <p>Pickup only!!&nbsp;<b><a href="https://www.google.com/maps/place/702+Auctions/@36.0639879,-115.1263821,15z/data=!4m5!3m4!1s0x0:0xe95798d6193dc64!8m2!3d36.0639879!4d-115.1263821" target="_blank">1889 E. MAULE AVE. SUITE F&nbsp;Las Vegas, NV 89119</a></b>&nbsp;Monday-Friday 9am-5pm&nbsp;within 10 days. Once payment is received, you will receive an email with a link to schedule a pickup time and pickup instructions. We offer contactless pickup options and take all possible measures to ensure your safety.</p>
+                <p>Pickup only!!&nbsp;<b><a href="https://www.google.com/maps/place/1889+E+Maule+Ave+%23F,+Las+Vegas,+NV+89119" target="_blank">1889 E. MAULE AVE SUITE F&nbsp;Las Vegas, NV 89119</a></b>&nbsp;Monday-Friday 9am-4:30pm&nbsp;within 10 days. Once payment is received, you will receive an email with a link to schedule a pickup time and pickup instructions. We offer contactless pickup options and take all possible measures to ensure your safety.</p>
             """
         elif selected_warehouse == "Sahara Warehouse":
             Summary_field_text = ('PICKUP FROM ACTION DISCOUNT SALES 3775 E SAHARA AVE LAS VEGAS, NV 89104 No reserve auctions of general merchandise returns and brand new shelf pulls from major retailers. 702 Auctions offers hassle free returns on items that are misdescribed within 10 days of the date you picked up your items.')
@@ -435,7 +435,7 @@ async def create_auction(page, auction_title, image_path, formatted_start_date, 
         await page.fill("#StartDate", formatted_start_date)
         await page.fill("#StartTime", '1:00 AM')
         await page.fill("#EndDate", bid_formatted_ending_date)
-        await page.fill("#EndTime", '6:30 PM')
+        await page.fill("#EndTime", ending_time)
 
         logger.info('Creating auction...')
         await page.click("#create")

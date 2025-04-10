@@ -145,6 +145,7 @@ def create_auction_view(request):
         try:
             auction_title = request.POST.get('auction_title')
             ending_date = request.POST.get('ending_date')
+            ending_time = request.POST.get('ending_time', '18:30')  # Default to 6:30 PM if not provided
             selected_warehouse = request.POST.get('selected_warehouse')
 
             if not all([auction_title, ending_date, selected_warehouse]):
@@ -153,11 +154,13 @@ def create_auction_view(request):
             try:
                 # Validate the date format
                 datetime.strptime(ending_date, '%Y-%m-%d')
+                # Validate the time format
+                datetime.strptime(ending_time, '%H:%M')
             except ValueError:
-                return JsonResponse({'error': 'Invalid date format. Use YYYY-MM-DD.'}, status=400)
+                return JsonResponse({'error': 'Invalid date or time format. Use YYYY-MM-DD for date and HH:MM for time.'}, status=400)
 
             # Start the Celery task
-            task = create_auction_task.delay(auction_title, ending_date, selected_warehouse)
+            task = create_auction_task.delay(auction_title, ending_date, selected_warehouse, ending_time)
 
             logger.info(f"Auction creation task started for {auction_title}")
             return JsonResponse({
