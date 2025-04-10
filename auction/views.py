@@ -110,9 +110,10 @@ def get_warehouse_events(request):
     
     all_events = Event.objects.filter(warehouse=warehouse)
     today = timezone.now().date()
+    ten_days_ago = today - timezone.timedelta(days=10)
 
     if process_type == 'past':
-        # For void_unpaid process
+        # For void_unpaid process - only show auctions that ended within the last 10 days
         filtered_events = [
             {
                 'id': event.event_id,
@@ -121,7 +122,7 @@ def get_warehouse_events(request):
                 'warehouse': event.warehouse
             }
             for event in all_events
-            if event.ending_date < today
+            if event.ending_date < today and event.ending_date >= ten_days_ago
         ]
     else:
         # For other processes (auction creation, formatting, etc.)
