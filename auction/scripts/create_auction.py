@@ -467,7 +467,7 @@ class SharedEvents:
         }
         await save_event_to_database(event_data)
 
-async def create_auction_main(auction_title, ending_date, selected_warehouse, task_id):
+async def create_auction_main(auction_title, ending_date, selected_warehouse, task_id, ending_time='18:30'):
     try:
         current_task.update_state(state="STARTED", meta={'status': f"Initiating auction creation for '{auction_title}'"})
         
@@ -496,7 +496,7 @@ async def create_auction_main(auction_title, ending_date, selected_warehouse, ta
             current_task.update_state(state='PROGRESS', meta={'status': "Auction image downloaded successfully"})
 
             event_id = await create_auction(page, auction_title, event_image, formatted_start_date, 
-                                            bid_formatted_ending_date, selected_warehouse)
+                                            bid_formatted_ending_date, selected_warehouse, ending_time)
             if not event_id:
                 raise Exception("Failed to obtain event ID")
 
