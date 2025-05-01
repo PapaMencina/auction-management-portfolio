@@ -1,125 +1,170 @@
-# Auction Management System Knowledge
+# Auction Management System Knowledge Base
 
-## Project Overview
-- Django-based auction management system for managing liquidation auctions
-- Handles auction creation, formatting, and management of unpaid transactions
-- Uses Celery for background tasks
-- Integrates with HiBid auction platform and Airtable for data management
+## System Architecture
 
-## Key Components
+### Core Technologies
+- Django 3.2.23 (Python web framework)
+- Celery 5.4.0 (Task queue)
+- Redis (Task status tracking and caching)
+- MinIO (Object storage for images)
+- Playwright (Browser automation)
+- Airtable (Data source)
+- HiBid (Auction platform integration)
 
-### Warehouses
-- System supports multiple warehouses (Maule and Sahara)
-- Each warehouse has specific configurations and credentials
-- Warehouse selection affects auction details like pickup location and terms
+### Infrastructure
+- Docker-based deployment (Dockerfile and Dockerfile.worker)
+- Heroku deployment support (heroku.yml)
+- PostgreSQL database (via dj-database-url)
+- Gunicorn web server
+- Celery workers for background tasks
 
-### Authentication
-- Always use Maule Warehouse credentials for HiBid login regardless of selected warehouse
-- Login credentials are stored in config.json
+## Data Models
 
-### Tasks
-All major operations run as Celery tasks:
-- Auction creation
-- Auction formatting
-- Void unpaid transactions
-- Remove duplicates
+### Core Models
+1. **CustomUser**
+   - Extends Django's AbstractUser
+   - Supports standard user permissions
+   - Special permission: "can_use_show_browser"
 
-### Image Processing
-- Images are processed through MinIO for storage
-- Image processing includes resizing, orientation fixing, and optimization
-- Rate limiting is implemented for image uploads
+2. **Event**
+   - Represents an auction event
+   - Fields: event_id, warehouse, title, dates
+   - Tracks active status
+   - Related to: VoidedTransaction, ImageMetadata, AuctionFormattedData, HiBidUpload
 
-### Data Flow
-1. Data originates from Airtable
-2. Gets processed and formatted
-3. Uploaded to HiBid platform
-4. Results stored in local database
+3. **ImageMetadata**
+   - Manages auction images
+   - Supports primary image designation
+   - Stores URLs (MinIO integration)
+   - Tracks upload timestamps
 
-### Remove Duplicates Process
-- Helps manage duplicate items across auctions in Airtable
-- Takes target MSRP as input to control volume
-- Randomly selects items to avoid predictable patterns
-- Updates 'Auctions' field in Airtable to track which items are in which auctions
-- Groups items by product name and updates up to half of each group
-- Stops when target MSRP is reached
-- Progress tracking in 10% increments for large batches
+4. **AuctionFormattedData**
+   - Stores formatted CSV data for events
+   - Used for data transformation and upload
 
-## Important Rules
+5. **HiBidUpload**
+   - Tracks upload status to HiBid platform
+   - Maintains upload history
 
-### File Handling
-- Use MinIO for image storage instead of local filesystem
-- Always clean up temporary files in finally blocks
-- Handle file operations in chunks for memory efficiency
+## Task System
 
-### Error Handling
-- Always implement retries for external service calls
-- Log errors with full tracebacks
-- Update task status for frontend feedback
+### Core Tasks
+1. **Auction Formatter Task**
+   - Formats auction data for HiBid
+   - Supports warehouse-specific configurations
+   - Implements progress tracking
+   - Handles starting price calculations
 
-### Task Status Updates
-- Use RedisTaskStatus for real-time progress updates
-- Include both state and descriptive messages
-- States: ["NOT_STARTED", "IN_PROGRESS", "COMPLETED", "ERROR", "WARNING"]
-- Always include stage and substage information for better tracking
-- Task history is kept for 24 hours (last 50 entries)
-- Status updates should include:
-  - stage: Main process stage
-  - substage: Current specific operation
-  - error_context: Detailed error information when needed
-  - progress: Numerical progress (0-100) when applicable
+2. **Auction Creation Task**
+   - Creates new auctions on HiBid
+   - Validates date formats
+   - Supports async operation
+   - Configures warehouse-specific settings
 
-### Task Status Example
-```python
-RedisTaskStatus.set_status(
-    task_id,
-    RedisTaskStatus.STATUS_IN_PROGRESS,
-    "Processing auction data",
-    progress=25,
-    stage="Data Processing",
-    substage="Validating input"
-)
-```
+3. **Void Unpaid Task**
+   - Processes unpaid transactions
+   - Uses Playwright for browser automation
+   - Supports different upload choices
+   - Warehouse-specific processing
 
-### Configuration
-- Use config_manager for all configuration access
-- Config is warehouse-specific - always set active warehouse first
-- Keep sensitive credentials in config.json
+4. **Remove Duplicates Task**
+   - Manages duplicate items in Airtable
+   - Validates auction numbers
+   - Implements target MSRP control
+   - Progress tracking with status updates
+
+## Integration Points
+
+### HiBid Integration
+- Browser automation via Playwright
+- Supports multiple warehouse configurations
+- Handles authentication and session management
+- Implements retry mechanisms for reliability
 
 ### Airtable Integration
-- Use pyairtable for Airtable operations
-- Handle rate limits through batching
-- Validate auction numbers against database before processing
-- Cache expensive Airtable queries when possible
+- Uses pyairtable for API access
+- Implements rate limiting
+- Supports batch operations
+- Validates auction numbers against database
 
-## Common Patterns
+### Image Processing
+- MinIO for object storage
+- Image optimization and resizing
+- Primary image designation
+- URL-based storage system
 
-### Browser Automation
-- Use Playwright for web automation
-- Always implement proper waits and error handling
-- Take screenshots on errors for debugging
+## Configuration Management
 
-### CSV Processing
-- Use pandas for large CSV operations
-- Process in batches for memory efficiency
-- Validate CSV content before saving/uploading
+### Warehouse Configuration
+- Supports multiple warehouses (Maule, Sahara)
+- Warehouse-specific settings
+- Credential management
+- Configuration validation
 
-### Database Operations
-- Use transactions for related operations
-- Implement proper async/sync patterns with Django
-- Cache expensive operations when possible
+### Task Status System
+- Redis-based status tracking
+- States: NOT_STARTED, IN_PROGRESS, COMPLETED, ERROR, WARNING
+- 24-hour history retention
+- Detailed progress tracking
+- Stage and substage information
 
-## Optimization Guidelines
-- Use batch processing for bulk operations
-- Implement caching for frequent operations
-- Control memory usage with chunking
-- Rate limit external API calls
+## Security Considerations
 
-## Testing
-- Run tests before deploying changes
-- Test with both warehouses
-- Verify image processing works
-- Check task status updates work
+### Authentication
+- Custom user model
+- Permission-based access control
+- Secure credential storage
+- Session management
 
-## Links
+### Data Protection
+- Secure file handling
+- Temporary file cleanup
+- Rate limiting implementation
+- Error logging and monitoring
+
+## Development Guidelines
+
+### Code Organization
+- Modular task structure
+- Clear separation of concerns
+- Consistent error handling
+- Comprehensive logging
+
+### Best Practices
+1. **Task Implementation**
+   - Always include progress tracking
+   - Implement proper error handling
+   - Use appropriate retry mechanisms
+   - Clean up resources in finally blocks
+
+2. **Data Processing**
+   - Use batch processing for large datasets
+   - Implement proper validation
+   - Handle memory efficiently
+   - Cache expensive operations
+
+3. **Integration**
+   - Validate external service responses
+   - Implement proper timeouts
+   - Handle rate limits gracefully
+   - Maintain proper logging
+
+## Testing and Deployment
+
+### Testing Requirements
+- Unit tests for core functionality
+- Integration tests for external services
+- Warehouse-specific testing
+- Image processing validation
+
+### Deployment Process
+- Docker containerization
+- Heroku deployment support
+- Environment variable management
+- Database migration handling
+
+## External Resources
 - [HiBid API Documentation](https://bid.702auctions.com/api/docs)
 - [Airtable API Reference](https://airtable.com/api)
+- [Django Documentation](https://docs.djangoproject.com/en/3.2/)
+- [Celery Documentation](https://docs.celeryq.dev/en/stable/)
