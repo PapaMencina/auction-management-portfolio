@@ -386,7 +386,7 @@ async def create_auction(page, auction_title, image_path, formatted_start_date, 
             <p>For our complete terms and conditions,&nbsp;<a href="https://bid.702auctions.com/Home/Terms">Click Here</a></p>
             """
             formatted_text_shipping_info = """
-                <p>Pickup only!!&nbsp;<b><a href="https://www.google.com/maps/place/1889+E+Maule+Ave+%23F,+Las+Vegas,+NV+89119" target="_blank">1889 E. MAULE AVE SUITE F&nbsp;Las Vegas, NV 89119</a></b>&nbsp;Monday-Friday 9am-4:30pm&nbsp;within 10 days. Once payment is received, you will receive an email with a link to schedule a pickup time and pickup instructions. We offer contactless pickup options and take all possible measures to ensure your safety.</p>
+                <p>Pickup only!!&nbsp;<b><a href="https://www.google.com/maps/place/1889+E+Maule+Ave+%23F,+Las+Vegas,+NV+89119" target="_blank">1889 E. MAULE AVE SUITE F&nbsp;Las Vegas, NV 89119</a></b>&nbsp;Monday-Friday 9am-5:00pm&nbsp;within 10 days. Once payment is received, you will receive an email with a link to schedule a pickup time and pickup instructions. We offer contactless pickup options and take all possible measures to ensure your safety.</p>
             """
         elif selected_warehouse == "Sahara Warehouse":
             Summary_field_text = ('PICKUP FROM ACTION DISCOUNT SALES 3775 E SAHARA AVE LAS VEGAS, NV 89104 No reserve auctions of general merchandise returns and brand new shelf pulls from major retailers. 702 Auctions offers hassle free returns on items that are misdescribed within 10 days of the date you picked up your items.')
@@ -415,7 +415,7 @@ async def create_auction(page, auction_title, image_path, formatted_start_date, 
             <p>For our complete terms and conditions,&nbsp;<a href="https://bid.702auctions.com/Home/Terms">Click Here</a></p>
             """
             formatted_text_shipping_info = """
-                <p>Pickup only!!&nbsp;<b><a href="https://www.google.com/maps/place/3775+E+Sahara+Ave,+Las+Vegas,+NV+89104" target="_blank">3775 E SAHARA AVE&nbsp;Las Vegas, NV 89104</a></b>&nbsp;Monday-Friday 9am-4:30pm&nbsp;within 10 days. Once payment is received, you will receive an email with a link to schedule a pickup time and pickup instructions. We offer contactless pickup options and take all possible measures to ensure your safety.</p>
+                <p>Pickup only!!&nbsp;<b><a href="https://www.google.com/maps/place/3775+E+Sahara+Ave,+Las+Vegas,+NV+89104" target="_blank">3775 E SAHARA AVE&nbsp;Las Vegas, NV 89104</a></b>&nbsp;Monday-Friday 9am-5:00pm&nbsp;within 10 days. Once payment is received, you will receive an email with a link to schedule a pickup time and pickup instructions. We offer contactless pickup options and take all possible measures to ensure your safety.</p>
             """
 
         logger.info('Setting auction details...')
