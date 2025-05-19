@@ -30,3 +30,15 @@ body {
     transform: scale(1.03);
     box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
 }
+
+/* Simple icon styling for dashboard cards */
+.card-icon {
+    display: block;
+    margin: 0 auto 0.5rem auto;
+    font-size: 2.25rem; /* matches text-4xl */
+    color: #4f46e5; /* indigo-600 */
+}
+
+.dark .card-icon {
+    color: #818cf8; /* indigo-400 */
+}
