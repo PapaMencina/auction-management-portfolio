@@ -1,0 +1,32 @@
+/* Custom styles for modern dark/light theme */
+body {
+    transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+.dark body {
+    background-color: #111827; /* gray-900 */
+    color: #d1d5db; /* gray-300 */
+}
+
+.btn-animated {
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.btn-animated:hover {
+    transform: scale(1.05);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+}
+
+.btn-animated:active {
+    transform: scale(0.95);
+}
+
+/* Card hover effect for dashboard links */
+.card-animated {
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.card-animated:hover {
+    transform: scale(1.03);
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
+}
