@@ -1,13 +1,18 @@
 {
-  "name": "auction-management-system",
+  "name": "auction-management-webapp",
   "version": "1.0.0",
+  "description": "Auction Management Web Application with modern UI",
+  "scripts": {
+    "build": "echo 'No build step required'",
+    "postinstall": "npm run build",
+    "start": "echo 'Starting app through Django'",
+    "heroku-postbuild": "python manage.py collectstatic --noinput"
+  },
   "engines": {
     "node": "16.x"
   },
-  "scripts": {
-    "postinstall": "playwright install chromium"
-  },
-  "dependencies": {
-    "playwright": "1.46.0"
-  }
+  "cacheDirectories": [
+    "node_modules"
+  ],
+  "dependencies": {}
 }

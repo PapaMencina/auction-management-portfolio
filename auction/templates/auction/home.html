@@ -1,32 +1,154 @@
 {% extends "base.html" %}
-{% block title %}Home - Auction Management System{% endblock %}
+{% block title %}Dashboard - Auction Management System{% endblock %}
 {% block content %}
-<h1 class="text-3xl font-bold mb-6 text-center">Dashboard</h1>
-<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-    <a href="{% url 'auction:create_auction' %}" class="block p-6 bg-white dark:bg-gray-800 rounded-lg shadow-md card-animated text-center">
-        <div class="card-icon">🛒</div>
-        <h2 class="text-2xl font-bold mb-2 text-indigo-600 dark:text-indigo-400">Create Auction</h2>
-        <p class="text-gray-600 dark:text-gray-300">Start a new auction for your items.</p>
+<div class="mb-8">
+    <h1 class="text-3xl font-bold mb-2 text-gray-800 dark:text-gray-100">Welcome to Auction Manager</h1>
+    <p class="text-gray-600 dark:text-gray-400">Manage your auctions efficiently with our powerful tools.</p>
+</div>
+
+<!-- Quick Stats Section -->
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+    <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm border-l-4 border-primary-500">
+        <div class="flex items-center">
+            <div class="p-3 rounded-full bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400 mr-4">
+                <i class="fas fa-gavel text-2xl"></i>
+            </div>
+            <div>
+                <p class="text-sm text-gray-500 dark:text-gray-400">Active Auctions</p>
+                <h3 class="text-2xl font-bold text-gray-800 dark:text-gray-100">{{ active_auctions|default:"0" }}</h3>
+                <div class="text-xs text-gray-400 dark:text-gray-500">Auctions before end date</div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm border-l-4 border-green-500">
+        <div class="flex items-center">
+            <div class="p-3 rounded-full bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 mr-4">
+                <i class="fas fa-check-circle text-2xl"></i>
+            </div>
+            <div>
+                <p class="text-sm text-gray-500 dark:text-gray-400">Completed</p>
+                <h3 class="text-2xl font-bold text-gray-800 dark:text-gray-100">{{ completed_auctions|default:"0" }}</h3>
+                <div class="text-xs text-gray-400 dark:text-gray-500">Auctions past end date</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Main Tools Section -->
+<h2 class="text-2xl font-bold mb-6 text-gray-800 dark:text-gray-100">Auction Tools</h2>
+
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+    <a href="{% url 'auction:create_auction' %}" class="block bg-white dark:bg-gray-800 rounded-lg shadow-sm overflow-hidden card-animated">
+        <div class="p-6">
+            <div class="flex items-center justify-center mb-4">
+                <i class="fas fa-plus-circle card-icon"></i>
+            </div>
+            <h3 class="text-xl font-bold mb-2 text-gray-800 dark:text-gray-100 text-center">Create Auction</h3>
+            <p class="text-gray-600 dark:text-gray-400 text-center">Create and configure new auctions with customized settings.</p>
+        </div>
+        <div class="bg-gray-50 dark:bg-gray-700/50 px-6 py-3 text-center">
+            <span class="text-primary-600 dark:text-primary-400 font-medium flex items-center justify-center">
+                Get Started <i class="fas fa-arrow-right ml-2"></i>
+            </span>
+        </div>
     </a>
-    <a href="{% url 'auction:void_unpaid' %}" class="block p-6 bg-white dark:bg-gray-800 rounded-lg shadow-md card-animated text-center">
-        <div class="card-icon">💸</div>
-        <h2 class="text-2xl font-bold mb-2 text-indigo-600 dark:text-indigo-400">Void Unpaid Transactions</h2>
-        <p class="text-gray-600 dark:text-gray-300">Manage unpaid transactions in your auctions.</p>
+    
+    <a href="{% url 'auction:auction_formatter' %}" class="block bg-white dark:bg-gray-800 rounded-lg shadow-sm overflow-hidden card-animated">
+        <div class="p-6">
+            <div class="flex items-center justify-center mb-4">
+                <i class="fas fa-file-alt card-icon"></i>
+            </div>
+            <h3 class="text-xl font-bold mb-2 text-gray-800 dark:text-gray-100 text-center">Format Auction</h3>
+            <p class="text-gray-600 dark:text-gray-400 text-center">Standardize and prepare your auction data for platforms.</p>
+        </div>
+        <div class="bg-gray-50 dark:bg-gray-700/50 px-6 py-3 text-center">
+            <span class="text-primary-600 dark:text-primary-400 font-medium flex items-center justify-center">
+                Format Data <i class="fas fa-arrow-right ml-2"></i>
+            </span>
+        </div>
     </a>
-    <a href="{% url 'auction:remove_duplicates' %}" class="block p-6 bg-white dark:bg-gray-800 rounded-lg shadow-md card-animated text-center">
-        <div class="card-icon">🗑️</div>
-        <h2 class="text-2xl font-bold mb-2 text-indigo-600 dark:text-indigo-400">Remove Duplicates</h2>
-        <p class="text-gray-600 dark:text-gray-300">Clean up duplicate entries in your auction listings.</p>
+    
+    <a href="{% url 'auction:upload_to_hibid' %}" class="block bg-white dark:bg-gray-800 rounded-lg shadow-sm overflow-hidden card-animated">
+        <div class="p-6">
+            <div class="flex items-center justify-center mb-4">
+                <i class="fas fa-cloud-upload-alt card-icon"></i>
+            </div>
+            <h3 class="text-xl font-bold mb-2 text-gray-800 dark:text-gray-100 text-center">Upload to HiBid</h3>
+            <p class="text-gray-600 dark:text-gray-400 text-center">Transfer your formatted auction data to HiBid platform.</p>
+        </div>
+        <div class="bg-gray-50 dark:bg-gray-700/50 px-6 py-3 text-center">
+            <span class="text-primary-600 dark:text-primary-400 font-medium flex items-center justify-center">
+                Upload Now <i class="fas fa-arrow-right ml-2"></i>
+            </span>
+        </div>
     </a>
-    <a href="{% url 'auction:auction_formatter' %}" class="block p-6 bg-white dark:bg-gray-800 rounded-lg shadow-md card-animated text-center">
-        <div class="card-icon">📝</div>
-        <h2 class="text-2xl font-bold mb-2 text-indigo-600 dark:text-indigo-400">Format Auction</h2>
-        <p class="text-gray-600 dark:text-gray-300">Standardize and format your auction data.</p>
+    
+    <a href="{% url 'auction:void_unpaid' %}" class="block bg-white dark:bg-gray-800 rounded-lg shadow-sm overflow-hidden card-animated">
+        <div class="p-6">
+            <div class="flex items-center justify-center mb-4">
+                <i class="fas fa-ban card-icon"></i>
+            </div>
+            <h3 class="text-xl font-bold mb-2 text-gray-800 dark:text-gray-100 text-center">Void Unpaid</h3>
+            <p class="text-gray-600 dark:text-gray-400 text-center">Process and manage unpaid auction transactions.</p>
+        </div>
+        <div class="bg-gray-50 dark:bg-gray-700/50 px-6 py-3 text-center">
+            <span class="text-primary-600 dark:text-primary-400 font-medium flex items-center justify-center">
+                Manage Payments <i class="fas fa-arrow-right ml-2"></i>
+            </span>
+        </div>
     </a>
-    <a href="{% url 'auction:upload_to_hibid' %}" class="block p-6 bg-white dark:bg-gray-800 rounded-lg shadow-md card-animated text-center">
-        <div class="card-icon">⬆️</div>
-        <h2 class="text-2xl font-bold mb-2 text-indigo-600 dark:text-indigo-400">Upload to Hibid</h2>
-        <p class="text-gray-600 dark:text-gray-300">Transfer your auction data to the Hibid platform.</p>
+    
+    <a href="{% url 'auction:remove_duplicates' %}" class="block bg-white dark:bg-gray-800 rounded-lg shadow-sm overflow-hidden card-animated">
+        <div class="p-6">
+            <div class="flex items-center justify-center mb-4">
+                <i class="fas fa-clone card-icon"></i>
+            </div>
+            <h3 class="text-xl font-bold mb-2 text-gray-800 dark:text-gray-100 text-center">Remove Duplicates</h3>
+            <p class="text-gray-600 dark:text-gray-400 text-center">Clean up and manage duplicate entries in your auctions.</p>
+        </div>
+        <div class="bg-gray-50 dark:bg-gray-700/50 px-6 py-3 text-center">
+            <span class="text-primary-600 dark:text-primary-400 font-medium flex items-center justify-center">
+                Clean Data <i class="fas fa-arrow-right ml-2"></i>
+            </span>
+        </div>
     </a>
+</div>
+
+<!-- Recent Activity Section -->
+<h2 class="text-2xl font-bold mb-6 text-gray-800 dark:text-gray-100">Recent Activity</h2>
+<div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm overflow-hidden">
+    <div class="p-0">
+        {% if recent_activities %}
+        <ul class="divide-y divide-gray-200 dark:divide-gray-700">
+            {% for activity in recent_activities %}
+            <li class="p-4 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0 mr-3">
+                        <div class="w-10 h-10 rounded-full bg-{{ activity.type_color|default:'gray' }}-100 dark:bg-{{ activity.type_color|default:'gray' }}-900/30 flex items-center justify-center text-{{ activity.type_color|default:'gray' }}-600 dark:text-{{ activity.type_color|default:'gray' }}-400">
+                            <i class="fas fa-{{ activity.icon|default:'circle' }}"></i>
+                        </div>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <p class="text-sm font-medium text-gray-800 dark:text-gray-200">{{ activity.title }}</p>
+                        <p class="text-sm text-gray-500 dark:text-gray-400">{{ activity.description }}</p>
+                    </div>
+                    <div class="flex-shrink-0 ml-3">
+                        <span class="text-xs text-gray-500 dark:text-gray-400">{{ activity.time }}</span>
+                    </div>
+                </div>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <div class="p-6 text-center">
+            <div class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gray-100 dark:bg-gray-700/50 mb-4">
+                <i class="fas fa-history text-gray-400 dark:text-gray-500 text-2xl"></i>
+            </div>
+            <h3 class="text-lg font-medium text-gray-800 dark:text-gray-200 mb-1">No recent activity</h3>
+            <p class="text-gray-500 dark:text-gray-400">Your recent actions will appear here</p>
+        </div>
+        {% endif %}
+    </div>
 </div>
 {% endblock %}

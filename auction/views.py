@@ -51,9 +51,17 @@ if warehouse_data:
 def home(request):
     warehouses = list(warehouse_data.keys())
     active_warehouse = config_manager.active_warehouse or (warehouses[0] if warehouses else None)
+    
+    # Get statistics for dashboard
+    today = timezone.now().date()
+    active_auctions = Event.objects.filter(ending_date__gte=today).count()
+    completed_auctions = Event.objects.filter(ending_date__lt=today).count()
+    
     context = {
         'warehouses': warehouses,
         'default_warehouse': active_warehouse,
+        'active_auctions': active_auctions,
+        'completed_auctions': completed_auctions,
     }
     return render(request, 'auction/home.html', context)
 

@@ -1,52 +1,161 @@
 {% extends "base.html" %}
 {% block title %}Upload to HiBid - Auction Management System{% endblock %}
 {% block content %}
-<div class="max-w-2xl mx-auto bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
-    <h1 class="text-2xl font-bold mb-6 text-center text-gray-900 dark:text-white">Upload to HiBid</h1>
-    <form id="uploadToHiBidForm" method="post" class="space-y-4">
-        {% csrf_token %}
-        <div>
-            <label for="selected_warehouse" class="block mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">Select Warehouse:</label>
-            <select id="selected_warehouse" onchange="updateAuctionDropdown()" class="w-full p-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white">
-                <option value="">Select a warehouse</option>
-                {% for warehouse in warehouses %}
-                    <option value="{{ warehouse }}">{{ warehouse }}</option>
-                {% endfor %}
-            </select>
+<div class="mb-6">
+    <h1 class="text-3xl font-bold mb-2 text-gray-800 dark:text-gray-100">Upload to HiBid</h1>
+    <p class="text-gray-600 dark:text-gray-400">Transfer your formatted auction data to HiBid platform.</p>
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+    <div class="lg:col-span-2">
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-6 mb-6">
+            <h2 class="text-xl font-bold mb-4 text-gray-800 dark:text-gray-100 flex items-center">
+                <i class="fas fa-cloud-upload-alt text-primary-600 dark:text-primary-400 mr-2"></i>
+                Upload Settings
+            </h2>
+            
+            <form id="uploadToHiBidForm" method="post" class="space-y-6" data-form-enhance="true" data-form-loading="true" data-loading-message="Uploading to HiBid...">
+                {% csrf_token %}
+                <div class="form-group">
+                    <label for="selected_warehouse" class="form-label">
+                        <i class="fas fa-warehouse text-gray-500 dark:text-gray-400 mr-1"></i>
+                        Warehouse Location
+                    </label>
+                    <select id="selected_warehouse" onchange="updateAuctionDropdown()" class="form-input">
+                        <option value="">Select a warehouse</option>
+                        {% for warehouse in warehouses %}
+                            <option value="{{ warehouse }}">{{ warehouse }}</option>
+                        {% endfor %}
+                    </select>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Select the warehouse where the items are located</p>
+                </div>
+                
+                <div class="form-group">
+                    <label for="auction_id" class="form-label">
+                        <i class="fas fa-gavel text-gray-500 dark:text-gray-400 mr-1"></i>
+                        Auction Event
+                    </label>
+                    <select id="auction_id" name="auction_id" required class="form-input">
+                        <option value="">Select an auction</option>
+                    </select>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Choose the auction to upload to HiBid</p>
+                </div>
+                
+                <div class="flex flex-col sm:flex-row gap-4 pt-2">
+                    <button type="submit" id="submit-button" class="btn-primary flex items-center justify-center" disabled>
+                        <i class="fas fa-cloud-upload-alt mr-2"></i>
+                        Upload to HiBid
+                    </button>
+                    <button type="button" onclick="resetForm()" class="btn-secondary">
+                        <i class="fas fa-redo mr-2"></i>
+                        Reset
+                    </button>
+                </div>
+            </form>
         </div>
-        <div>
-            <label for="auction_id" class="block mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">Select Event:</label>
-            <select id="auction_id" name="auction_id" required class="w-full p-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white">
-                <option value="">Select an auction</option>
-                <!-- Options will be populated dynamically by JavaScript -->
-            </select>
-        </div>
-        <div class="relative">
-            <button type="submit" id="submit-button" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline transition duration-150 ease-in-out btn-animated">
-                Run Upload to HiBid Script
-            </button>
-            <div id="spinner" class="hidden absolute right-3 top-1/2 transform -translate-y-1/2">
-                <div class="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+    </div>
+    
+    <div class="lg:col-span-1">
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-6 mb-6 sticky top-24">
+            <h2 class="text-xl font-bold mb-4 text-gray-800 dark:text-gray-100 flex items-center">
+                <i class="fas fa-info-circle text-primary-600 dark:text-primary-400 mr-2"></i>
+                Status & Progress
+            </h2>
+            
+            <div id="status-card" class="p-4 bg-gray-50 dark:bg-gray-700/30 rounded-lg mb-4">
+                <div class="flex items-center mb-3">
+                    <div id="status-icon" class="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-600 flex items-center justify-center mr-3">
+                        <i class="fas fa-hourglass text-gray-500 dark:text-gray-400"></i>
+                    </div>
+                    <div>
+                        <h3 id="status-title" class="font-medium text-gray-700 dark:text-gray-300">Ready to Upload</h3>
+                        <p id="status-description" class="text-sm text-gray-500 dark:text-gray-400">Select a warehouse and auction</p>
+                    </div>
+                </div>
+                
+                <div class="progress-container">
+                    <div id="progress-bar" class="progress-bar" style="width: 0%"></div>
+                </div>
+            </div>
+            
+            <div id="status-message" class="space-y-4"></div>
+            
+            <div class="mt-6 border-t border-gray-200 dark:border-gray-700 pt-4">
+                <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">What happens next?</h3>
+                <ul class="space-y-2 text-sm text-gray-500 dark:text-gray-400">
+                    <li class="flex items-start">
+                        <i class="fas fa-check-circle text-green-500 mt-0.5 mr-2"></i>
+                        <span>System will upload formatted data to HiBid</span>
+                    </li>
+                    <li class="flex items-start">
+                        <i class="fas fa-check-circle text-green-500 mt-0.5 mr-2"></i>
+                        <span>Images will be uploaded for each item</span>
+                    </li>
+                    <li class="flex items-start">
+                        <i class="fas fa-check-circle text-green-500 mt-0.5 mr-2"></i>
+                        <span>Process can take several minutes</span>
+                    </li>
+                </ul>
             </div>
         </div>
-    </form>
-    <div id="status-message" class="mt-4 text-center text-sm text-gray-600 dark:text-gray-400"></div>
+    </div>
 </div>
 
 <script>
+document.addEventListener('DOMContentLoaded', function() {
+    const form = document.getElementById('uploadToHiBidForm');
+    const submitButton = document.getElementById('submit-button');
+    const warehouseSelect = document.getElementById('selected_warehouse');
+    const auctionSelect = document.getElementById('auction_id');
+
+    // Initial call to set up auction dropdown
+    updateAuctionDropdown();
+
+    // Add event listeners to form controls
+    warehouseSelect.addEventListener('change', async () => {
+        submitButton.disabled = true;
+        await updateAuctionDropdown();
+        validateForm();
+    });
+
+    auctionSelect.addEventListener('change', validateForm);
+
+    function validateForm() {
+        const warehouse = warehouseSelect.value;
+        const auctionId = auctionSelect.value;
+        
+        if (warehouse && auctionId) {
+            submitButton.disabled = false;
+            submitButton.classList.remove('opacity-50', 'cursor-not-allowed');
+            updateStatus('READY', 'Ready to upload to HiBid', 15);
+        } else {
+            submitButton.disabled = true;
+            submitButton.classList.add('opacity-50', 'cursor-not-allowed');
+            updateStatus('WAITING', warehouse ? 'Select an auction to proceed' : 'Select a warehouse first', 5);
+        }
+    }
+
     function updateAuctionDropdown() {
-        const warehouseSelect = document.getElementById('selected_warehouse');
-        const auctionSelect = document.getElementById('auction_id');
         const selectedWarehouse = warehouseSelect.value;
-
-        // Clear existing options
         auctionSelect.innerHTML = '<option value="">Select an auction</option>';
+        
+        if (!selectedWarehouse) {
+            updateStatus('WAITING', 'Select a warehouse first', 0);
+            return;
+        }
 
-        if (selectedWarehouse) {
+        try {
+            updateStatus('LOADING', 'Fetching available auctions...', 5);
+            
             // Fetch filtered auctions from the server
             fetch(`/auction/get-warehouse-events/?warehouse=${selectedWarehouse}&process_type=future`)
                 .then(response => response.json())
                 .then(filteredAuctions => {
+                    if (filteredAuctions.length === 0) {
+                        updateStatus('WARNING', 'No auctions found for this warehouse', 0);
+                        return;
+                    }
+                    
                     // Add new options
                     filteredAuctions.forEach(auction => {
                         const option = document.createElement('option');
@@ -54,88 +163,181 @@
                         option.textContent = `${auction.title} (${auction.id}) - Ends: ${auction.ending_date}`;
                         auctionSelect.appendChild(option);
                     });
+                    
+                    updateStatus('READY', 'Select an auction to proceed', 10);
                 })
                 .catch(error => {
                     console.error('Error fetching auctions:', error);
-                    updateUI('ERROR', 'Failed to fetch auctions');
+                    updateStatus('ERROR', 'Failed to fetch auctions: ' + error.message, 0);
                 });
+        } catch (error) {
+            console.error('Error:', error);
+            updateStatus('ERROR', 'An error occurred: ' + error.message, 0);
         }
     }
 
-    function updateUI(status, message) {
-        const statusMessage = document.getElementById('status-message');
-        statusMessage.textContent = message;
-        statusMessage.classList.remove('text-gray-600', 'text-green-600', 'text-red-600');
-        statusMessage.classList.add(status === 'SUCCESS' ? 'text-green-600' : status === 'ERROR' ? 'text-red-600' : 'text-gray-600');
+    function updateStatus(state, message, progress) {
+        const statusIcon = document.getElementById('status-icon');
+        const statusTitle = document.getElementById('status-title');
+        const statusDescription = document.getElementById('status-description');
+        const statusCard = document.getElementById('status-card');
+        const progressBar = document.getElementById('progress-bar');
+        
+        // Update progress bar
+        if (progressBar && progress !== undefined) {
+            progressBar.style.width = `${progress}%`;
+        }
+        
+        // Clear existing classes
+        statusIcon.className = 'w-8 h-8 rounded-full flex items-center justify-center mr-3';
+        statusCard.className = 'p-4 rounded-lg mb-4';
+        
+        // Set state-specific styles
+        let iconClass, titleText, cardClass;
+        
+        switch(state) {
+            case 'COMPLETED':
+            case 'SUCCESS':
+                iconClass = 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400';
+                titleText = 'Completed Successfully';
+                cardClass = 'bg-green-50 dark:bg-green-900/10 border border-green-200 dark:border-green-900/30';
+                statusIcon.innerHTML = '<i class="fas fa-check"></i>';
+                break;
+            case 'ERROR':
+            case 'FAILURE':
+                iconClass = 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400';
+                titleText = 'Error Occurred';
+                cardClass = 'bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-900/30';
+                statusIcon.innerHTML = '<i class="fas fa-exclamation-triangle"></i>';
+                break;
+            case 'PROCESSING':
+            case 'STARTED':
+                iconClass = 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400';
+                titleText = 'Processing';
+                cardClass = 'bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-900/30';
+                statusIcon.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+                break;
+            case 'WARNING':
+                iconClass = 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-600 dark:text-yellow-400';
+                titleText = 'Warning';
+                cardClass = 'bg-yellow-50 dark:bg-yellow-900/10 border border-yellow-200 dark:border-yellow-900/30';
+                statusIcon.innerHTML = '<i class="fas fa-exclamation-circle"></i>';
+                break;
+            case 'WAITING':
+                iconClass = 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-600 dark:text-yellow-400';
+                titleText = 'Waiting';
+                cardClass = 'bg-yellow-50 dark:bg-yellow-900/10 border border-yellow-200 dark:border-yellow-900/30';
+                statusIcon.innerHTML = '<i class="fas fa-clock"></i>';
+                break;
+            case 'LOADING':
+                iconClass = 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400';
+                titleText = 'Loading';
+                cardClass = 'bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-900/30';
+                statusIcon.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+                break;
+            default: // READY
+                iconClass = 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400';
+                titleText = 'Ready to Process';
+                cardClass = 'bg-gray-50 dark:bg-gray-700/30';
+                statusIcon.innerHTML = '<i class="fas fa-hourglass"></i>';
+        }
+        
+        statusIcon.className += ' ' + iconClass;
+        statusTitle.textContent = titleText;
+        statusDescription.textContent = message;
+        statusCard.className += ' ' + cardClass;
     }
 
-    function showSpinner() {
-        document.getElementById('spinner').classList.remove('hidden');
+    function displayResults(result) {
+        const resultsDiv = document.createElement('div');
+        resultsDiv.classList.add('p-4', 'bg-green-50', 'dark:bg-green-900/10', 'border', 'border-green-200', 'dark:border-green-900/30', 'rounded-lg');
+        
+        resultsDiv.innerHTML = `
+            <h3 class="text-lg font-medium text-gray-800 dark:text-gray-100 mb-2 flex items-center">
+                <i class="fas fa-check-circle text-green-500 mr-2"></i>
+                Upload Completed
+            </h3>
+            <p class="text-sm text-gray-600 dark:text-gray-400">${result}</p>
+        `;
+        
+        document.getElementById('status-message').innerHTML = '';
+        document.getElementById('status-message').appendChild(resultsDiv);
+        
+        // Show notification if function exists
+        if (window.showNotification) {
+            window.showNotification('HiBid upload completed successfully', 'success');
+        }
     }
 
-    function hideSpinner() {
-        document.getElementById('spinner').classList.add('hidden');
+    function displayError(message) {
+        const errorDiv = document.createElement('div');
+        errorDiv.classList.add('p-4', 'bg-red-50', 'dark:bg-red-900/10', 'border', 'border-red-200', 'dark:border-red-900/30', 'rounded-lg');
+        
+        errorDiv.innerHTML = `
+            <h3 class="text-lg font-medium text-gray-800 dark:text-gray-100 mb-2 flex items-center">
+                <i class="fas fa-exclamation-circle text-red-500 mr-2"></i>
+                Error Occurred
+            </h3>
+            <p class="text-sm text-gray-600 dark:text-gray-400">${message}</p>
+        `;
+        
+        document.getElementById('status-message').innerHTML = '';
+        document.getElementById('status-message').appendChild(errorDiv);
+        
+        // Show notification if function exists
+        if (window.showNotification) {
+            window.showNotification('Error uploading to HiBid', 'error');
+        }
     }
 
-    function disableSubmitButton() {
-        const submitButton = document.getElementById('submit-button');
+    form.addEventListener('submit', function(e) {
+        e.preventDefault();
+        const formData = new FormData(this);
+        
+        // Disable form controls during processing
+        warehouseSelect.disabled = true;
+        auctionSelect.disabled = true;
         submitButton.disabled = true;
         submitButton.classList.add('opacity-50', 'cursor-not-allowed');
-    }
-
-    function enableSubmitButton() {
-        const submitButton = document.getElementById('submit-button');
-        submitButton.disabled = false;
-        submitButton.classList.remove('opacity-50', 'cursor-not-allowed');
-    }
-
-    document.addEventListener('DOMContentLoaded', function() {
-        const form = document.getElementById('uploadToHiBidForm');
-        const submitButton = document.getElementById('submit-button');
-
-        updateAuctionDropdown();
-
-        form.addEventListener('submit', function(e) {
-            e.preventDefault();
-            const auctionId = document.getElementById('auction_id').value;
-            
-            if (submitButton.dataset.processingAuctionId === auctionId) {
-                updateUI('WARNING', 'This auction is already being processed for HiBid upload. Please wait for it to complete.');
-                return;
+        
+        updateStatus('PROCESSING', 'Initiating HiBid upload...', 20);
+        
+        fetch('{% url "auction:upload_to_hibid" %}', {
+            method: 'POST',
+            body: formData,
+            headers: {
+                'X-CSRFToken': '{{ csrf_token }}'
             }
-
-            const formData = new FormData(this);
-            disableSubmitButton();
-            submitButton.dataset.processingAuctionId = auctionId;
-            showSpinner();
-            
-            updateUI('PROCESSING', 'Initiating HiBid upload...');
-
-            fetch('{% url "auction:upload_to_hibid" %}', {
-                method: 'POST',
-                body: formData,
-                headers: {
-                    'X-CSRFToken': '{{ csrf_token }}'
-                }
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.status === 'success') {
-                    updateUI('SUCCESS', data.message);
-                } else {
-                    throw new Error(data.message);
-                }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                updateUI('ERROR', 'An error occurred: ' + error.message);
-            })
-            .finally(() => {
-                hideSpinner();
-                enableSubmitButton();
-                submitButton.dataset.processingAuctionId = '';
-            });
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                updateStatus('SUCCESS', data.message, 100);
+                displayResults(data.message || "HiBid upload process started successfully.");
+            } else {
+                throw new Error(data.message || "An error occurred during upload.");
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            updateStatus('ERROR', 'An error occurred: ' + error.message, 0);
+            displayError(error.message);
+        })
+        .finally(() => {
+            // Re-enable form controls
+            warehouseSelect.disabled = false;
+            auctionSelect.disabled = false;
+            submitButton.disabled = false;
+            submitButton.classList.remove('opacity-50', 'cursor-not-allowed');
         });
     });
+
+    function resetForm() {
+        form.reset();
+        auctionSelect.innerHTML = '<option value="">Select an auction</option>';
+        updateStatus('WAITING', 'Form has been reset. Select a warehouse to begin.', 0);
+        document.getElementById('status-message').innerHTML = '';
+    }
+});
 </script>
 {% endblock %}

@@ -12,12 +12,15 @@ services:
     env_file:
       - .env
     depends_on:
-      - redis
       - minio
+    environment:
+      - REDIS_URL=redis://host.docker.internal:6379/0
     command: >
       sh -c "python manage.py migrate &&
              python manage.py collectstatic --noinput &&
              gunicorn auction_webapp.wsgi:application --bind 0.0.0.0:8000 --workers 2 --threads 4 --timeout 120"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   worker:
     build:
@@ -28,17 +31,13 @@ services:
     env_file:
       - .env
     depends_on:
-      - redis
       - minio
       - web
+    environment:
+      - REDIS_URL=redis://host.docker.internal:6379/0
     command: celery -A auction_webapp worker --loglevel=info
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   minio:
     image: minio/minio
@@ -53,5 +52,4 @@ services:
     command: server /data --console-address ":9001"
 
 volumes:
-  redis_data:
   minio_data: 

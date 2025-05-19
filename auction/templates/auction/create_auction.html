@@ -1,41 +1,122 @@
 {% extends "base.html" %}
 {% block title %}Create Auction - Auction Management System{% endblock %}
 {% block content %}
-<div class="max-w-2xl mx-auto bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
-    <h1 class="text-2xl font-bold mb-6 text-center text-gray-900 dark:text-white">Create Auction</h1>
-    <form id="create-auction-form" method="post" class="space-y-4">
-        {% csrf_token %}
-        <div>
-            <label for="warehouse" class="block mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">Select Warehouse:</label>
-            <select id="warehouse" name="selected_warehouse" onchange="updateAuctionTitle()" class="w-full p-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white">
-                <option value="">Select a warehouse</option>
-                {% for warehouse in warehouses %}
-                    <option value="{{ warehouse }}">{{ warehouse }}</option>
-                {% endfor %}
-            </select>
+<div class="mb-6">
+    <h1 class="text-3xl font-bold mb-2 text-gray-800 dark:text-gray-100">Create Auction</h1>
+    <p class="text-gray-600 dark:text-gray-400">Set up a new auction event with your desired parameters.</p>
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+    <div class="lg:col-span-2">
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-6 mb-6">
+            <h2 class="text-xl font-bold mb-4 text-gray-800 dark:text-gray-100 flex items-center">
+                <i class="fas fa-plus-circle text-primary-600 dark:text-primary-400 mr-2"></i>
+                Auction Details
+            </h2>
+            
+            <form id="create-auction-form" method="post" class="space-y-6" data-form-enhance="true" data-form-loading="true" data-loading-message="Creating auction...">
+                {% csrf_token %}
+                <div class="form-group">
+                    <label for="warehouse" class="form-label">
+                        <i class="fas fa-warehouse text-gray-500 dark:text-gray-400 mr-1"></i>
+                        Warehouse Location
+                    </label>
+                    <select id="warehouse" name="selected_warehouse" onchange="updateAuctionTitle()" class="form-input">
+                        <option value="">Select a warehouse</option>
+                        {% for warehouse in warehouses %}
+                            <option value="{{ warehouse }}">{{ warehouse }}</option>
+                        {% endfor %}
+                    </select>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Select the warehouse where the auction items are located</p>
+                </div>
+                
+                <div class="form-group">
+                    <label for="auction_title" class="form-label">
+                        <i class="fas fa-heading text-gray-500 dark:text-gray-400 mr-1"></i>
+                        Auction Title
+                    </label>
+                    <input type="text" id="auction_title" name="auction_title" required class="form-input">
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">A descriptive title for your auction event</p>
+                </div>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="form-group">
+                        <label for="ending_date" class="form-label">
+                            <i class="fas fa-calendar-alt text-gray-500 dark:text-gray-400 mr-1"></i>
+                            Ending Date
+                        </label>
+                        <input type="date" id="ending_date" name="ending_date" required class="form-input">
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">When the auction will close</p>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="ending_time" class="form-label">
+                            <i class="fas fa-clock text-gray-500 dark:text-gray-400 mr-1"></i>
+                            Ending Time
+                        </label>
+                        <input type="time" id="ending_time" name="ending_time" value="18:30" required class="form-input">
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Time of day when bidding closes</p>
+                    </div>
+                </div>
+                
+                <div class="flex flex-col sm:flex-row gap-4 pt-2">
+                    <button type="submit" id="submit-button" class="btn-primary flex items-center justify-center">
+                        <i class="fas fa-gavel mr-2"></i>
+                        Create Auction
+                    </button>
+                    <button type="button" onclick="resetForm()" class="btn-secondary">
+                        <i class="fas fa-redo mr-2"></i>
+                        Reset
+                    </button>
+                </div>
+            </form>
         </div>
-        <div>
-            <label for="auction_title" class="block mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">Auction Title:</label>
-            <input type="text" id="auction_title" name="auction_title" required class="w-full p-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white">
-        </div>
-        <div>
-            <label for="ending_date" class="block mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">Ending Date:</label>
-            <input type="date" id="ending_date" name="ending_date" required class="w-full p-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white">
-        </div>
-        <div>
-            <label for="ending_time" class="block mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">Ending Time:</label>
-            <input type="time" id="ending_time" name="ending_time" value="18:30" required class="w-full p-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white">
-        </div>
-        <div class="relative">
-            <button type="submit" id="submit-button" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline transition duration-150 ease-in-out btn-animated">
-                Run Create Auction Script
-            </button>
-            <div id="spinner" class="hidden absolute right-3 top-1/2 transform -translate-y-1/2">
-                <div class="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+    </div>
+    
+    <div class="lg:col-span-1">
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-6 mb-6 sticky top-24">
+            <h2 class="text-xl font-bold mb-4 text-gray-800 dark:text-gray-100 flex items-center">
+                <i class="fas fa-info-circle text-primary-600 dark:text-primary-400 mr-2"></i>
+                Status & Progress
+            </h2>
+            
+            <div id="status-card" class="p-4 bg-gray-50 dark:bg-gray-700/30 rounded-lg mb-4">
+                <div class="flex items-center mb-3">
+                    <div id="status-icon" class="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-600 flex items-center justify-center mr-3">
+                        <i class="fas fa-hourglass text-gray-500 dark:text-gray-400"></i>
+                    </div>
+                    <div>
+                        <h3 id="status-title" class="font-medium text-gray-700 dark:text-gray-300">Ready to Create</h3>
+                        <p id="status-description" class="text-sm text-gray-500 dark:text-gray-400">Fill the form and click "Create Auction"</p>
+                    </div>
+                </div>
+                
+                <div class="progress-container">
+                    <div id="progress-bar" class="progress-bar" style="width: 0%"></div>
+                </div>
+            </div>
+            
+            <div id="status-message" class="space-y-4"></div>
+            
+            <div class="mt-6 border-t border-gray-200 dark:border-gray-700 pt-4">
+                <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">What happens next?</h3>
+                <ul class="space-y-2 text-sm text-gray-500 dark:text-gray-400">
+                    <li class="flex items-start">
+                        <i class="fas fa-check-circle text-green-500 mt-0.5 mr-2"></i>
+                        <span>Auction will be created with the specified details</span>
+                    </li>
+                    <li class="flex items-start">
+                        <i class="fas fa-check-circle text-green-500 mt-0.5 mr-2"></i>
+                        <span>Structure will be set up on HiBid platform</span>
+                    </li>
+                    <li class="flex items-start">
+                        <i class="fas fa-check-circle text-green-500 mt-0.5 mr-2"></i>
+                        <span>Once created, you can format and upload items</span>
+                    </li>
+                </ul>
             </div>
         </div>
-    </form>
-    <div id="status-message" class="mt-4 text-center text-sm text-gray-600 dark:text-gray-400"></div>
+    </div>
 </div>
 
 <script>
@@ -43,6 +124,15 @@
         var warehouseSelect = document.getElementById('warehouse');
         var auctionTitleInput = document.getElementById('auction_title');
         var selectedWarehouse = warehouseSelect.value;
+
+        // Update status based on warehouse selection
+        if (selectedWarehouse) {
+            updateStatus('READY', 'Warehouse selected. Now set other auction details.', 20);
+        } else {
+            updateStatus('WAITING', 'Please select a warehouse first', 0);
+            auctionTitleInput.value = '';
+            return;
+        }
 
         if (selectedWarehouse === 'Maule Warehouse') {
             auctionTitleInput.value = 'Maule Liquidation Returns & Brand New Overstock Items #';
@@ -54,73 +144,142 @@
     }
 
     function pollTaskStatus(taskId) {
+        updateStatus('PROCESSING', 'Creating auction on HiBid platform...', 25);
+        
         const intervalId = setInterval(() => {
             fetch(`/auction/check-task-status/${taskId}/`)
                 .then(response => response.json())
                 .then(data => {
                     console.log('Task status data:', data);
-                    updateUI(data.state, data.message, data.result);
+                    
+                    // Calculate progress percentage
+                    const progress = data.progress || 
+                                    (data.state === 'SUCCESS' ? 100 : 
+                                    data.state === 'FAILURE' ? 0 : 50);
+                    
+                    updateStatus(
+                        data.state === 'SUCCESS' ? 'COMPLETED' :
+                        data.state === 'FAILURE' ? 'ERROR' : 'PROCESSING',
+                        data.message || 'Processing auction creation...',
+                        progress
+                    );
+                    
                     if (data.state === 'SUCCESS') {
                         clearInterval(intervalId);
-                        hideSpinner();
                         enableSubmitButton();
                         displayResults(data.result);
                     } else if (data.state === 'FAILURE') {
                         clearInterval(intervalId);
-                        hideSpinner();
                         enableSubmitButton();
                         displayError(data.result);
                     }
                 })
                 .catch(error => {
                     console.error('Error polling task status:', error);
-                    updateUI('ERROR', 'Failed to check task status', error.message);
+                    updateStatus('ERROR', `Failed to check task status: ${error.message}`, 0);
                     clearInterval(intervalId);
-                    hideSpinner();
                     enableSubmitButton();
                 });
-        }, 5000);
+        }, 3000);
     }
 
-    function updateUI(state, message, details) {
-        const statusMessage = document.getElementById('status-message');
-        let displayMessage = `Status: ${state} - ${message}`;
-        if (details) {
-            displayMessage += `<br>Details: ${details}`;
+    function updateStatus(state, message, progress) {
+        const statusIcon = document.getElementById('status-icon');
+        const statusTitle = document.getElementById('status-title');
+        const statusDescription = document.getElementById('status-description');
+        const statusCard = document.getElementById('status-card');
+        const progressBar = document.getElementById('progress-bar');
+        
+        // Update progress bar
+        if (progressBar && progress !== undefined) {
+            progressBar.style.width = `${progress}%`;
         }
-        statusMessage.innerHTML = displayMessage;
-        statusMessage.classList.remove('text-gray-600', 'text-green-600', 'text-red-600');
-        statusMessage.classList.add(
-            state === 'SUCCESS' ? 'text-green-600' : 
-            state === 'FAILURE' ? 'text-red-600' : 
-            'text-gray-600'
-        );
+        
+        // Clear existing classes
+        statusIcon.className = 'w-8 h-8 rounded-full flex items-center justify-center mr-3';
+        statusCard.className = 'p-4 rounded-lg mb-4';
+        
+        // Set state-specific styles
+        let iconClass, titleText, cardClass;
+        
+        switch(state) {
+            case 'COMPLETED':
+                iconClass = 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400';
+                titleText = 'Auction Created';
+                cardClass = 'bg-green-50 dark:bg-green-900/10 border border-green-200 dark:border-green-900/30';
+                statusIcon.innerHTML = '<i class="fas fa-check"></i>';
+                break;
+            case 'ERROR':
+                iconClass = 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400';
+                titleText = 'Error Occurred';
+                cardClass = 'bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-900/30';
+                statusIcon.innerHTML = '<i class="fas fa-exclamation-triangle"></i>';
+                break;
+            case 'PROCESSING':
+                iconClass = 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400';
+                titleText = 'Creating Auction';
+                cardClass = 'bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-900/30';
+                statusIcon.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+                break;
+            case 'WAITING':
+                iconClass = 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-600 dark:text-yellow-400';
+                titleText = 'Waiting';
+                cardClass = 'bg-yellow-50 dark:bg-yellow-900/10 border border-yellow-200 dark:border-yellow-900/30';
+                statusIcon.innerHTML = '<i class="fas fa-clock"></i>';
+                break;
+            default: // READY
+                iconClass = 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400';
+                titleText = 'Ready to Create';
+                cardClass = 'bg-gray-50 dark:bg-gray-700/30';
+                statusIcon.innerHTML = '<i class="fas fa-hourglass"></i>';
+        }
+        
+        statusIcon.className += ' ' + iconClass;
+        statusTitle.textContent = titleText;
+        statusDescription.textContent = message;
+        statusCard.className += ' ' + cardClass;
     }
 
     function displayResults(result) {
         const resultsDiv = document.createElement('div');
+        resultsDiv.classList.add('p-4', 'bg-green-50', 'dark:bg-green-900/10', 'border', 'border-green-200', 'dark:border-green-900/30', 'rounded-lg');
+        
         resultsDiv.innerHTML = `
-            <h3 class="text-lg font-semibold mt-4">Auction Creation Completed</h3>
-            <p>${result}</p>
+            <h3 class="text-lg font-medium text-gray-800 dark:text-gray-100 mb-2 flex items-center">
+                <i class="fas fa-check-circle text-green-500 mr-2"></i>
+                Auction Created Successfully
+            </h3>
+            <p class="text-sm text-gray-600 dark:text-gray-400">${result}</p>
         `;
+        
+        document.getElementById('status-message').innerHTML = '';
         document.getElementById('status-message').appendChild(resultsDiv);
+        
+        // Show notification
+        if (window.showNotification) {
+            window.showNotification('Auction created successfully', 'success');
+        }
     }
 
     function displayError(message) {
         const errorDiv = document.createElement('div');
+        errorDiv.classList.add('p-4', 'bg-red-50', 'dark:bg-red-900/10', 'border', 'border-red-200', 'dark:border-red-900/30', 'rounded-lg');
+        
         errorDiv.innerHTML = `
-            <h3 class="text-lg font-semibold mt-4 text-red-600">Error Occurred</h3>
-            <p>${message}</p>
+            <h3 class="text-lg font-medium text-gray-800 dark:text-gray-100 mb-2 flex items-center">
+                <i class="fas fa-exclamation-circle text-red-500 mr-2"></i>
+                Error Creating Auction
+            </h3>
+            <p class="text-sm text-gray-600 dark:text-gray-400">${message}</p>
         `;
+        
+        document.getElementById('status-message').innerHTML = '';
         document.getElementById('status-message').appendChild(errorDiv);
-    }
-
-    function showSpinner() {
-        document.getElementById('spinner').classList.remove('hidden');
-    }
-
-    function hideSpinner() {
-        document.getElementById('spinner').classList.add('hidden');
+        
+        // Show notification
+        if (window.showNotification) {
+            window.showNotification('Error creating auction', 'error');
+        }
     }
 
     function disableSubmitButton() {
@@ -136,20 +295,32 @@
     }
 
     function clearPreviousResults() {
-        const statusMessage = document.getElementById('status-message');
-        statusMessage.innerHTML = '';
+        document.getElementById('status-message').innerHTML = '';
+    }
+    
+    function resetForm() {
+        document.getElementById('create-auction-form').reset();
+        clearPreviousResults();
+        updateStatus('READY', 'Form has been reset. Ready to start over.', 0);
     }
 
     document.addEventListener('DOMContentLoaded', function() {
         const form = document.getElementById('create-auction-form');
         const submitButton = document.getElementById('submit-button');
+        
+        // Initialize status
+        updateStatus('WAITING', 'Please fill out all required fields', 0);
 
         form.addEventListener('submit', function(e) {
             e.preventDefault();
             const auctionTitle = document.getElementById('auction_title').value;
             
             if (submitButton.dataset.processingAuctionId === auctionTitle) {
-                updateUI('WARNING', 'This auction is already being processed', 'Please wait for it to complete.');
+                updateStatus('WARNING', 'This auction is already being processed. Please wait for it to complete.', null);
+                
+                if (window.showNotification) {
+                    window.showNotification('This auction is already being processed', 'warning');
+                }
                 return;
             }
 
@@ -158,9 +329,8 @@
             const formData = new FormData(form);
             disableSubmitButton();
             submitButton.dataset.processingAuctionId = auctionTitle;
-            showSpinner();
             
-            updateUI('PROCESSING', 'Creating auction...', '');
+            updateStatus('PROCESSING', 'Starting auction creation process...', 10);
 
             fetch(form.action, {
                 method: 'POST',
@@ -175,22 +345,34 @@
                 if (data.error) {
                     throw new Error(data.error);
                 }
-                updateUI('STARTED', 'Auction creation process started successfully', data.message || '');
+                
+                updateStatus('PROCESSING', data.message || 'Auction creation process started', 20);
+                
                 if (data.task_id) {
                     console.log('Starting polling for task:', data.task_id);
                     pollTaskStatus(data.task_id);
                 } else {
                     console.warn('No task_id received from server');
-                    hideSpinner();
+                    updateStatus('ERROR', 'No task ID received from server', 0);
                     enableSubmitButton();
                 }
             })
             .catch(error => {
                 console.error('Error:', error);
-                updateUI('ERROR', 'Error starting auction creation', error.message);
-                hideSpinner();
+                updateStatus('ERROR', `Error starting auction creation: ${error.message}`, 0);
                 enableSubmitButton();
+                
+                if (window.showNotification) {
+                    window.showNotification('Error creating auction', 'error');
+                }
             });
+        });
+        
+        // Add event listeners for form fields to update status
+        document.getElementById('ending_date').addEventListener('change', function() {
+            if (this.value) {
+                updateStatus('READY', 'Form is being completed. Continue filling in the details.', 50);
+            }
         });
     });
 </script>

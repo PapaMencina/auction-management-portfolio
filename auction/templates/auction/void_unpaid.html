@@ -1,56 +1,128 @@
 {% extends "base.html" %}
 {% block title %}Void Unpaid Transactions - Auction Management System{% endblock %}
 {% block content %}
-<div class="max-w-2xl mx-auto bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
-    <h1 class="text-2xl font-bold mb-6 text-center text-gray-900 dark:text-white">Void Unpaid Transactions</h1>
-    <form id="void-unpaid-form" class="space-y-4">
-        {% csrf_token %}
-        <div>
-            <label for="warehouse" class="block mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">Select Warehouse:</label>
-            <select id="warehouse" name="warehouse" required onchange="updateAuctionDropdown()" class="w-full p-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white">
-                <option value="">Select a warehouse</option>
-                {% for warehouse in warehouses %}
-                    <option value="{{ warehouse }}">{{ warehouse }}</option>
-                {% endfor %}
-            </select>
+<div class="mb-6">
+    <h1 class="text-3xl font-bold mb-2 text-gray-800 dark:text-gray-100">Void Unpaid Transactions</h1>
+    <p class="text-gray-600 dark:text-gray-400">Process and manage unpaid auction transactions.</p>
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+    <div class="lg:col-span-2">
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-6 mb-6">
+            <h2 class="text-xl font-bold mb-4 text-gray-800 dark:text-gray-100 flex items-center">
+                <i class="fas fa-ban text-primary-600 dark:text-primary-400 mr-2"></i>
+                Transaction Settings
+            </h2>
+            
+            <form id="void-unpaid-form" class="space-y-6" data-form-enhance="true" data-form-loading="true" data-loading-message="Processing unpaid transactions...">
+                {% csrf_token %}
+                <div class="form-group">
+                    <label for="warehouse" class="form-label">
+                        <i class="fas fa-warehouse text-gray-500 dark:text-gray-400 mr-1"></i>
+                        Warehouse Location
+                    </label>
+                    <select id="warehouse" name="warehouse" required onchange="updateAuctionDropdown()" class="form-input">
+                        <option value="">Select a warehouse</option>
+                        {% for warehouse in warehouses %}
+                            <option value="{{ warehouse }}">{{ warehouse }}</option>
+                        {% endfor %}
+                    </select>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Select the warehouse where the items are located</p>
+                </div>
+                
+                <div class="form-group">
+                    <label for="auction_id" class="form-label">
+                        <i class="fas fa-gavel text-gray-500 dark:text-gray-400 mr-1"></i>
+                        Auction Event
+                    </label>
+                    <select id="auction_id" name="auction_id" required class="form-input">
+                        <option value="">Select an auction</option>
+                    </select>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Choose the auction to process unpaid transactions</p>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">
+                        <i class="fas fa-upload text-gray-500 dark:text-gray-400 mr-1"></i>
+                        Upload to Airtable
+                    </label>
+                    <div class="flex space-x-6 mt-2">
+                        <label class="inline-flex items-center">
+                            <input type="radio" name="upload_choice" value="1" checked class="w-4 h-4 text-primary-600 border-gray-300 focus:ring-primary-500">
+                            <span class="ml-2 text-gray-700 dark:text-gray-300">Yes</span>
+                        </label>
+                        <label class="inline-flex items-center">
+                            <input type="radio" name="upload_choice" value="0" class="w-4 h-4 text-primary-600 border-gray-300 focus:ring-primary-500">
+                            <span class="ml-2 text-gray-700 dark:text-gray-300">No</span>
+                        </label>
+                    </div>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Choose whether to update Airtable with transaction results</p>
+                </div>
+                
+                <div class="flex flex-col sm:flex-row gap-4 pt-2">
+                    <button type="submit" id="submit-button" class="btn-primary flex items-center justify-center" disabled>
+                        <i class="fas fa-ban mr-2"></i>
+                        Void Unpaid Transactions
+                    </button>
+                    <button type="button" onclick="resetForm()" class="btn-secondary">
+                        <i class="fas fa-redo mr-2"></i>
+                        Reset
+                    </button>
+                </div>
+            </form>
         </div>
-        <div>
-            <label for="auction_id" class="block mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">Auction ID:</label>
-            <select id="auction_id" name="auction_id" required class="w-full p-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white">
-                <option value="">Select an auction</option>
-            </select>
-        </div>
-        <div>
-            <label class="block mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">Upload to Airtable:</label>
-            <div class="flex space-x-4">
-                <label class="inline-flex items-center">
-                    <input type="radio" name="upload_choice" value="1" checked class="form-radio text-indigo-600">
-                    <span class="ml-2 text-gray-700 dark:text-gray-300">Yes</span>
-                </label>
-                <label class="inline-flex items-center">
-                    <input type="radio" name="upload_choice" value="0" class="form-radio text-indigo-600">
-                    <span class="ml-2 text-gray-700 dark:text-gray-300">No</span>
-                </label>
+    </div>
+    
+    <div class="lg:col-span-1">
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-6 mb-6 sticky top-24">
+            <h2 class="text-xl font-bold mb-4 text-gray-800 dark:text-gray-100 flex items-center">
+                <i class="fas fa-info-circle text-primary-600 dark:text-primary-400 mr-2"></i>
+                Status & Progress
+            </h2>
+            
+            <div id="status-card" class="p-4 bg-gray-50 dark:bg-gray-700/30 rounded-lg mb-4">
+                <div class="flex items-center mb-3">
+                    <div id="status-icon" class="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-600 flex items-center justify-center mr-3">
+                        <i class="fas fa-hourglass text-gray-500 dark:text-gray-400"></i>
+                    </div>
+                    <div>
+                        <h3 id="status-title" class="font-medium text-gray-700 dark:text-gray-300">Ready to Process</h3>
+                        <p id="status-description" class="text-sm text-gray-500 dark:text-gray-400">Select a warehouse and auction</p>
+                    </div>
+                </div>
+                
+                <div class="progress-container">
+                    <div id="progress-bar" class="progress-bar" style="width: 0%"></div>
+                </div>
+            </div>
+            
+            <div id="status-message" class="space-y-4"></div>
+            
+            <div class="mt-6 border-t border-gray-200 dark:border-gray-700 pt-4">
+                <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">What happens next?</h3>
+                <ul class="space-y-2 text-sm text-gray-500 dark:text-gray-400">
+                    <li class="flex items-start">
+                        <i class="fas fa-check-circle text-green-500 mt-0.5 mr-2"></i>
+                        <span>System will identify unpaid transactions</span>
+                    </li>
+                    <li class="flex items-start">
+                        <i class="fas fa-check-circle text-green-500 mt-0.5 mr-2"></i>
+                        <span>Void transactions on HiBid platform</span>
+                    </li>
+                    <li class="flex items-start">
+                        <i class="fas fa-check-circle text-green-500 mt-0.5 mr-2"></i>
+                        <span>Process can take several minutes</span>
+                    </li>
+                </ul>
             </div>
         </div>
-        <div class="relative">
-            <button type="submit" id="submit-button" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline transition duration-150 ease-in-out btn-animated">
-                Void Unpaid Transactions
-            </button>
-            <div id="spinner" class="hidden absolute right-3 top-1/2 transform -translate-y-1/2">
-                <div class="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-            </div>
-        </div>
-    </form>
-    <div id="status-message" class="mt-4 text-center text-sm text-gray-600 dark:text-gray-400"></div>
+    </div>
 </div>
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     const form = document.getElementById('void-unpaid-form');
-    const statusMessage = document.getElementById('status-message');
     const submitButton = document.getElementById('submit-button');
-    const spinner = document.getElementById('spinner');
     const warehouseSelect = document.getElementById('warehouse');
     const auctionSelect = document.getElementById('auction_id');
 
@@ -73,11 +145,11 @@ document.addEventListener('DOMContentLoaded', function() {
         if (warehouse && auctionId) {
             submitButton.disabled = false;
             submitButton.classList.remove('opacity-50', 'cursor-not-allowed');
-            updateUI('READY', 'Ready to process');
+            updateStatus('READY', 'Ready to process unpaid transactions', 15);
         } else {
             submitButton.disabled = true;
             submitButton.classList.add('opacity-50', 'cursor-not-allowed');
-            updateUI('WAITING', warehouse ? 'Select an auction to proceed' : 'Select a warehouse first');
+            updateStatus('WAITING', warehouse ? 'Select an auction to proceed' : 'Select a warehouse first', 5);
         }
     }
 
@@ -86,12 +158,13 @@ document.addEventListener('DOMContentLoaded', function() {
         auctionSelect.innerHTML = '<option value="">Select an auction</option>';
         
         if (!selectedWarehouse) {
-            updateUI('WAITING', 'Select a warehouse first');
+            updateStatus('WAITING', 'Select a warehouse first', 0);
             return;
         }
 
         try {
-            updateUI('LOADING', 'Fetching auctions...');
+            updateStatus('LOADING', 'Fetching available auctions...', 5);
+            
             const response = await fetch(`/auction/get-warehouse-events/?warehouse=${encodeURIComponent(selectedWarehouse)}&process_type=past`);
             
             if (!response.ok) {
@@ -101,7 +174,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const auctions = await response.json();
             
             if (auctions.length === 0) {
-                updateUI('READY', 'No ended auctions found');
+                updateStatus('WARNING', 'No ended auctions found for this warehouse', 0);
                 return;
             }
 
@@ -112,11 +185,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 auctionSelect.appendChild(option);
             });
 
-            updateUI('READY', 'Select an auction to proceed');
+            updateStatus('READY', 'Select an auction to proceed', 10);
             
         } catch (error) {
             console.error('Error fetching auctions:', error);
-            updateUI('ERROR', 'Failed to fetch auctions');
+            updateStatus('ERROR', 'Failed to fetch auctions: ' + error.message, 0);
         }
     }
 
@@ -130,14 +203,13 @@ document.addEventListener('DOMContentLoaded', function() {
         };
 
         if (!formData.warehouse || !formData.auction_id) {
-            updateUI('ERROR', 'Please select both warehouse and auction');
+            updateStatus('ERROR', 'Please select both warehouse and auction', 0);
             return;
         }
 
         try {
             disableFormControls(true);
-            showSpinner();
-            updateUI('PROCESSING', 'Starting void unpaid process...');
+            updateStatus('PROCESSING', 'Starting void unpaid process...', 20);
 
             const response = await fetch('/auction/void-unpaid/', {
                 method: 'POST',
@@ -162,9 +234,12 @@ document.addEventListener('DOMContentLoaded', function() {
 
         } catch (error) {
             console.error('Error:', error);
-            updateUI('ERROR', error.message);
+            updateStatus('ERROR', error.message, 0);
             disableFormControls(false);
-            hideSpinner();
+            
+            if (window.showNotification) {
+                window.showNotification('Error starting void process', 'error');
+            }
         }
     });
 
@@ -182,137 +257,217 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
+    function updateStatus(state, message, progress) {
+        const statusIcon = document.getElementById('status-icon');
+        const statusTitle = document.getElementById('status-title');
+        const statusDescription = document.getElementById('status-description');
+        const statusCard = document.getElementById('status-card');
+        const progressBar = document.getElementById('progress-bar');
+        
+        // Update progress bar
+        if (progressBar && progress !== undefined) {
+            progressBar.style.width = `${progress}%`;
+        }
+        
+        // Clear existing classes
+        statusIcon.className = 'w-8 h-8 rounded-full flex items-center justify-center mr-3';
+        statusCard.className = 'p-4 rounded-lg mb-4';
+        
+        // Set state-specific styles
+        let iconClass, titleText, cardClass;
+        
+        switch(state) {
+            case 'COMPLETED':
+            case 'SUCCESS':
+                iconClass = 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400';
+                titleText = 'Completed Successfully';
+                cardClass = 'bg-green-50 dark:bg-green-900/10 border border-green-200 dark:border-green-900/30';
+                statusIcon.innerHTML = '<i class="fas fa-check"></i>';
+                break;
+            case 'ERROR':
+            case 'FAILURE':
+                iconClass = 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400';
+                titleText = 'Error Occurred';
+                cardClass = 'bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-900/30';
+                statusIcon.innerHTML = '<i class="fas fa-exclamation-triangle"></i>';
+                break;
+            case 'PROCESSING':
+            case 'STARTED':
+                iconClass = 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400';
+                titleText = 'Processing';
+                cardClass = 'bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-900/30';
+                statusIcon.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+                break;
+            case 'WARNING':
+                iconClass = 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-600 dark:text-yellow-400';
+                titleText = 'Warning';
+                cardClass = 'bg-yellow-50 dark:bg-yellow-900/10 border border-yellow-200 dark:border-yellow-900/30';
+                statusIcon.innerHTML = '<i class="fas fa-exclamation-circle"></i>';
+                break;
+            case 'WAITING':
+                iconClass = 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-600 dark:text-yellow-400';
+                titleText = 'Waiting';
+                cardClass = 'bg-yellow-50 dark:bg-yellow-900/10 border border-yellow-200 dark:border-yellow-900/30';
+                statusIcon.innerHTML = '<i class="fas fa-clock"></i>';
+                break;
+            case 'LOADING':
+                iconClass = 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400';
+                titleText = 'Loading';
+                cardClass = 'bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-900/30';
+                statusIcon.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+                break;
+            default: // READY
+                iconClass = 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400';
+                titleText = 'Ready to Process';
+                cardClass = 'bg-gray-50 dark:bg-gray-700/30';
+                statusIcon.innerHTML = '<i class="fas fa-hourglass"></i>';
+        }
+        
+        statusIcon.className += ' ' + iconClass;
+        statusTitle.textContent = titleText;
+        statusDescription.textContent = message;
+        statusCard.className += ' ' + cardClass;
+    }
+
+    function displayResults(result) {
+        const resultsDiv = document.createElement('div');
+        resultsDiv.classList.add('p-4', 'bg-green-50', 'dark:bg-green-900/10', 'border', 'border-green-200', 'dark:border-green-900/30', 'rounded-lg');
+        
+        resultsDiv.innerHTML = `
+            <h3 class="text-lg font-medium text-gray-800 dark:text-gray-100 mb-2 flex items-center">
+                <i class="fas fa-check-circle text-green-500 mr-2"></i>
+                Process Completed
+            </h3>
+            <p class="text-sm text-gray-600 dark:text-gray-400">${result}</p>
+        `;
+        
+        document.getElementById('status-message').innerHTML = '';
+        document.getElementById('status-message').appendChild(resultsDiv);
+        
+        // Show notification
+        if (window.showNotification) {
+            window.showNotification('Void process completed successfully', 'success');
+        }
+    }
+
+    function displayError(message) {
+        const errorDiv = document.createElement('div');
+        errorDiv.classList.add('p-4', 'bg-red-50', 'dark:bg-red-900/10', 'border', 'border-red-200', 'dark:border-red-900/30', 'rounded-lg');
+        
+        errorDiv.innerHTML = `
+            <h3 class="text-lg font-medium text-gray-800 dark:text-gray-100 mb-2 flex items-center">
+                <i class="fas fa-exclamation-circle text-red-500 mr-2"></i>
+                Error Occurred
+            </h3>
+            <p class="text-sm text-gray-600 dark:text-gray-400">${message}</p>
+        `;
+        
+        document.getElementById('status-message').innerHTML = '';
+        document.getElementById('status-message').appendChild(errorDiv);
+        
+        // Show notification
+        if (window.showNotification) {
+            window.showNotification('Error processing void unpaid', 'error');
+        }
+    }
+
     async function pollTaskStatus(taskId) {
-    const MAX_RETRIES = 3;
-    let retries = 0;
-    let pollInterval;
+        const MAX_RETRIES = 3;
+        let retries = 0;
+        let pollInterval;
 
-    const poll = async () => {
-        try {
-            const response = await fetch(`/auction/check-task-status/${taskId}/`);
-            if (!response.ok) {
-                throw new Error('Failed to fetch task status');
-            }
+        const poll = async () => {
+            try {
+                const response = await fetch(`/auction/check-task-status/${taskId}/`);
+                if (!response.ok) {
+                    throw new Error('Failed to fetch task status');
+                }
 
-            const data = await response.json();
-            console.log('Task status:', data);
+                const data = await response.json();
+                console.log('Task status:', data);
 
-            // Update UI with current status
-            updateUI(data.state, data.message || data.status);
+                // Calculate progress
+                const progress = data.progress !== undefined ? data.progress : 
+                    data.state === 'SUCCESS' ? 100 : 
+                    data.state === 'FAILURE' ? 0 : 50;
 
-            // Handle different task states
-            switch (data.state) {
-                case 'SUCCESS':
-                    clearInterval(pollInterval);
-                    hideSpinner();
-                    disableFormControls(false);
-                    if (data.result) {
-                        const resultDiv = document.createElement('div');
-                        resultDiv.className = 'mt-4 p-4 bg-green-50 dark:bg-green-900 rounded-lg';
-                        resultDiv.innerHTML = `
-                            <h3 class="text-lg font-semibold text-green-700 dark:text-green-300">Process Completed</h3>
-                            <p class="mt-2 text-green-600 dark:text-green-200">${data.result}</p>
-                        `;
-                        statusMessage.appendChild(resultDiv);
-                    }
-                    break;
+                // Update UI with current status
+                updateStatus(
+                    data.state === 'SUCCESS' ? 'COMPLETED' :
+                    data.state === 'FAILURE' ? 'ERROR' : 'PROCESSING',
+                    data.message || data.status,
+                    progress
+                );
 
-                case 'FAILURE':
-                case 'ERROR':
-                    clearInterval(pollInterval);
-                    hideSpinner();
-                    disableFormControls(false);
-                    const errorDiv = document.createElement('div');
-                    errorDiv.className = 'mt-4 p-4 bg-red-50 dark:bg-red-900 rounded-lg';
-                    errorDiv.innerHTML = `
-                        <h3 class="text-lg font-semibold text-red-700 dark:text-red-300">Error Occurred</h3>
-                        <p class="mt-2 text-red-600 dark:text-red-200">${data.message || data.result || 'Task failed'}</p>
-                    `;
-                    statusMessage.appendChild(errorDiv);
-                    break;
-
-                case 'PROGRESS':
-                    // Show progress information if available
-                    if (data.progress) {
-                        updateUI('PROCESSING', `${data.message || 'Processing'} (${Math.round(data.progress)}%)`);
-                    }
-                    break;
-
-                case 'PENDING':
-                case 'STARTED':
-                    // Continue polling
-                    break;
-
-                default:
-                    if (retries >= MAX_RETRIES) {
+                // Handle different task states
+                switch (data.state) {
+                    case 'SUCCESS':
                         clearInterval(pollInterval);
-                        hideSpinner();
                         disableFormControls(false);
-                        updateUI('ERROR', 'Task status check failed after multiple attempts');
-                    }
-                    retries++;
-            }
+                        displayResults(data.result || 'Process completed successfully');
+                        break;
 
-        } catch (error) {
-            console.error('Error polling status:', error);
-            retries++;
-            
-            if (retries >= MAX_RETRIES) {
+                    case 'FAILURE':
+                    case 'ERROR':
+                        clearInterval(pollInterval);
+                        disableFormControls(false);
+                        displayError(data.message || data.result || 'Task failed');
+                        break;
+
+                    case 'PROGRESS':
+                        // Continue polling
+                        break;
+
+                    case 'PENDING':
+                    case 'STARTED':
+                        // Continue polling
+                        break;
+
+                    default:
+                        if (retries >= MAX_RETRIES) {
+                            clearInterval(pollInterval);
+                            disableFormControls(false);
+                            updateStatus('ERROR', 'Task status check failed after multiple attempts', 0);
+                        }
+                        retries++;
+                }
+
+            } catch (error) {
+                console.error('Error polling status:', error);
+                retries++;
+                
+                if (retries >= MAX_RETRIES) {
+                    clearInterval(pollInterval);
+                    disableFormControls(false);
+                    updateStatus('ERROR', 'Failed to check task status after multiple attempts', 0);
+                }
+            }
+        };
+
+        // Initial poll
+        await poll();
+        
+        // Continue polling every 5 seconds
+        pollInterval = setInterval(poll, 5000);
+
+        // Set a timeout to stop polling after 30 minutes
+        setTimeout(() => {
+            if (pollInterval) {
                 clearInterval(pollInterval);
-                hideSpinner();
                 disableFormControls(false);
-                updateUI('ERROR', 'Failed to check task status after multiple attempts');
+                updateStatus('ERROR', 'Task timed out after 30 minutes', 0);
             }
-        }
-    };
-
-    // Initial poll
-    await poll();
-    
-    // Continue polling every 5 seconds
-    pollInterval = setInterval(poll, 5000);
-
-    // Set a timeout to stop polling after 30 minutes
-    setTimeout(() => {
-        if (pollInterval) {
-            clearInterval(pollInterval);
-            hideSpinner();
-            disableFormControls(false);
-            updateUI('ERROR', 'Task timed out after 30 minutes');
-        }
-    }, 30 * 60 * 1000);
-}
-
-    function updateUI(state, message) {
-        if (statusMessage) {
-            statusMessage.textContent = message;
-            statusMessage.className = 'mt-4 text-center text-sm ';
-            
-            switch (state) {
-                case 'SUCCESS':
-                    statusMessage.classList.add('text-green-600');
-                    break;
-                case 'ERROR':
-                    statusMessage.classList.add('text-red-600');
-                    break;
-                case 'PROCESSING':
-                    statusMessage.classList.add('text-yellow-600');
-                    break;
-                case 'LOADING':
-                    statusMessage.classList.add('text-blue-600');
-                    break;
-                default:
-                    statusMessage.classList.add('text-gray-600');
-            }
-        }
+        }, 30 * 60 * 1000);
     }
 
-    function showSpinner() {
-        spinner.classList.remove('hidden');
+    function resetForm() {
+        form.reset();
+        clearStatus();
+        updateStatus('WAITING', 'Form has been reset. Select a warehouse to begin.', 0);
     }
 
-    function hideSpinner() {
-        spinner.classList.add('hidden');
+    function clearStatus() {
+        document.getElementById('status-message').innerHTML = '';
     }
 });
 </script>
