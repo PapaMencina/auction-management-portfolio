@@ -160,6 +160,7 @@
 ### Deployment Process
 - Docker containerization
 - Heroku deployment support
+- Front-end assets collected via `collectstatic` for Heroku compatibility
 - Environment variable management
 - Database migration handling
 
