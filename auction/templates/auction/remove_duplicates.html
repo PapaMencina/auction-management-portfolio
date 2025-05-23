@@ -1,5 +1,31 @@
 {% extends "base.html" %}
 {% block title %}Remove Duplicates in Airtable - Auction Management System{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* Custom loading overlay styles */
+    #loading-overlay {
+        z-index: 9999 !important;
+    }
+    
+    /* Hide any form enhancement overlays */
+    [data-form-loading-overlay],
+    .form-loading-overlay {
+        display: none !important;
+    }
+    
+    /* Spinner animation */
+    @keyframes spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+    }
+    
+    .animate-spin {
+        animation: spin 1s linear infinite;
+    }
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="mb-6">
     <h1 class="text-3xl font-bold mb-2 text-gray-800 dark:text-gray-100">Remove Duplicates in Airtable</h1>
@@ -14,7 +40,7 @@
                 Duplicate Settings
             </h2>
             
-            <form method="post" id="removeDuplicatesForm" action="{% url 'auction:remove_duplicates' %}" class="space-y-6" data-form-enhance="true" data-form-loading="true" data-loading-message="Removing duplicates...">
+            <form method="post" id="removeDuplicatesForm" action="{% url 'auction:remove_duplicates' %}" class="space-y-6">
                 {% csrf_token %}
                 <div class="form-group">
                     <label for="warehouse_name" class="form-label">
@@ -117,6 +143,71 @@ document.addEventListener('DOMContentLoaded', function() {
     const warehouseSelect = document.getElementById('warehouse_name');
     const auctionSelect = document.getElementById('auction_number');
     const targetMsrpInput = document.getElementById('target_msrp');
+
+    // Helper function to remove any existing loading overlays
+    function removeAllLoadingOverlays() {
+        // Remove our custom overlay
+        const customOverlay = document.getElementById('loading-overlay');
+        if (customOverlay) {
+            customOverlay.remove();
+        }
+        
+        // Remove any data-form-loading overlays
+        const formOverlays = document.querySelectorAll('[data-form-loading-overlay]');
+        formOverlays.forEach(overlay => overlay.remove());
+        
+        // Remove any other common loading overlay classes
+        const loadingOverlays = document.querySelectorAll('.loading-overlay, .form-loading-overlay, [class*="loading-backdrop"]');
+        loadingOverlays.forEach(overlay => overlay.remove());
+        
+        // Remove loading classes from body if any
+        document.body.classList.remove('loading', 'form-loading', 'processing');
+    }
+
+    // Helper function to show loading overlay
+    function showLoadingOverlay(message = 'Processing...') {
+        // Remove any existing overlay first
+        removeAllLoadingOverlays();
+        
+        const overlay = document.createElement('div');
+        overlay.id = 'loading-overlay';
+        overlay.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
+        overlay.innerHTML = `
+            <div class="bg-white dark:bg-gray-800 rounded-lg p-6 flex items-center space-x-4">
+                <div class="spinner-border animate-spin inline-block w-8 h-8 border-4 rounded-full border-blue-500 border-t-transparent"></div>
+                <span class="text-lg font-medium text-gray-800 dark:text-gray-100">${message}</span>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+    }
+
+    // Helper function to hide loading overlay
+    function hideLoadingOverlay() {
+        removeAllLoadingOverlays();
+    }
+
+    // Clean up any existing overlays on page load
+    removeAllLoadingOverlays();
+    
+    // Override any form enhancement that might add loading overlays
+    if (form.dataset.formEnhance) {
+        delete form.dataset.formEnhance;
+    }
+    if (form.dataset.formLoading) {
+        delete form.dataset.formLoading;
+    }
+    
+    // Listen for any custom events that might show loading overlays
+    window.addEventListener('beforeunload', removeAllLoadingOverlays);
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) {
+            // Clean up overlays when page becomes visible again
+            const hasActiveTask = document.querySelector('#status-icon .fa-spinner');
+            if (!hasActiveTask) {
+                removeAllLoadingOverlays();
+            }
+        }
+    });
 
     // Initial call to set up auction dropdown
     updateAuctions();
@@ -222,10 +313,12 @@ document.addEventListener('DOMContentLoaded', function() {
                     // Handle different task states
                     if (data.state === 'SUCCESS') {
                         clearInterval(intervalId);
+                        hideLoadingOverlay();  // Hide loading overlay
                         enableFormControls();
                         displayResults(data.result || 'Process completed successfully');
                     } else if (data.state === 'FAILURE' || data.state === 'ERROR') {
                         clearInterval(intervalId);
+                        hideLoadingOverlay();  // Hide loading overlay
                         enableFormControls();
                         displayError(data.message || data.result || 'Task failed');
                     }
@@ -234,6 +327,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     console.error('Error:', error);
                     updateStatus('ERROR', `Error checking task status: ${error.message}`, 0);
                     clearInterval(intervalId);
+                    hideLoadingOverlay();  // Hide loading overlay
                     enableFormControls();
                 });
         }, 5000); // Poll every 5 seconds
@@ -242,6 +336,7 @@ document.addEventListener('DOMContentLoaded', function() {
         setTimeout(() => {
             if (intervalId) {
                 clearInterval(intervalId);
+                hideLoadingOverlay();  // Hide loading overlay
                 enableFormControls();
                 updateStatus('ERROR', 'Task timed out after 30 minutes', 0);
             }
@@ -267,6 +362,11 @@ document.addEventListener('DOMContentLoaded', function() {
         if (window.showNotification) {
             window.showNotification('Duplicate removal completed', 'success');
         }
+        
+        // Ensure overlays are removed after a short delay
+        setTimeout(removeAllLoadingOverlays, 100);
+        setTimeout(removeAllLoadingOverlays, 500);
+        setTimeout(removeAllLoadingOverlays, 1000);
     }
 
     function displayError(message) {
@@ -288,6 +388,11 @@ document.addEventListener('DOMContentLoaded', function() {
         if (window.showNotification) {
             window.showNotification('Error removing duplicates', 'error');
         }
+        
+        // Ensure overlays are removed after a short delay
+        setTimeout(removeAllLoadingOverlays, 100);
+        setTimeout(removeAllLoadingOverlays, 500);
+        setTimeout(removeAllLoadingOverlays, 1000);
     }
 
     function updateStatus(state, message, progress) {
@@ -413,7 +518,8 @@ document.addEventListener('DOMContentLoaded', function() {
             console.log(`${key}: ${value}`);
         }
         
-        // Disable form controls AFTER creating FormData
+        // Show loading overlay and disable form controls
+        showLoadingOverlay('Removing duplicates...');
         disableFormControls();
         
         fetch(this.action, {
@@ -436,12 +542,14 @@ document.addEventListener('DOMContentLoaded', function() {
             if (data.task_id) {
                 pollTaskStatus(data.task_id);
             } else {
+                hideLoadingOverlay();  // Hide loading overlay if no task ID
                 enableFormControls();
                 updateStatus('ERROR', 'No task ID received from server', 0);
             }
         })
         .catch(error => {
             console.error('Error:', error);
+            hideLoadingOverlay();  // Hide loading overlay on error
             updateStatus('ERROR', `Error: ${error.message}`, 0);
             enableFormControls();
             displayError(error.message);

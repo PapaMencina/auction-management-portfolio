@@ -180,6 +180,11 @@
                         } else {
                             displayError(data.message);
                         }
+                        
+                        // Hide loading overlay when task completes
+                        if (window.hideLoading) {
+                            window.hideLoading();
+                        }
                     }
                 })
                 .catch(error => {
@@ -187,6 +192,11 @@
                     updateStatus('ERROR', `Failed to check task status: ${error.message}`, 0);
                     clearInterval(intervalId);
                     enableSubmitButton();
+                    
+                    // Hide loading overlay on error
+                    if (window.hideLoading) {
+                        window.hideLoading();
+                    }
                 });
         }, 3000);
     }
@@ -371,6 +381,11 @@
                 
                 if (window.showNotification) {
                     window.showNotification('Error starting format process', 'error');
+                }
+                
+                // Hide loading overlay on initial request error
+                if (window.hideLoading) {
+                    window.hideLoading();
                 }
             });
         });

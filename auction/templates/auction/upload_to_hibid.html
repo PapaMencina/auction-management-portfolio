@@ -322,6 +322,11 @@ document.addEventListener('DOMContentLoaded', function() {
             console.error('Error:', error);
             updateStatus('ERROR', 'An error occurred: ' + error.message, 0);
             displayError(error.message);
+            
+            // Hide loading overlay on error
+            if (window.hideLoading) {
+                window.hideLoading();
+            }
         })
         .finally(() => {
             // Re-enable form controls
@@ -329,6 +334,11 @@ document.addEventListener('DOMContentLoaded', function() {
             auctionSelect.disabled = false;
             submitButton.disabled = false;
             submitButton.classList.remove('opacity-50', 'cursor-not-allowed');
+            
+            // Hide loading overlay when request completes
+            if (window.hideLoading) {
+                window.hideLoading();
+            }
         });
     });
 

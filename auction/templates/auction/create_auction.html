@@ -168,10 +168,18 @@
                         clearInterval(intervalId);
                         enableSubmitButton();
                         displayResults(data.result);
+                        // Hide loading overlay on success
+                        if (window.hideLoading) {
+                            window.hideLoading();
+                        }
                     } else if (data.state === 'FAILURE') {
                         clearInterval(intervalId);
                         enableSubmitButton();
                         displayError(data.result);
+                        // Hide loading overlay on failure
+                        if (window.hideLoading) {
+                            window.hideLoading();
+                        }
                     }
                 })
                 .catch(error => {
@@ -179,6 +187,10 @@
                     updateStatus('ERROR', `Failed to check task status: ${error.message}`, 0);
                     clearInterval(intervalId);
                     enableSubmitButton();
+                    // Hide loading overlay on error
+                    if (window.hideLoading) {
+                        window.hideLoading();
+                    }
                 });
         }, 3000);
     }
@@ -364,6 +376,11 @@
                 
                 if (window.showNotification) {
                     window.showNotification('Error creating auction', 'error');
+                }
+                
+                // Hide loading overlay on initial request error
+                if (window.hideLoading) {
+                    window.hideLoading();
                 }
             });
         });
