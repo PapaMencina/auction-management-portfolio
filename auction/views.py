@@ -116,9 +116,25 @@ def get_warehouse_events(request):
     process_type = request.GET.get('process_type', 'future')
     logger.info(f"Fetching events for warehouse: {warehouse}, process_type: {process_type}")
     
+    # Normalize warehouse name for comparison
+    if warehouse:
+        warehouse = warehouse.strip()
+    
     all_events = Event.objects.filter(warehouse=warehouse)
     today = timezone.now().date()
     ten_days_ago = today - timezone.timedelta(days=10)
+    
+    # Add debug logging
+    logger.info(f"Total events in database for {warehouse}: {all_events.count()}")
+    for event in all_events:
+        logger.info(f"Event: {event.event_id} - {event.title} - Ending: {event.ending_date} - Warehouse: {event.warehouse}")
+    
+    # Also check for events with similar warehouse names (case-insensitive)
+    if all_events.count() == 0 and warehouse:
+        similar_events = Event.objects.filter(warehouse__iexact=warehouse)
+        if similar_events.count() > 0:
+            logger.warning(f"Found {similar_events.count()} events with case-insensitive match for warehouse '{warehouse}'")
+            all_events = similar_events
 
     if process_type == 'past':
         # For void_unpaid process - only show auctions that ended within the last 10 days
@@ -403,5 +419,30 @@ def check_task_status(request, task_id):
             response['message'] = str(task.info)
 
     return JsonResponse(response)
+
+# Add a debug endpoint to check all events
+@login_required
+def debug_events(request):
+    """Debug endpoint to check all events in the database"""
+    all_events = Event.objects.all().order_by('-timestamp')
+    events_data = []
+    
+    for event in all_events:
+        events_data.append({
+            'id': event.event_id,
+            'title': event.title,
+            'warehouse': event.warehouse,
+            'start_date': event.start_date.strftime("%Y-%m-%d"),
+            'ending_date': event.ending_date.strftime("%Y-%m-%d"),
+            'timestamp': event.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+            'is_active': event.is_active()
+        })
+    
+    return JsonResponse({
+        'total_events': all_events.count(),
+        'events': events_data,
+        'current_date': timezone.now().date().strftime("%Y-%m-%d"),
+        'warehouses': list(warehouse_data.keys())
+    })
     
     
