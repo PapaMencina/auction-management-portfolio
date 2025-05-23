@@ -16,4 +16,5 @@ urlpatterns = [
     path('download-csv/<str:auction_id>/', views.download_formatted_csv, name='download_formatted_csv'),
     path('get-warehouse-events/', views.get_warehouse_events, name='get_warehouse_events'),
     path('debug-events/', views.debug_events, name='debug_events'),
+    path('test-warehouse-events/', views.test_warehouse_events, name='test_warehouse_events'),
 ]

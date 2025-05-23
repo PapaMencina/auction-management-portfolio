@@ -126,8 +126,10 @@ def get_warehouse_events(request):
     
     # Add debug logging
     logger.info(f"Total events in database for {warehouse}: {all_events.count()}")
-    for event in all_events:
-        logger.info(f"Event: {event.event_id} - {event.title} - Ending: {event.ending_date} - Warehouse: {event.warehouse}")
+    logger.info(f"Today's date: {today}")
+    
+    for event in all_events[:5]:  # Log first 5 events only to avoid spam
+        logger.info(f"Event: {event.event_id} - {event.title} - Ending: {event.ending_date} - Warehouse: '{event.warehouse}'")
     
     # Also check for events with similar warehouse names (case-insensitive)
     if all_events.count() == 0 and warehouse:
@@ -142,7 +144,7 @@ def get_warehouse_events(request):
             {
                 'id': event.event_id,
                 'title': event.title,
-                'ending_date': event.ending_date.strftime("%Y-%m-%d %H:%M:%S"),
+                'ending_date': event.ending_date.strftime("%Y-%m-%d"),
                 'warehouse': event.warehouse
             }
             for event in all_events
@@ -154,7 +156,7 @@ def get_warehouse_events(request):
             {
                 'id': event.event_id,
                 'title': event.title,
-                'ending_date': event.ending_date.strftime("%Y-%m-%d %H:%M:%S"),
+                'ending_date': event.ending_date.strftime("%Y-%m-%d"),
                 'warehouse': event.warehouse
             }
             for event in all_events
@@ -162,6 +164,9 @@ def get_warehouse_events(request):
         ]
 
     logger.info(f"Filtered events count: {len(filtered_events)}")
+    if len(filtered_events) > 0:
+        logger.info(f"First filtered event: {filtered_events[0]}")
+    
     return JsonResponse(filtered_events, safe=False)
 
 @login_required
@@ -444,5 +449,41 @@ def debug_events(request):
         'current_date': timezone.now().date().strftime("%Y-%m-%d"),
         'warehouses': list(warehouse_data.keys())
     })
+
+# Test endpoint to check warehouse events without UI
+@login_required
+def test_warehouse_events(request):
+    """Test endpoint to debug warehouse event filtering"""
+    warehouse = request.GET.get('warehouse', 'Maule Warehouse')
+    
+    # Get all events for debugging
+    all_events = Event.objects.filter(warehouse=warehouse)
+    today = timezone.now().date()
+    
+    response_data = {
+        'warehouse': warehouse,
+        'today': today.strftime("%Y-%m-%d"),
+        'all_events_count': all_events.count(),
+        'all_events': [],
+        'future_events': [],
+        'past_events': []
+    }
+    
+    for event in all_events:
+        event_data = {
+            'id': event.event_id,
+            'title': event.title,
+            'ending_date': event.ending_date.strftime("%Y-%m-%d"),
+            'days_until_end': (event.ending_date - today).days,
+            'is_future': event.ending_date >= today
+        }
+        response_data['all_events'].append(event_data)
+        
+        if event.ending_date >= today:
+            response_data['future_events'].append(event_data)
+        else:
+            response_data['past_events'].append(event_data)
+    
+    return JsonResponse(response_data)
     
     
