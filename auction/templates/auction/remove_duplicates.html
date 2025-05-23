@@ -14,7 +14,7 @@
                 Duplicate Settings
             </h2>
             
-            <form method="post" id="removeDuplicatesForm" class="space-y-6" data-form-enhance="true" data-form-loading="true" data-loading-message="Removing duplicates...">
+            <form method="post" id="removeDuplicatesForm" action="{% url 'auction:remove_duplicates' %}" class="space-y-6" data-form-enhance="true" data-form-loading="true" data-loading-message="Removing duplicates...">
                 {% csrf_token %}
                 <div class="form-group">
                     <label for="warehouse_name" class="form-label">
@@ -46,7 +46,7 @@
                         <i class="fas fa-tag text-gray-500 dark:text-gray-400 mr-1"></i>
                         Target MSRP
                     </label>
-                    <input type="number" name="target_msrp" id="target_msrp" required class="form-input">
+                    <input type="number" name="target_msrp" id="target_msrp" step="0.01" min="0.01" required class="form-input">
                     <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Set the target MSRP threshold for duplicate detection</p>
                 </div>
                 
@@ -374,8 +374,9 @@ document.addEventListener('DOMContentLoaded', function() {
         warehouseSelect.disabled = false;
         auctionSelect.disabled = false;
         targetMsrpInput.disabled = false;
-        submitButton.disabled = false;
-        submitButton.classList.remove('opacity-50', 'cursor-not-allowed');
+        
+        // Only enable submit button if form is valid
+        validateForm();
     }
 
     function resetForm() {
@@ -389,16 +390,31 @@ document.addEventListener('DOMContentLoaded', function() {
     form.onsubmit = function(event) {
         event.preventDefault();
         
+        // Debug: Log form values
+        console.log('Form submission - values:', {
+            warehouse: warehouseSelect.value,
+            auction: auctionSelect.value,
+            targetMsrp: targetMsrpInput.value
+        });
+        
         if (!warehouseSelect.value || !auctionSelect.value || !targetMsrpInput.value) {
             updateStatus('WARNING', 'Please fill out all required fields.', 0);
             return;
         }
 
         document.getElementById('status-message').innerHTML = '';
-        disableFormControls();
         updateStatus('PROCESSING', 'Removing duplicates...', 20);
         
         const formData = new FormData(this);
+        
+        // Debug: Log FormData contents
+        console.log('FormData contents:');
+        for (let [key, value] of formData.entries()) {
+            console.log(`${key}: ${value}`);
+        }
+        
+        // Disable form controls AFTER creating FormData
+        disableFormControls();
         
         fetch(this.action, {
             method: 'POST',
@@ -407,8 +423,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 'X-CSRFToken': formData.get('csrfmiddlewaretoken')
             }
         })
-        .then(response => response.json())
+        .then(response => {
+            console.log('Response status:', response.status);
+            return response.json();
+        })
         .then(data => {
+            console.log('Response data:', data);
             if (data.error) {
                 throw new Error(data.error);
             }

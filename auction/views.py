@@ -275,14 +275,47 @@ def remove_duplicates_view(request):
     warehouses = list(warehouse_data.keys())
 
     if request.method == 'POST':
-        auction_number = request.POST.get('auction_number')
-        target_msrp = float(request.POST.get('target_msrp'))
-        warehouse_name = request.POST.get('warehouse_name')
+        try:
+            auction_number = request.POST.get('auction_number')
+            target_msrp_str = request.POST.get('target_msrp')
+            warehouse_name = request.POST.get('warehouse_name')
+            
+            # Validate required fields
+            if not all([auction_number, target_msrp_str, warehouse_name]):
+                missing_fields = []
+                if not auction_number:
+                    missing_fields.append('auction_number')
+                if not target_msrp_str:
+                    missing_fields.append('target_msrp')
+                if not warehouse_name:
+                    missing_fields.append('warehouse_name')
+                
+                error_msg = f'Missing required fields: {", ".join(missing_fields)}'
+                logger.error(f"Remove duplicates error: {error_msg}")
+                return JsonResponse({'error': error_msg}, status=400)
+            
+            # Validate and convert target_msrp
+            try:
+                target_msrp = float(target_msrp_str)
+                if target_msrp <= 0:
+                    raise ValueError("Target MSRP must be greater than 0")
+            except ValueError as e:
+                error_msg = f'Invalid target MSRP: {str(e)}'
+                logger.error(f"Remove duplicates error: {error_msg}")
+                return JsonResponse({'error': error_msg}, status=400)
 
-        # Start the Celery task
-        task = remove_duplicates_task.delay(auction_number, target_msrp, warehouse_name)
-
-        return JsonResponse({'message': 'Remove duplicates process started', 'task_id': task.id})
+            # Start the Celery task
+            task = remove_duplicates_task.delay(auction_number, target_msrp, warehouse_name)
+            
+            logger.info(f"Remove duplicates task started for auction {auction_number}")
+            return JsonResponse({
+                'message': 'Remove duplicates process started',
+                'task_id': task.id
+            })
+            
+        except Exception as e:
+            logger.exception("Unexpected error in remove_duplicates_view")
+            return JsonResponse({'error': str(e)}, status=500)
 
     context = {
         'auctions_json': json.dumps(auctions, cls=DjangoJSONEncoder),
