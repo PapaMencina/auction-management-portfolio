@@ -14,7 +14,7 @@
                 Transaction Settings
             </h2>
             
-            <form id="void-unpaid-form" class="space-y-6" data-form-enhance="true" data-form-loading="true" data-loading-message="Processing unpaid transactions...">
+            <form id="void-unpaid-form" class="space-y-6">
                 {% csrf_token %}
                 <div class="form-group">
                     <label for="warehouse" class="form-label">
@@ -240,11 +240,6 @@ document.addEventListener('DOMContentLoaded', function() {
             if (window.showNotification) {
                 window.showNotification('Error starting void process', 'error');
             }
-            
-            // Hide loading overlay on initial request error
-            if (window.hideLoading) {
-                window.hideLoading();
-            }
         }
     });
 
@@ -410,10 +405,6 @@ document.addEventListener('DOMContentLoaded', function() {
                         clearInterval(pollInterval);
                         disableFormControls(false);
                         displayResults(data.result || 'Process completed successfully');
-                        // Hide loading overlay on success
-                        if (window.hideLoading) {
-                            window.hideLoading();
-                        }
                         break;
 
                     case 'FAILURE':
@@ -421,10 +412,6 @@ document.addEventListener('DOMContentLoaded', function() {
                         clearInterval(pollInterval);
                         disableFormControls(false);
                         displayError(data.message || data.result || 'Task failed');
-                        // Hide loading overlay on failure
-                        if (window.hideLoading) {
-                            window.hideLoading();
-                        }
                         break;
 
                     case 'PROGRESS':
@@ -441,10 +428,6 @@ document.addEventListener('DOMContentLoaded', function() {
                             clearInterval(pollInterval);
                             disableFormControls(false);
                             updateStatus('ERROR', 'Task status check failed after multiple attempts', 0);
-                            // Hide loading overlay on max retries
-                            if (window.hideLoading) {
-                                window.hideLoading();
-                            }
                         }
                         retries++;
                 }
@@ -457,10 +440,6 @@ document.addEventListener('DOMContentLoaded', function() {
                     clearInterval(pollInterval);
                     disableFormControls(false);
                     updateStatus('ERROR', 'Failed to check task status after multiple attempts', 0);
-                    // Hide loading overlay on max retries
-                    if (window.hideLoading) {
-                        window.hideLoading();
-                    }
                 }
             }
         };
@@ -477,10 +456,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 clearInterval(pollInterval);
                 disableFormControls(false);
                 updateStatus('ERROR', 'Task timed out after 30 minutes', 0);
-                // Hide loading overlay on timeout
-                if (window.hideLoading) {
-                    window.hideLoading();
-                }
             }
         }, 30 * 60 * 1000);
     }

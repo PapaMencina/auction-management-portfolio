@@ -313,12 +313,10 @@ document.addEventListener('DOMContentLoaded', function() {
                     // Handle different task states
                     if (data.state === 'SUCCESS') {
                         clearInterval(intervalId);
-                        hideLoadingOverlay();  // Hide loading overlay
                         enableFormControls();
                         displayResults(data.result || 'Process completed successfully');
                     } else if (data.state === 'FAILURE' || data.state === 'ERROR') {
                         clearInterval(intervalId);
-                        hideLoadingOverlay();  // Hide loading overlay
                         enableFormControls();
                         displayError(data.message || data.result || 'Task failed');
                     }
@@ -327,7 +325,6 @@ document.addEventListener('DOMContentLoaded', function() {
                     console.error('Error:', error);
                     updateStatus('ERROR', `Error checking task status: ${error.message}`, 0);
                     clearInterval(intervalId);
-                    hideLoadingOverlay();  // Hide loading overlay
                     enableFormControls();
                 });
         }, 5000); // Poll every 5 seconds
@@ -336,7 +333,6 @@ document.addEventListener('DOMContentLoaded', function() {
         setTimeout(() => {
             if (intervalId) {
                 clearInterval(intervalId);
-                hideLoadingOverlay();  // Hide loading overlay
                 enableFormControls();
                 updateStatus('ERROR', 'Task timed out after 30 minutes', 0);
             }
@@ -518,8 +514,7 @@ document.addEventListener('DOMContentLoaded', function() {
             console.log(`${key}: ${value}`);
         }
         
-        // Show loading overlay and disable form controls
-        showLoadingOverlay('Removing duplicates...');
+        // Don't show loading overlay - just disable form controls
         disableFormControls();
         
         fetch(this.action, {
@@ -542,14 +537,12 @@ document.addEventListener('DOMContentLoaded', function() {
             if (data.task_id) {
                 pollTaskStatus(data.task_id);
             } else {
-                hideLoadingOverlay();  // Hide loading overlay if no task ID
                 enableFormControls();
                 updateStatus('ERROR', 'No task ID received from server', 0);
             }
         })
         .catch(error => {
             console.error('Error:', error);
-            hideLoadingOverlay();  // Hide loading overlay on error
             updateStatus('ERROR', `Error: ${error.message}`, 0);
             enableFormControls();
             displayError(error.message);

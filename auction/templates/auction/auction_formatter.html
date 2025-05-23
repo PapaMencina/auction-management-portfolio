@@ -14,7 +14,7 @@
                 Format Settings
             </h2>
             
-            <form id="auction-formatter-form" method="post" class="space-y-6" data-form-enhance="true" data-form-loading="true" data-loading-message="Formatting auction data...">
+            <form id="auction-formatter-form" method="post" class="space-y-6">
                 {% csrf_token %}
                 <div class="form-group">
                     <label for="selected_warehouse" class="form-label">
@@ -180,11 +180,6 @@
                         } else {
                             displayError(data.message);
                         }
-                        
-                        // Hide loading overlay when task completes
-                        if (window.hideLoading) {
-                            window.hideLoading();
-                        }
                     }
                 })
                 .catch(error => {
@@ -192,11 +187,6 @@
                     updateStatus('ERROR', `Failed to check task status: ${error.message}`, 0);
                     clearInterval(intervalId);
                     enableSubmitButton();
-                    
-                    // Hide loading overlay on error
-                    if (window.hideLoading) {
-                        window.hideLoading();
-                    }
                 });
         }, 3000);
     }
@@ -381,11 +371,6 @@
                 
                 if (window.showNotification) {
                     window.showNotification('Error starting format process', 'error');
-                }
-                
-                // Hide loading overlay on initial request error
-                if (window.hideLoading) {
-                    window.hideLoading();
                 }
             });
         });
