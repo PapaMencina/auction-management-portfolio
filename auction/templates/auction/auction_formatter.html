@@ -42,18 +42,6 @@
                     <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Choose the auction event you want to format</p>
                 </div>
                 
-                <div class="form-group">
-                    <label for="starting_price" class="form-label">
-                        <i class="fas fa-tag text-gray-500 dark:text-gray-400 mr-1"></i>
-                        Starting Price ($)
-                    </label>
-                    <div class="relative">
-                        <span class="absolute inset-y-0 left-0 flex items-center pl-3 text-gray-500 dark:text-gray-400">$</span>
-                        <input type="number" id="starting_price" name="starting_price" min="0.01" step="0.01" value="1.00" required class="form-input pl-8">
-                    </div>
-                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Set the minimum starting bid amount for all items</p>
-                </div>
-                
                 <div class="flex flex-col sm:flex-row gap-4 pt-2">
                     <button type="submit" id="submit-button" class="btn-primary flex items-center justify-center">
                         <i class="fas fa-cog mr-2"></i>
@@ -99,6 +87,10 @@
                     <li class="flex items-start">
                         <i class="fas fa-check-circle text-green-500 mt-0.5 mr-2"></i>
                         <span>Data will be retrieved from Airtable</span>
+                    </li>
+                    <li class="flex items-start">
+                        <i class="fas fa-check-circle text-green-500 mt-0.5 mr-2"></i>
+                        <span>Starting prices calculated automatically ($5 new, $2.50 once-listed, $1 multiple-listed)</span>
                     </li>
                     <li class="flex items-start">
                         <i class="fas fa-check-circle text-green-500 mt-0.5 mr-2"></i>
