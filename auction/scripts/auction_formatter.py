@@ -331,6 +331,26 @@ def category_converter(category: str) -> int:
     return 162733  # Default category ID
 
 
+def calculate_starting_price(auction_count: int) -> str:
+    """
+    Calculate starting price based on auction count:
+    - 0 auctions (never listed): $5.00
+    - 1 auction (listed once): $2.50
+    - 2+ auctions (listed multiple times): $1.00
+    """
+    try:
+        count = int(auction_count) if auction_count else 0
+    except (ValueError, TypeError):
+        count = 0
+    
+    if count == 0:
+        return "5.00"
+    elif count == 1:
+        return "2.50"
+    else:  # 2 or more
+        return "1.00"
+
+
 def format_subtitle(auction_count: int, msrp: float, other_notes: str) -> str:
     msrp_str = f"MSRP: ${msrp}"
     if auction_count >= 4:
@@ -354,6 +374,10 @@ def process_single_record(airtable_record: Dict, uploaded_image_urls: Dict[str, 
 
         fields = airtable_record.get('fields', {})
 
+        # Calculate dynamic starting price based on auction count
+        auction_count = fields.get("Auction Count", 0)
+        dynamic_starting_price = calculate_starting_price(auction_count)
+
         new_record = {
             'EventID': auction_id,
             'LotNumber': ('M' if selected_warehouse == "Maule Warehouse" else 'S' if selected_warehouse == "Sahara Warehouse" else '') + str(fields.get("Lot Number", "")),
@@ -368,7 +392,7 @@ def process_single_record(airtable_record: Dict, uploaded_image_urls: Dict[str, 
             'Title': text_shortener(fields.get("Product Name", ""), 80),
             'Subtitle': "",  # Will be set later
             'Description': "",  # Will be set later
-            'Price': starting_price,
+            'Price': dynamic_starting_price,
             'Quantity': "1",
             'IsTaxable': "TRUE",
             'YouTubeID': "",
@@ -889,6 +913,10 @@ class AuctionFormatter:
 
             fields = record.get('fields', {})
 
+            # Calculate dynamic starting price based on auction count
+            auction_count = fields.get("Auction Count", 0)
+            dynamic_starting_price = calculate_starting_price(auction_count)
+
             new_record = {
                 'EventID': self.auction_id,
                 'LotNumber': ('M' if self.selected_warehouse == "Maule Warehouse" else 'S' if self.selected_warehouse == "Sahara Warehouse" else '') + str(fields.get("Lot Number", "")),
@@ -903,7 +931,7 @@ class AuctionFormatter:
                 'Title': text_shortener(fields.get("Product Name", ""), 80),
                 'Subtitle': "",  # Will be set later
                 'Description': "",  # Will be set later
-                'Price': self.starting_price,
+                'Price': dynamic_starting_price,
                 'Quantity': "1",
                 'IsTaxable': "TRUE",
                 'YouTubeID': "",
@@ -1209,7 +1237,6 @@ class AuctionFormatter:
             'Seller': '702Auctions',
             'ListingType': 'Auction',
             'Currency': 'USD',
-            'Price': self.starting_price,
             'Quantity': '1',
             'IsTaxable': 'true',
             'Bold': 'false',
