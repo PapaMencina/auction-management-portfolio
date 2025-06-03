@@ -334,33 +334,40 @@ def category_converter(category: str) -> int:
 def calculate_starting_price(auction_count: int) -> str:
     """
     Calculate starting price based on auction count:
-    - 0 auctions (never listed): $5.00
-    - 1 auction (listed once): $2.50
-    - 2+ auctions (listed multiple times): $1.00
+    - 1 auction (first time listed): $5.00
+    - 2 auctions (second time listed): $2.50
+    - 3+ auctions (third+ time listed): $1.00
+    
+    Note: Auction count includes the current auction, so first-time items have count=1
     """
     try:
-        count = int(auction_count) if auction_count else 0
+        count = int(auction_count) if auction_count else 1  # Default to 1 if missing
     except (ValueError, TypeError):
-        count = 0
+        count = 1  # Default to 1 for first-time items
     
-    if count == 0:
+    if count <= 1:  # First time listing (count is 1 or less)
         return "5.00"
-    elif count == 1:
+    elif count == 2:  # Second time listing
         return "2.50"
-    else:  # 2 or more
+    else:  # 3 or more times listed
         return "1.00"
 
 
 def format_subtitle(auction_count: int, msrp: float, other_notes: str) -> str:
     msrp_str = f"MSRP: ${msrp}"
-    if auction_count >= 4:
+    
+    # Adjust dash logic for the fact that count includes current auction
+    # First time = count 1, second time = count 2, etc.
+    if auction_count >= 5:  # 5+ times listed
         final_msrp = msrp_str
-    elif auction_count == 3:
+    elif auction_count == 4:  # 4th time listed
+        final_msrp = f"{msrp_str} ----"
+    elif auction_count == 3:  # 3rd time listed  
         final_msrp = f"{msrp_str} ---"
-    elif auction_count == 2:
+    elif auction_count == 2:  # 2nd time listed
         final_msrp = f"{msrp_str} --"
-    else:
-        final_msrp = f"{msrp_str} -"
+    else:  # 1st time listed (count=1)
+        final_msrp = f"{msrp_str} -"  # No dashes for brand new items
 
     notes_str = f"NOTES: {other_notes}" if other_notes and other_notes.strip() else ""
     return (final_msrp + " " + notes_str)[:80]
@@ -430,8 +437,8 @@ def process_single_record(airtable_record: Dict, uploaded_image_urls: Dict[str, 
 
         # Subtitle
         new_record["Subtitle"] = format_subtitle(
-            int(new_record["AuctionCount"]),
-            float(new_record["MSRP"]),
+            int(new_record["AuctionCount"]) if new_record["AuctionCount"] else 1,
+            float(new_record["MSRP"]) if new_record["MSRP"] else 0.00,
             new_record["Other Notes"]
         )
 
