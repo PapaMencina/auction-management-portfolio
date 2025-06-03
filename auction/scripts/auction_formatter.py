@@ -331,15 +331,27 @@ def category_converter(category: str) -> int:
     return 162733  # Default category ID
 
 
-def calculate_starting_price(auction_count: int) -> str:
+def calculate_starting_price(auction_count: int, msrp: float = 0.00) -> str:
     """
-    Calculate starting price based on auction count:
+    Calculate starting price based on auction count and MSRP:
+    - Items with MSRP $20.00 or under: $1.00 (regardless of auction count)
     - 1 auction (first time listed): $5.00
     - 2 auctions (second time listed): $2.50
     - 3+ auctions (third+ time listed): $1.00
     
     Note: Auction count includes the current auction, so first-time items have count=1
     """
+    try:
+        # Convert MSRP to float if needed
+        msrp_value = float(msrp) if msrp else 0.00
+    except (ValueError, TypeError):
+        msrp_value = 0.00
+    
+    # If MSRP is $20.00 or under, always start at $1.00
+    if msrp_value > 0 and msrp_value <= 20.00:
+        return "1.00"
+    
+    # Otherwise, use the existing auction count logic
     try:
         count = int(auction_count) if auction_count else 1  # Default to 1 if missing
     except (ValueError, TypeError):
@@ -381,9 +393,10 @@ def process_single_record(airtable_record: Dict, uploaded_image_urls: Dict[str, 
 
         fields = airtable_record.get('fields', {})
 
-        # Calculate dynamic starting price based on auction count
+        # Calculate dynamic starting price based on auction count and MSRP
         auction_count = fields.get("Auction Count", 0)
-        dynamic_starting_price = calculate_starting_price(auction_count)
+        msrp = fields.get("MSRP", "0.00")
+        dynamic_starting_price = calculate_starting_price(auction_count, msrp)
 
         new_record = {
             'EventID': auction_id,
@@ -920,9 +933,10 @@ class AuctionFormatter:
 
             fields = record.get('fields', {})
 
-            # Calculate dynamic starting price based on auction count
+            # Calculate dynamic starting price based on auction count and MSRP
             auction_count = fields.get("Auction Count", 0)
-            dynamic_starting_price = calculate_starting_price(auction_count)
+            msrp = fields.get("MSRP", "0.00")
+            dynamic_starting_price = calculate_starting_price(auction_count, msrp)
 
             new_record = {
                 'EventID': self.auction_id,
