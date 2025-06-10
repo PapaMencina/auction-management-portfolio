@@ -1,3 +1,12 @@
+"""
+Auction Formatter Script
+Environment-aware resource management:
+- Detects Heroku deployment via DYNO environment variable
+- Uses conservative settings on Heroku (Standard-2X: 1GB RAM, 2x CPU)
+- Uses aggressive settings for local processing with ample resources
+- Timeouts remain generous in both environments to handle large datasets
+"""
+
 import os
 import time
 import re
@@ -93,7 +102,10 @@ class RateLimiter:
         await asyncio.sleep(self.time_period)
         self.semaphore.release()
 
-rate_limiter = RateLimiter(rate_limit=20, time_period=1)  # Increased rate limit since MinIO is more performant
+# Environment-based global rate limiting
+is_heroku_env = os.environ.get('DYNO') is not None
+global_rate_limit = 20 if is_heroku_env else 50
+rate_limiter = RateLimiter(rate_limit=global_rate_limit, time_period=1)
 
 def get_image_orientation(img: Image.Image) -> int:
     try:
@@ -536,14 +548,25 @@ class AuctionFormatter:
         self.total_steps = 6
         self.current_step = 0
 
-        # Standard-2X dyno optimized configuration (2x-8x compute)
-        self.MAX_CONCURRENT_TASKS = 16        # Increased for 2x CPU share
-        self.MAX_CONCURRENT_IMAGES = 32       # Doubled for parallel processing
-        self.BATCH_SIZE = 50                  # Smaller batches for better memory management
-        self.IMAGE_CHUNK_SIZE = 10           # Smaller chunks for better throughput
+        # Environment-based configuration
+        is_heroku = os.environ.get('DYNO') is not None
         
-        # Memory management - Standard-2X has 1GB RAM
-        self.memory_limit = 512 * 1024 * 1024  # 512MB target (safe margin for other processes)
+        if is_heroku:
+            # Conservative settings for Heroku Standard-2X dyno (1GB RAM, 2x CPU)
+            self.MAX_CONCURRENT_TASKS = 16        # Limited for 2x CPU share
+            self.MAX_CONCURRENT_IMAGES = 32       # Limited for memory constraints
+            self.BATCH_SIZE = 50                  # Smaller batches for memory management
+            self.IMAGE_CHUNK_SIZE = 10           # Smaller chunks for stability
+            self.memory_limit = 512 * 1024 * 1024  # 512MB target (safe margin)
+            gui_callback("Running on Heroku - using conservative resource settings")
+        else:
+            # Aggressive settings for local processing with ample resources
+            self.MAX_CONCURRENT_TASKS = 32        # Increased for local processing
+            self.MAX_CONCURRENT_IMAGES = 64       # Increased for parallel processing
+            self.BATCH_SIZE = 100                 # Larger batches for local processing
+            self.IMAGE_CHUNK_SIZE = 20           # Larger chunks for better throughput
+            self.memory_limit = 2048 * 1024 * 1024  # 2GB for local processing
+            gui_callback("Running locally - using aggressive resource settings")
         
         # Website URLs and notification email
         self.website_login_url = config_manager.get_global_var('website_login_url')
@@ -561,7 +584,10 @@ class AuctionFormatter:
             'main': asyncio.Semaphore(self.MAX_CONCURRENT_TASKS),
             'image': asyncio.Semaphore(self.MAX_CONCURRENT_IMAGES)
         }
-        self.rate_limiter = RateLimiter(rate_limit=32, time_period=1)  # Increased for 2x CPU
+        # Environment-based rate limiting
+        is_heroku = os.environ.get('DYNO') is not None
+        rate_limit = 32 if is_heroku else 100
+        self.rate_limiter = RateLimiter(rate_limit=rate_limit, time_period=1)
 
     def update_progress(self, message, sub_progress=None):
         self.current_step += 1
@@ -608,7 +634,7 @@ class AuctionFormatter:
             await page.wait_for_load_state('networkidle', timeout=60000)
 
             self.gui_callback("Waiting for username field to be present...")
-            username_field = await page.wait_for_selector("#username", state="visible", timeout=90000)
+            username_field = await page.wait_for_selector("#username", state="visible", timeout=180000)
 
             if not username_field:
                 self.gui_callback("Username field not found")
@@ -623,7 +649,7 @@ class AuctionFormatter:
                 return False
 
             self.gui_callback("Submitting login form...")
-            sign_in_button = await page.wait_for_selector('input[type="submit"][value="Sign In"]', state="visible", timeout=90000)
+            sign_in_button = await page.wait_for_selector('input[type="submit"][value="Sign In"]', state="visible", timeout=180000)
             if sign_in_button:
                 await sign_in_button.click()
             else:
@@ -632,7 +658,7 @@ class AuctionFormatter:
                 return False
 
             self.gui_callback("Waiting for login to complete...")
-            await page.wait_for_load_state('networkidle', timeout=60000)
+            await page.wait_for_load_state('networkidle', timeout=120000)
 
             # Check if login was successful
             if "logon" in page.url.lower() or "login" in page.url.lower():
@@ -669,7 +695,7 @@ class AuctionFormatter:
 
                 self.gui_callback("Waiting for form to load...")
                 try:
-                    await page.wait_for_selector("#CsvImportForm", state="visible", timeout=60000)
+                    await page.wait_for_selector("#CsvImportForm", state="visible", timeout=120000)
                 except Exception as e:
                     self.gui_callback(f"Error: Form not found. {str(e)}")
                     await self.save_screenshot(page, 'form_not_found')
@@ -735,7 +761,7 @@ class AuctionFormatter:
 
                 self.gui_callback("Waiting for upload to complete...")
                 try:
-                    await page.wait_for_selector(".alert-success", state="visible", timeout=120000)
+                    await page.wait_for_selector(".alert-success", state="visible", timeout=300000)
                     success_message = await page.inner_text(".alert-success")
                     self.gui_callback(f"Upload result: {success_message}")
 
@@ -866,7 +892,7 @@ class AuctionFormatter:
         total_records = len(airtable_records)
 
         # Process in chunks for better memory management
-        chunk_size = min(self.BATCH_SIZE, 50)  # Limit chunk size
+        chunk_size = self.BATCH_SIZE  # Use environment-aware batch size
         for i in range(0, total_records, chunk_size):
             if self.should_stop.is_set():
                 break
@@ -890,9 +916,9 @@ class AuctionFormatter:
                     ]
                     image_tasks.extend(record_image_tasks)
 
-            # Process images in smaller batches
+            # Process images with environment-aware batch size
             image_results = {}
-            batch_size = min(self.IMAGE_CHUNK_SIZE, 10)
+            batch_size = self.IMAGE_CHUNK_SIZE
             for batch_start in range(0, len(image_tasks), batch_size):
                 batch_end = batch_start + batch_size
                 batch = image_tasks[batch_start:batch_end]
@@ -926,7 +952,8 @@ class AuctionFormatter:
                     failed_records.append(result)
 
             progress = min((i + chunk_size) / total_records * 100, 100)
-            self.gui_callback(f"Processed {progress:.1f}% of records")
+            actual_processed = min(i + chunk_size, total_records)
+            self.gui_callback(f"Processed {actual_processed}/{total_records} records ({progress:.1f}%)")
 
             # Memory management
             if self.check_memory_usage() > 0.8:  # If memory usage is above 80%
@@ -1147,7 +1174,7 @@ class AuctionFormatter:
                     try:
                         image_data = await asyncio.wait_for(
                             download_image_async(url, self.gui_callback),
-                            timeout=20  # Reduced from 30
+                            timeout=60  # Increased for large batches
                         )
                         if not image_data:
                             await asyncio.sleep(1)  # Reduced delay
@@ -1159,7 +1186,7 @@ class AuctionFormatter:
                     try:
                         processed_data = await asyncio.wait_for(
                             process_image_async(image_data, self.gui_callback),
-                            timeout=20
+                            timeout=60  # Increased for large images
                         )
                         if not processed_data:
                             await asyncio.sleep(1)
@@ -1177,7 +1204,7 @@ class AuctionFormatter:
                                 self.gui_callback,
                                 self.should_stop
                             ),
-                            timeout=20
+                            timeout=60  # Increased for large uploads
                         )
                         
                         if uploaded_url:

@@ -1,3 +1,12 @@
+"""
+Void Unpaid Transactions Script
+Environment-aware configuration:
+- Detects Heroku deployment via DYNO environment variable
+- Conservative timeouts/delays on Heroku: 30 min timeout, 5 retries
+- Aggressive settings locally: 1 hour timeout, 10 retries
+- Handles large volumes of transactions with appropriate delays
+"""
+
 import os
 import threading
 import re
@@ -45,7 +54,7 @@ async def export_csv(page, event_id):
     
     try:
         logger.info("Waiting for download to start...")
-        async with page.expect_download(timeout=30000) as download_info:
+        async with page.expect_download(timeout=60000) as download_info:
             logger.info("Clicking ExportCSV button...")
             await page.click("#ExportCSV")
         
@@ -121,17 +130,17 @@ async def login(page, username, password):
     try:
         # Wait for and fill username field
         logger.info("Waiting for username field to be visible...")
-        await page.wait_for_selector("#username", state="visible", timeout=15000)
+        await page.wait_for_selector("#username", state="visible", timeout=30000)
         await page.fill("#username", username)
         
         # Wait for and fill password field
         logger.info("Waiting for password field to be visible...")
-        await page.wait_for_selector("#password", state="visible", timeout=15000)
+        await page.wait_for_selector("#password", state="visible", timeout=30000)
         await page.fill("#password", password)
         
         # Wait for and click the sign-in button
         logger.info("Waiting for sign-in button to be visible...")
-        sign_in_button = await page.wait_for_selector('input[type="submit"][value="Sign In"]', state="visible", timeout=15000)
+        sign_in_button = await page.wait_for_selector('input[type="submit"][value="Sign In"]', state="visible", timeout=30000)
         if sign_in_button:
             await sign_in_button.click()
         else:
@@ -140,7 +149,7 @@ async def login(page, username, password):
             return False
 
         # Wait for navigation after clicking sign in
-        await page.wait_for_load_state('networkidle', timeout=30000)
+        await page.wait_for_load_state('networkidle', timeout=60000)
         
         # Check if login was successful
         if "logon" in page.url.lower() or "login" in page.url.lower():
@@ -174,6 +183,11 @@ def should_continue(should_stop, gui_callback, message):
 
 async def start_playwright_process(event_id, upload_choice, task_id):
     logger.info(f"Starting playwright process for event_id: {event_id}")
+    
+    # Log environment
+    is_heroku = os.environ.get('DYNO') is not None
+    logger.info(f"Running on {'Heroku' if is_heroku else 'local environment'}")
+    
     csv_content = None
     login_url = config_manager.get_global_var('website_login_url')
     bid_home_page = config_manager.get_global_var('bid_home_page')
@@ -203,7 +217,7 @@ async def start_playwright_process(event_id, upload_choice, task_id):
             RedisTaskStatus.set_status(task_id, "IN_PROGRESS", "Navigating to report page")
             await page.goto(report_url)
             try:
-                await page.wait_for_selector("#ReportResults", state="visible", timeout=30000)
+                await page.wait_for_selector("#ReportResults", state="visible", timeout=60000)
             except:
                 if "Account/LogOn" in page.url:
                     current_task.update_state(state="PROGRESS", meta={'status': "Re-attempting login"})
@@ -212,7 +226,7 @@ async def start_playwright_process(event_id, upload_choice, task_id):
                     if not login_success:
                         raise Exception("Login failed on re-attempt. Aborting process.")
                     await page.goto(report_url)
-                    await page.wait_for_selector("#ReportResults", state="visible", timeout=30000)
+                    await page.wait_for_selector("#ReportResults", state="visible", timeout=60000)
                 else:
                     raise Exception(f"Failed to load report page. Current URL: {page.url}")
 
@@ -347,7 +361,13 @@ async def send_to_airtable(upload_choice, csv_content):
     else:
         logger.info("Upload to Airtable skipped due to upload_choice.")
 
-async def void_unpaid_transactions(page, report_url, task_id, timeout=1000, max_retries=5):
+async def void_unpaid_transactions(page, report_url, task_id, timeout=None, max_retries=None):
+    # Environment-based defaults
+    is_heroku = os.environ.get('DYNO') is not None
+    if timeout is None:
+        timeout = 1800 if is_heroku else 3600  # 30 min on Heroku, 1 hour locally
+    if max_retries is None:
+        max_retries = 5 if is_heroku else 10
     print("Starting the voiding process for unpaid transactions...")
     RedisTaskStatus.set_status(task_id, "IN_PROGRESS", "Starting to void unpaid transactions")
     start_time = time.time()
@@ -397,11 +417,15 @@ async def are_transactions_voided(page):
     return await page.locator(".panel-body .no-history").count() > 0
 
 async def void_transaction(page):
+    # Environment-based delays
+    is_heroku = os.environ.get('DYNO') is not None
+    delay = 2 if is_heroku else 3  # Conservative on Heroku, more relaxed locally
+    
     await page.click("#ReportResults > div:nth-child(2) > div:nth-child(6) > a")
-    await asyncio.sleep(2)
+    await asyncio.sleep(delay)
     await page.click(".modal .btn.btn-danger")
     await page.wait_for_selector(".modal.bootstrap-dialog.type-danger", state="hidden")
-    await asyncio.sleep(2)
+    await asyncio.sleep(delay)
 
 async def handle_retry(page, url, exception, retries):
     print(f"Error during voiding process: {exception}. Retrying...")
