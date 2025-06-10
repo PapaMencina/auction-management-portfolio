@@ -332,15 +332,22 @@ def auction_formatter_view(request):
         try:
             auction_id = request.POST.get('auction_id')
             selected_warehouse = request.POST.get('selected_warehouse')
+            starting_price_str = request.POST.get('starting_price', '')
 
             if not all([auction_id, selected_warehouse]):
                 return JsonResponse({'error': 'Missing required fields'}, status=400)
 
-            # Pass a default starting price since we now use dynamic pricing
-            # This parameter is no longer used in the actual processing
-            default_starting_price = 1.00
+            # Parse starting price if provided, otherwise use None for dynamic pricing
+            starting_price = None
+            if starting_price_str:
+                try:
+                    starting_price = float(starting_price_str)
+                    if starting_price <= 0:
+                        return JsonResponse({'error': 'Starting price must be greater than 0'}, status=400)
+                except ValueError:
+                    return JsonResponse({'error': 'Invalid starting price format'}, status=400)
 
-            task = auction_formatter_task.delay(auction_id, selected_warehouse, default_starting_price)
+            task = auction_formatter_task.delay(auction_id, selected_warehouse, starting_price)
             
             logger.info(f"Auction formatter task started for auction {auction_id}")
             return JsonResponse({

@@ -331,9 +331,10 @@ def category_converter(category: str) -> int:
     return 162733  # Default category ID
 
 
-def calculate_starting_price(auction_count: int, msrp: float = 0.00) -> str:
+def calculate_starting_price(auction_count: int, msrp: float = 0.00, override_price: Optional[float] = None) -> str:
     """
     Calculate starting price based on auction count and MSRP:
+    - If override_price is provided, use that for all items
     - Items with MSRP $20.00 or under: $1.00 (regardless of auction count)
     - 1 auction (first time listed): $5.00
     - 2 auctions (second time listed): $2.50
@@ -341,6 +342,15 @@ def calculate_starting_price(auction_count: int, msrp: float = 0.00) -> str:
     
     Note: Auction count includes the current auction, so first-time items have count=1
     """
+    # If override price is provided, use it for all items
+    if override_price is not None:
+        try:
+            price_value = float(override_price)
+            if price_value > 0:
+                return f"{price_value:.2f}"
+        except (ValueError, TypeError):
+            pass  # Fall through to default logic if override is invalid
+    
     try:
         # Convert MSRP to float if needed
         msrp_value = float(msrp) if msrp else 0.00
@@ -396,7 +406,7 @@ def process_single_record(airtable_record: Dict, uploaded_image_urls: Dict[str, 
         # Calculate dynamic starting price based on auction count and MSRP
         auction_count = fields.get("Auction Count", 0)
         msrp = fields.get("MSRP", "0.00")
-        dynamic_starting_price = calculate_starting_price(auction_count, msrp)
+        dynamic_starting_price = calculate_starting_price(auction_count, msrp, starting_price)
 
         new_record = {
             'EventID': auction_id,
@@ -936,7 +946,7 @@ class AuctionFormatter:
             # Calculate dynamic starting price based on auction count and MSRP
             auction_count = fields.get("Auction Count", 0)
             msrp = fields.get("MSRP", "0.00")
-            dynamic_starting_price = calculate_starting_price(auction_count, msrp)
+            dynamic_starting_price = calculate_starting_price(auction_count, msrp, self.starting_price)
 
             new_record = {
                 'EventID': self.auction_id,
