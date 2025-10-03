@@ -1,0 +1,83 @@
+{
+  "_comment": "Configuration Template for Auction Management System",
+  "_instructions": "Copy this file to config.json and update with your actual credentials",
+
+  "global": {
+    "_comment_minio": "MinIO or S3-compatible object storage configuration",
+    "minio_endpoint": "your-minio-endpoint.example.com",
+    "minio_access_key": "YOUR_MINIO_ACCESS_KEY",
+    "minio_secret_key": "YOUR_MINIO_SECRET_KEY",
+    "minio_bucket": "auction-images",
+    "minio_secure": true,
+
+    "_comment_playwright": "Browser automation configuration",
+    "webdriver_path": "auto",
+    "playwright_browser": "chromium",
+    "playwright_headless": true,
+    "playwright_slow_mo": 50,
+    "playwright_timeout": 30000,
+
+    "_comment_auction_platform": "Auction platform URLs (e.g., HiBid)",
+    "website_login_url": "https://your-auction-platform.com/Account/LogOn",
+    "import_csv_url": "https://your-auction-platform.com/Admin/ImportCSV",
+    "bid_create_event": "https://your-auction-platform.com/Event/CreateEvent",
+    "bid_home_page": "https://your-auction-platform.com",
+
+    "_comment_notifications": "Email and notification configuration",
+    "notification_email": "your-email@example.com",
+
+    "_comment_relaythat": "RelayThat marketing image service",
+    "relaythat_email": "your-relaythat-email@example.com",
+    "relaythat_password": "YOUR_RELAYTHAT_PASSWORD"
+  },
+
+  "warehouses": {
+    "Warehouse Name 1": {
+      "_comment": "Airtable configuration for this warehouse",
+      "airtable_sales_base_id": "appXXXXXXXXXXXXXX",
+      "airtable_inventory_base_id": "appXXXXXXXXXXXXXX",
+      "airtable_inventory_table_id": "tblXXXXXXXXXXXXXX",
+      "airtable_cancels_table_id": "tblXXXXXXXXXXXXXX",
+      "airtable_api_key": "patXXXXXXXXXXXXXX.XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+      "airtable_send_to_auction_view_id": "viwXXXXXXXXXXXXXX",
+      "airtable_remove_dups_view": "viwXXXXXXXXXXXXXX",
+
+      "_comment_credentials": "Auction platform credentials",
+      "bid_username": "your-username",
+      "bid_password": "YOUR_PASSWORD",
+      "hibid_user_name": "your-hibid-email@example.com",
+      "hibid_password": "YOUR_HIBID_PASSWORD",
+
+      "_comment_assets": "Optional logo file path",
+      "file_path_702_logo": "",
+
+      "_comment_relaythat": "RelayThat composition URL for this warehouse",
+      "relaythat_url": "https://app.relaythat.com/composition/XXXXXXX"
+    },
+
+    "Warehouse Name 2": {
+      "airtable_sales_base_id": "appYYYYYYYYYYYYYY",
+      "airtable_inventory_base_id": "appYYYYYYYYYYYYYY",
+      "airtable_inventory_table_id": "tblYYYYYYYYYYYYYY",
+      "airtable_cancels_table_id": "tblYYYYYYYYYYYYYY",
+      "airtable_api_key": "patYYYYYYYYYYYYYY.YYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYY",
+      "airtable_send_to_auction_view_id": "viwYYYYYYYYYYYYYY",
+      "airtable_remove_dups_view": "viwYYYYYYYYYYYYYY",
+      "bid_username": "your-username-2",
+      "bid_password": "YOUR_PASSWORD_2",
+      "hibid_user_name": "your-hibid-email-2@example.com",
+      "hibid_password": "YOUR_HIBID_PASSWORD_2",
+      "file_path_702_logo": "",
+      "relaythat_url": "https://app.relaythat.com/composition/YYYYYYY"
+    }
+  },
+
+  "_configuration_notes": {
+    "airtable_api_key": "Get from https://airtable.com/account - Create a personal access token",
+    "airtable_base_ids": "Found in Airtable URL: airtable.com/appXXXXXXXXXX/...",
+    "airtable_table_ids": "Found in Airtable URL: airtable.com/.../tblXXXXXXXXXX/...",
+    "airtable_view_ids": "Found in Airtable URL: airtable.com/.../viwXXXXXXXXXX",
+    "minio_setup": "Set up MinIO server or use AWS S3 compatible storage",
+    "relaythat_setup": "Create compositions at https://app.relaythat.com/"
+  }
+}
